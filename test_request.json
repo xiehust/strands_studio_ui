@@ -1,0 +1,3 @@
+{
+  "code": "print('Hello from Strands UI!')\nprint('Backend is working correctly')\nresult = 2 + 2\nprint(f'2 + 2 = {result}')"
+}

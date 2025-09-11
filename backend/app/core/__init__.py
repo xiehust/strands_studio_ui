@@ -1,1 +1,0 @@
-# Core configuration and settings
