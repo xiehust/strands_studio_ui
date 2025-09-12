@@ -87,6 +87,10 @@ export class ProjectManager {
     return this.loadProject(currentId);
   }
 
+  static clearCurrentProject(): void {
+    localStorage.removeItem(CURRENT_PROJECT_KEY);
+  }
+
   static exportProject(project: StrandsProject): string {
     return JSON.stringify(project, null, 2);
   }

@@ -1,7 +1,7 @@
 import { Handle, Position, type NodeProps, useReactFlow } from '@xyflow/react';
-import { Bot, Settings, X } from 'lucide-react';
+import { Crown, Settings, X } from 'lucide-react';
 
-interface AgentNodeData {
+interface OrchestratorAgentNodeData {
   label?: string;
   modelProvider?: string;
   modelId?: string;
@@ -10,13 +10,15 @@ interface AgentNodeData {
   temperature?: number;
   maxTokens?: number;
   streaming?: boolean;
+  // Orchestrator-specific properties
+  coordinationPrompt?: string;
 }
 
-export function AgentNode({ data, selected, id }: NodeProps) {
+export function OrchestratorAgentNode({ data, selected, id }: NodeProps) {
   const { deleteElements } = useReactFlow();
-  const nodeData = data as AgentNodeData || {};
+  const nodeData = data as OrchestratorAgentNodeData || {};
   const {
-    label = 'Agent',
+    label = 'Orchestrator Agent',
     modelProvider = 'AWS Bedrock',
     modelName = 'Claude 3.7 Sonnet',
     temperature = 0.7,
@@ -27,15 +29,16 @@ export function AgentNode({ data, selected, id }: NodeProps) {
     deleteElements({ nodes: [{ id }] });
   };
 
+
   return (
     <div className={`
-      bg-white rounded-lg border-2 shadow-sm min-w-[200px]
-      ${selected ? 'border-blue-500 shadow-lg' : 'border-gray-200 hover:border-gray-300'}
+      bg-white rounded-lg border-2 shadow-sm min-w-[220px]
+      ${selected ? 'border-purple-500 shadow-lg' : 'border-gray-200 hover:border-purple-300'}
     `}>
       {/* Node Header */}
-      <div className="bg-blue-50 px-4 py-2 border-b border-gray-200 rounded-t-lg flex items-center">
-        <Bot className="w-4 h-4 text-blue-600 mr-2" />
-        <span className="text-sm font-semibold text-blue-800">{label}</span>
+      <div className="bg-gradient-to-r from-purple-50 to-indigo-50 px-4 py-2 border-b border-purple-200 rounded-t-lg flex items-center">
+        <Crown className="w-4 h-4 text-purple-600 mr-2" />
+        <span className="text-sm font-semibold text-purple-800">{label}</span>
         <div className="ml-auto flex items-center space-x-1">
           <Settings className="w-3 h-3 text-gray-400" />
           {selected && (
@@ -70,7 +73,7 @@ export function AgentNode({ data, selected, id }: NodeProps) {
         type="target"
         position={Position.Top}
         id="user-input"
-        className="!bg-blue-500"
+        className="!bg-purple-500"
         style={{ top: -6, left: '50%', transform: 'translateX(-50%)' }}
       />
       <Handle
@@ -78,14 +81,16 @@ export function AgentNode({ data, selected, id }: NodeProps) {
         position={Position.Left}
         id="tools"
         className="!bg-orange-500"
-        style={{ left: -6, top: '40%' }}
+        style={{ left: -6, top: '30%' }}
       />
+
+      {/* Sub-Agents Handle */}
       <Handle
-        type="target"
-        position={Position.Left}
-        id="orchestrator-input"
-        className="!bg-purple-400"
-        style={{ left: -6, top: '70%' }}
+        type="source"
+        position={Position.Right}
+        id="sub-agents"
+        className="!bg-purple-500 !border-purple-300"
+        style={{ right: -6, top: '50%' }}
       />
 
       {/* Output Handle */}
@@ -93,7 +98,7 @@ export function AgentNode({ data, selected, id }: NodeProps) {
         type="source"
         position={Position.Bottom}
         id="output"
-        className="!bg-blue-500"
+        className="!bg-purple-500"
         style={{ bottom: -6 }}
       />
     </div>

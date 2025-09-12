@@ -48,7 +48,7 @@ export function CodePanel({ nodes, edges, className = '' }: CodePanelProps) {
   };
 
   return (
-    <div className={`bg-white border-l border-gray-200 flex flex-col ${className}`}>
+    <div className={`bg-white border-l border-gray-200 flex flex-col h-full ${className}`}>
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-gray-200">
         <div className="flex items-center">

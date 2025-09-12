@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bot, Wrench, ArrowRight, ArrowLeft, GitBranch, Code, Server } from 'lucide-react';
+import { Bot, Wrench, ArrowRight, ArrowLeft, Code, Server, Crown } from 'lucide-react';
 
 interface NodeTypeItem {
   type: string;
@@ -16,6 +16,13 @@ const nodeTypes: NodeTypeItem[] = [
     icon: Bot,
     description: 'Strands Agent with configurable model and settings',
     category: 'Core',
+  },
+  {
+    type: 'orchestrator-agent',
+    label: 'Orchestrator Agent',
+    icon: Crown,
+    description: 'Orchestrates multiple agents as tools for complex workflows',
+    category: 'Advanced',
   },
   {
     type: 'tool',
@@ -46,13 +53,6 @@ const nodeTypes: NodeTypeItem[] = [
     category: 'IO',
   },
   {
-    type: 'control',
-    label: 'Control Flow',
-    icon: GitBranch,
-    description: 'Conditional logic, loops, or flow control',
-    category: 'Control',
-  },
-  {
     type: 'custom-tool',
     label: 'Custom Tool',
     icon: Code,
@@ -61,7 +61,7 @@ const nodeTypes: NodeTypeItem[] = [
   },
 ];
 
-const categories = ['Core', 'IO', 'Control', 'Advanced'];
+const categories = ['Core', 'IO', 'Advanced'];
 
 interface NodePaletteProps {
   className?: string;

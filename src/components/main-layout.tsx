@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { type Node, type Edge } from '@xyflow/react';
-import { Code, Eye, EyeOff, FolderOpen, Play, Terminal } from 'lucide-react';
+import { Code, Eye, EyeOff, FolderOpen, Terminal, Save, Plus, Download, Upload } from 'lucide-react';
 import { FlowEditor } from './flow-editor';
 import { NodePalette } from './node-palette';
 import { PropertyPanel } from './property-panel';
@@ -8,7 +8,7 @@ import { CodePanel } from './code-panel';
 import { ExecutionPanel } from './execution-panel';
 import { ProjectManagerComponent } from './project-manager';
 import { ResizablePanel } from './resizable-panel';
-import { type StrandsProject } from '../lib/project-manager';
+import { type StrandsProject, ProjectManager } from '../lib/project-manager';
 import { generateStrandsAgentCode } from '../lib/code-generator';
 
 export function MainLayout() {
@@ -16,9 +16,18 @@ export function MainLayout() {
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [showCodePanel, setShowCodePanel] = useState(true);
-  const [showExecutionPanel, setShowExecutionPanel] = useState(false);
   const [rightPanelMode, setRightPanelMode] = useState<'code' | 'execution'>('code');
   const [showProjectManager, setShowProjectManager] = useState(false);
+  const [currentProject, setCurrentProject] = useState<StrandsProject | null>(null);
+  const [showNewProjectDialog, setShowNewProjectDialog] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
+  const [newProjectDescription, setNewProjectDescription] = useState('');
+
+  // Load current project on mount
+  useEffect(() => {
+    const current = ProjectManager.getCurrentProject();
+    setCurrentProject(current);
+  }, []);
 
   // Keep selectedNode synchronized with nodes array
   useEffect(() => {
@@ -89,6 +98,94 @@ export function MainLayout() {
   const handleLoadProject = useCallback((project: StrandsProject) => {
     setNodes(project.nodes);
     setEdges(project.edges);
+    setCurrentProject(project);
+  }, []);
+
+  // Project management functions
+  const handleSaveCurrentProject = useCallback(() => {
+    if (currentProject) {
+      // Update existing project
+      const updated = ProjectManager.updateProject(currentProject.id, {
+        nodes,
+        edges,
+      });
+      if (updated) {
+        setCurrentProject(updated);
+      }
+    } else {
+      // Save as new project
+      setShowNewProjectDialog(true);
+    }
+  }, [currentProject, nodes, edges]);
+
+  const handleCreateNewProject = useCallback(() => {
+    if (!newProjectName.trim()) {
+      alert('Project name is required');
+      return;
+    }
+
+    const newProject = ProjectManager.saveProject({
+      name: newProjectName.trim(),
+      description: newProjectDescription.trim() || undefined,
+      nodes,
+      edges,
+    });
+
+    ProjectManager.setCurrentProject(newProject.id);
+    setCurrentProject(newProject);
+    setNewProjectName('');
+    setNewProjectDescription('');
+    setShowNewProjectDialog(false);
+  }, [newProjectName, newProjectDescription, nodes, edges]);
+
+  const handleNewProject = useCallback(() => {
+    if (nodes.length > 0 || edges.length > 0) {
+      if (confirm('Creating a new project will clear the current flow. Continue?')) {
+        setNodes([]);
+        setEdges([]);
+        setCurrentProject(null);
+        ProjectManager.clearCurrentProject();
+      }
+    }
+  }, [nodes, edges]);
+
+  const handleExportCurrentProject = useCallback(() => {
+    if (currentProject) {
+      const jsonData = ProjectManager.exportProject(currentProject);
+      const blob = new Blob([jsonData], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${currentProject.name.replace(/\s+/g, '_')}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+  }, [currentProject]);
+
+  const handleImportProject = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const content = e.target?.result as string;
+      const imported = ProjectManager.importProject(content);
+      if (imported) {
+        ProjectManager.setCurrentProject(imported.id);
+        setCurrentProject(imported);
+        setNodes(imported.nodes);
+        setEdges(imported.edges);
+        alert('Project imported successfully!');
+      } else {
+        alert('Failed to import project. Please check the file format.');
+      }
+    };
+    reader.readAsText(file);
+    
+    // Reset input
+    event.target.value = '';
   }, []);
 
   // Generate current code for execution
@@ -106,19 +203,75 @@ export function MainLayout() {
       <div className="flex-1 flex flex-col">
         {/* Header */}
         <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-semibold text-gray-900">Strands Agent Builder</h1>
-            <p className="text-sm text-gray-500 mt-1">
-              Visually create and configure AI agents using drag-and-drop interface
-            </p>
+          <div className="flex items-center space-x-6">
+            <div>
+              <h1 className="text-xl font-semibold text-gray-900">Strands Agent Builder</h1>
+              <p className="text-sm text-gray-500 mt-1">
+                Visually create and configure AI agents using drag-and-drop interface
+              </p>
+            </div>
+            <div className="flex items-center space-x-1 pl-6 border-l border-gray-200">
+              <span className="text-sm text-gray-600">Project:</span>
+              <span className="text-sm font-medium text-gray-900">
+                {currentProject ? currentProject.name : 'Untitled Project'}
+              </span>
+            </div>
           </div>
           <div className="flex items-center space-x-2">
+            {/* Project Controls */}
+            <button
+              onClick={handleSaveCurrentProject}
+              className="flex items-center px-3 py-2 rounded-md text-sm font-medium bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors"
+              title="Save current project"
+            >
+              <Save className="w-4 h-4 mr-2" />
+              Save
+            </button>
+            
+            <button
+              onClick={handleNewProject}
+              className="flex items-center px-3 py-2 rounded-md text-sm font-medium bg-green-100 text-green-700 hover:bg-green-200 transition-colors"
+              title="Create new project"
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              New
+            </button>
+
+            <label className="flex items-center px-3 py-2 rounded-md text-sm font-medium bg-purple-100 text-purple-700 hover:bg-purple-200 transition-colors cursor-pointer"
+                   title="Import project">
+              <Upload className="w-4 h-4 mr-2" />
+              Import
+              <input
+                type="file"
+                accept=".json"
+                onChange={handleImportProject}
+                className="hidden"
+              />
+            </label>
+
+            <button
+              onClick={handleExportCurrentProject}
+              disabled={!currentProject}
+              className={`flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                currentProject
+                  ? 'bg-orange-100 text-orange-700 hover:bg-orange-200'
+                  : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+              }`}
+              title="Export current project"
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Export
+            </button>
+
+            <div className="w-px h-6 bg-gray-300 mx-2" />
+
+            <div className="flex items-center space-x-2">
             <button
               onClick={() => setShowProjectManager(true)}
               className="flex items-center px-3 py-2 rounded-md text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors"
             >
               <FolderOpen className="w-4 h-4 mr-2" />
-              Projects
+              Open
             </button>
             
             <button
@@ -158,6 +311,7 @@ export function MainLayout() {
             >
               {showCodePanel ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
             </button>
+            </div>
           </div>
         </header>
         
@@ -182,24 +336,28 @@ export function MainLayout() {
           )}
           
           {showCodePanel && (
-            rightPanelMode === 'code' ? (
-              <CodePanel
-                className="w-96 flex-shrink-0"
-                nodes={nodes}
-                edges={edges}
-              />
-            ) : (
-              <ResizablePanel
-                resizeFrom="left"
-                defaultWidth={384}
-                minWidth={300}
-                maxWidth={800}
-              >
+            <ResizablePanel
+              resizeFrom="left"
+              defaultWidth={384}
+              minWidth={300}
+              maxWidth={800}
+              storageKey="right-panel-width" // Shared storage key for both panels
+            >
+              {rightPanelMode === 'code' ? (
+                <CodePanel
+                  nodes={nodes}
+                  edges={edges}
+                />
+              ) : (
                 <ExecutionPanel
                   code={getCurrentCode()}
+                  projectId={currentProject?.id || 'default-project'}
+                  projectName={currentProject?.name || 'Untitled Project'}
+                  projectVersion={currentProject?.version || '1.0.0'}
+                  flowData={{ nodes, edges }}
                 />
-              </ResizablePanel>
-            )
+              )}
+            </ResizablePanel>
           )}
         </div>
       </div>
@@ -214,6 +372,58 @@ export function MainLayout() {
             onLoadProject={handleLoadProject}
             onClose={() => setShowProjectManager(false)}
           />
+        </div>
+      )}
+
+      {/* New Project Dialog */}
+      {showNewProjectDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-80 mx-4">
+            <h4 className="text-lg font-semibold text-gray-900 mb-4">Create New Project</h4>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Project Name *
+                </label>
+                <input
+                  type="text"
+                  value={newProjectName}
+                  onChange={(e) => setNewProjectName(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="Enter project name"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Description
+                </label>
+                <textarea
+                  value={newProjectDescription}
+                  onChange={(e) => setNewProjectDescription(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="Optional description"
+                  rows={3}
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-2 mt-6">
+              <button
+                onClick={() => setShowNewProjectDialog(false)}
+                className="px-3 py-2 text-sm text-gray-600 hover:text-gray-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreateNewProject}
+                className="px-3 py-2 text-sm bg-blue-500 text-white rounded hover:bg-blue-600"
+              >
+                Create Project
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

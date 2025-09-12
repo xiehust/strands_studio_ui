@@ -21,10 +21,10 @@ import '@xyflow/react/dist/style.css';
 
 import {
   AgentNode,
+  OrchestratorAgentNode,
   ToolNode,
   InputNode,
   OutputNode,
-  ControlNode,
   CustomToolNode,
 } from './nodes';
 import { MCPToolNode } from './nodes/mcp-tool-node';
@@ -35,11 +35,11 @@ const initialEdges: Edge[] = [];
 
 const nodeTypes = {
   agent: AgentNode,
+  'orchestrator-agent': OrchestratorAgentNode,
   tool: ToolNode,
   'mcp-tool': MCPToolNode,
   input: InputNode,
   output: OutputNode,
-  control: ControlNode,
   'custom-tool': CustomToolNode,
 };
 
@@ -133,13 +133,13 @@ export function FlowEditor({
     (params: Connection) => {
       const validation = isValidConnection(params, nodes);
       if (validation.valid) {
-        setEdges((eds) => addEdge(params, eds));
+        setEdges(addEdge(params, edges));
       } else {
         // You could show a toast notification here
         console.warn('Invalid connection:', validation.message);
       }
     },
-    [setEdges, nodes]
+    [setEdges, nodes, edges]
   );
 
   const isValidConnectionCallback = useCallback(
@@ -151,7 +151,7 @@ export function FlowEditor({
   );
 
   const onNodeClick = useCallback(
-    (event: React.MouseEvent, node: Node) => {
+    (_event: React.MouseEvent, node: Node) => {
       onNodeSelect?.(node);
     },
     [onNodeSelect]
@@ -225,9 +225,9 @@ export function FlowEditor({
         data: defaultData,
       };
 
-      setNodes((nds) => nds.concat(newNode));
+      setNodes([...nodes, newNode]);
     },
-    [reactFlowInstance, setNodes]
+    [reactFlowInstance, setNodes, nodes]
   );
 
   return (
@@ -239,7 +239,7 @@ export function FlowEditor({
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
-        isValidConnection={isValidConnectionCallback}
+        isValidConnection={(edge) => isValidConnectionCallback(edge as Connection)}
         onNodeClick={onNodeClick}
         onPaneClick={onPaneClick}
         onInit={setReactFlowInstance}

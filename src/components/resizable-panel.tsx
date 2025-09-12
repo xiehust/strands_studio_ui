@@ -7,7 +7,30 @@ interface ResizablePanelProps {
   maxWidth?: number;
   className?: string;
   resizeFrom?: 'left' | 'right';
+  storageKey?: string; // Add storage key for persistence
 }
+
+// Utility functions for localStorage
+const getStoredWidth = (key: string, defaultValue: number): number => {
+  try {
+    const stored = localStorage.getItem(key);
+    if (stored) {
+      const parsed = parseInt(stored, 10);
+      return isNaN(parsed) ? defaultValue : parsed;
+    }
+  } catch (error) {
+    console.warn('Failed to read from localStorage:', error);
+  }
+  return defaultValue;
+};
+
+const setStoredWidth = (key: string, width: number): void => {
+  try {
+    localStorage.setItem(key, width.toString());
+  } catch (error) {
+    console.warn('Failed to write to localStorage:', error);
+  }
+};
 
 export function ResizablePanel({
   children,
@@ -15,9 +38,13 @@ export function ResizablePanel({
   minWidth = 240,
   maxWidth = 800,
   className = '',
-  resizeFrom = 'left'
+  resizeFrom = 'left',
+  storageKey
 }: ResizablePanelProps) {
-  const [width, setWidth] = useState(defaultWidth);
+  // Initialize width from localStorage if storageKey is provided
+  const [width, setWidth] = useState(() => {
+    return storageKey ? getStoredWidth(storageKey, defaultWidth) : defaultWidth;
+  });
   const [isResizing, setIsResizing] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const startXRef = useRef(0);
@@ -44,7 +71,12 @@ export function ResizablePanel({
     const newWidth = startWidthRef.current + deltaX;
     const clampedWidth = Math.min(Math.max(newWidth, minWidth), maxWidth);
     setWidth(clampedWidth);
-  }, [isResizing, minWidth, maxWidth, resizeFrom]);
+    
+    // Persist width to localStorage during resize if storageKey is provided
+    if (storageKey) {
+      setStoredWidth(storageKey, clampedWidth);
+    }
+  }, [isResizing, minWidth, maxWidth, resizeFrom, storageKey]);
 
   const handleMouseUp = useCallback(() => {
     setIsResizing(false);

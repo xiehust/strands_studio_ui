@@ -1,32 +1,236 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Play, Square, Loader, CheckCircle, XCircle, Clock, Terminal, Zap } from 'lucide-react';
-import { apiClient, type ExecutionRequest, type ExecutionResult } from '../lib/api-client';
+import { Play, Square, Loader, CheckCircle, XCircle, Clock, Terminal, Zap, FolderOpen, FileText, AlertTriangle, RefreshCw } from 'lucide-react';
+import { apiClient, type ExecutionRequest, type ExecutionResult, type ExecutionHistoryItem, type ExecutionInfo, type ArtifactContent } from '../lib/api-client';
+import { ValidationError, isExecutionResult } from '../lib/validation';
 
 interface ExecutionPanelProps {
   code: string;
   className?: string;
+  projectId?: string;
+  projectName?: string;
+  projectVersion?: string;
+  flowData?: { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[] };
 }
 
-interface ExecutionLog {
-  id: string;
-  timestamp: string;
-  result: ExecutionResult;
-}
 
-export function ExecutionPanel({ code, className = '' }: ExecutionPanelProps) {
+// Utility functions for localStorage
+const getStoredInputData = (): string => {
+  try {
+    return localStorage.getItem('execution-panel-input-data') || '';
+  } catch (error) {
+    console.warn('Failed to read input data from localStorage:', error);
+    return '';
+  }
+};
+
+const setStoredInputData = (data: string): void => {
+  try {
+    localStorage.setItem('execution-panel-input-data', data);
+  } catch (error) {
+    console.warn('Failed to save input data to localStorage:', error);
+  }
+};
+
+export function ExecutionPanel({ 
+  code, 
+  className = '', 
+  projectId = 'default-project',
+  projectName = 'Untitled Project',
+  projectVersion = '1.0.0',
+  flowData
+}: ExecutionPanelProps) {
   const [isExecuting, setIsExecuting] = useState(false);
   const [currentExecution, setCurrentExecution] = useState<ExecutionResult | null>(null);
-  const [executionLogs, setExecutionLogs] = useState<ExecutionLog[]>([]);
-  const [inputData, setInputData] = useState('');
+  const [inputData, setInputData] = useState(() => getStoredInputData()); // Initialize from localStorage
   const [backendAvailable, setBackendAvailable] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingOutput, setStreamingOutput] = useState('');
   const [streamStartTime, setStreamStartTime] = useState<Date | null>(null);
+  const [storedExecutions, setStoredExecutions] = useState<ExecutionInfo[]>([]);
+  const [loadingStoredExecutions, setLoadingStoredExecutions] = useState(false);
+  const [selectedStoredExecution, setSelectedStoredExecution] = useState<ExecutionInfo | null>(null);
+  const [loadedArtifacts, setLoadedArtifacts] = useState<{ [key: string]: ArtifactContent }>({});
+  const [error, setError] = useState<string | null>(null);
+  const [storageError, setStorageError] = useState<string | null>(null);
 
   // Check backend availability on mount
   useEffect(() => {
     checkBackendHealth();
   }, []);
+
+  // Load stored executions when backend becomes available
+  useEffect(() => {
+    if (backendAvailable) {
+      loadStoredExecutions();
+    }
+  }, [backendAvailable, projectName, projectVersion]);
+
+  const saveExecutionToHistory = async (executionId: string, result: ExecutionResult, code: string, inputData?: string) => {
+    try {
+      const historyItem: ExecutionHistoryItem = {
+        execution_id: executionId,
+        project_id: projectName,
+        version: projectVersion,
+        result: result,
+        code: code,
+        input_data: inputData,
+        created_at: new Date().toISOString()
+      };
+      
+      await apiClient.saveExecutionHistory(historyItem);
+    } catch (error) {
+      console.error('Failed to save execution to history:', error);
+    }
+  };
+
+  const saveExecutionArtifacts = async (executionId: string, result: ExecutionResult, code: string, inputData?: string) => {
+    if (!projectName) return;
+    
+    try {
+      // Save generated code artifact
+      await apiClient.saveArtifact({
+        project_id: projectName,
+        version: projectVersion,
+        execution_id: executionId,
+        content: code,
+        file_type: 'generate.py'
+      });
+
+      // Save execution result artifact
+      await apiClient.saveArtifact({
+        project_id: projectName,
+        version: projectVersion,
+        execution_id: executionId,
+        content: JSON.stringify(result, null, 2),
+        file_type: 'result.json'
+      });
+
+      // Save flow data if available
+      if (flowData) {
+        await apiClient.saveArtifact({
+          project_id: projectName,
+          version: projectVersion,
+          execution_id: executionId,
+          content: JSON.stringify(flowData, null, 2),
+          file_type: 'flow.json'
+        });
+      }
+
+      // Save metadata
+      const metadata = {
+        project_id: projectName,
+        version: projectVersion,
+        execution_id: executionId,
+        timestamp: result.timestamp,
+        success: result.success,
+        execution_time: result.execution_time,
+        input_data: inputData,
+        has_flow_data: !!flowData
+      };
+      
+      await apiClient.saveArtifact({
+        project_id: projectName,
+        version: projectVersion,
+        execution_id: executionId,
+        content: JSON.stringify(metadata, null, 2),
+        file_type: 'metadata.json'
+      });
+
+      console.log(`Artifacts saved for execution ${executionId}`);
+      setStorageError(null); // Clear any previous storage errors
+    } catch (error) {
+      console.error('Failed to save execution artifacts:', error);
+      const message = error instanceof ValidationError ? error.message : 
+                      error instanceof Error ? error.message : 'Failed to save execution artifacts';
+      setStorageError(`Storage failed: ${message}`);
+    }
+  };
+
+  const loadStoredExecutions = async () => {
+    if (!projectName) return;
+    
+    setLoadingStoredExecutions(true);
+    try {
+      // Load executions only for the current project
+      const executions = await apiClient.getExecutionHistory(projectName, projectVersion);
+      setStoredExecutions(executions);
+      setStorageError(null); // Clear any previous storage errors
+    } catch (error) {
+      console.error('Failed to load stored executions:', error);
+      const message = error instanceof ValidationError ? error.message : 
+                      error instanceof Error ? error.message : 'Failed to load execution history';
+      setStorageError(`Load failed: ${message}`);
+    } finally {
+      setLoadingStoredExecutions(false);
+    }
+  };
+
+  const loadArtifact = async (execution: ExecutionInfo, fileType: string) => {
+    const key = `${execution.execution_id}_${fileType}`;
+    if (loadedArtifacts[key]) return loadedArtifacts[key];
+    
+    try {
+      const artifact = await apiClient.getArtifact(
+        execution.project_id,
+        execution.version,
+        execution.execution_id,
+        fileType
+      );
+      
+      setLoadedArtifacts(prev => ({ ...prev, [key]: artifact }));
+      return artifact;
+    } catch (error) {
+      console.error(`Failed to load ${fileType} artifact:`, error);
+      const message = error instanceof ValidationError ? error.message : 
+                      error instanceof Error ? error.message : `Failed to load ${fileType}`;
+      setStorageError(`Artifact load failed: ${message}`);
+      return null;
+    }
+  };
+
+  const loadStoredExecutionResult = async (execution: ExecutionInfo) => {
+    try {
+      const resultArtifact = await loadArtifact(execution, 'result.json');
+      if (resultArtifact) {
+        try {
+          const result = JSON.parse(resultArtifact.content);
+          if (!isExecutionResult(result)) {
+            throw new Error('Invalid execution result format');
+          }
+          setCurrentExecution(result);
+          setSelectedStoredExecution(execution);
+          setError(null); // Clear any previous errors
+
+          // Also load metadata to get the input_data
+          try {
+            const metadataArtifact = await loadArtifact(execution, 'metadata.json');
+            if (metadataArtifact) {
+              const metadata = JSON.parse(metadataArtifact.content);
+              
+              // Check for input_data in metadata, handle both undefined and empty string
+              if (metadata.input_data !== undefined && metadata.input_data !== null) {
+                setInputData(metadata.input_data || ''); // Handle empty string case
+                // Don't update localStorage when loading stored execution data
+                // Let user manually save if they want to persist it
+              } else {
+                // Clear input data if stored execution had no input
+                setInputData('');
+              }
+            }
+          } catch (metadataError) {
+            console.warn('Failed to load metadata for input data:', metadataError);
+            // Don't fail the whole operation if metadata loading fails
+          }
+        } catch (parseError) {
+          throw new Error(`Invalid execution result format: ${parseError instanceof Error ? parseError.message : 'Unknown parsing error'}`);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load stored execution result:', error);
+      const message = error instanceof Error ? error.message : 'Failed to load execution result';
+      setError(`Load failed: ${message}`);
+    }
+  };
 
   // Set up WebSocket connection for real-time updates
   useEffect(() => {
@@ -34,16 +238,12 @@ export function ExecutionPanel({ code, className = '' }: ExecutionPanelProps) {
     
     const handleWebSocketMessage = (data: any) => {
       if (data.type === 'execution_complete') {
+        console.log(`WebSocket: Setting execution complete for ${data.execution_id}`);
         setIsExecuting(false);
         setCurrentExecution(data.result);
         
-        // Add to execution logs
-        const log: ExecutionLog = {
-          id: data.execution_id,
-          timestamp: data.result.timestamp,
-          result: data.result,
-        };
-        setExecutionLogs(prev => [log, ...prev].slice(0, 10)); // Keep last 10 logs
+        // Log execution completion
+        console.log(`Execution completed via WebSocket: ${data.execution_id}`);
       }
     };
 
@@ -62,19 +262,39 @@ export function ExecutionPanel({ code, className = '' }: ExecutionPanelProps) {
 
   // Check if the code has streaming enabled
   const hasStreamingEnabled = useCallback(() => {
-    return code.includes('streaming = True') || code.includes('"streaming": true');
-  }, [code]);
+    const hasYield = code.includes('yield event["data"]') || code.includes('yield') || code.includes('stream_async');
+    const hasStreamingComment = code.includes('# Execute agent with streaming');
+    
+    // Also check if any agent nodes have streaming enabled in flowData
+    const hasStreamingAgent = flowData?.nodes?.some(node => 
+      (node.type === 'agent' || node.type === 'orchestrator-agent') && 
+      node.data?.streaming === true
+    ) || false;
+    
+    console.log('Streaming detection:', { 
+      hasYield, 
+      hasStreamingComment, 
+      hasStreamingAgent, 
+      flowDataNodesCount: flowData?.nodes?.length || 0 
+    });
+    
+    return hasYield || hasStreamingComment || hasStreamingAgent;
+  }, [code, flowData]);
 
   const handleExecute = async () => {
     if (!code.trim()) {
-      alert('No code to execute');
+      setError('No code to execute');
       return;
     }
 
     if (!backendAvailable) {
-      alert('Backend server is not available. Please make sure the server is running on port 8000.');
+      setError('Backend server is not available. Please make sure the server is running on port 8000.');
       return;
     }
+
+    // Clear any previous errors
+    setError(null);
+    setStorageError(null);
 
     setIsExecuting(true);
     setCurrentExecution(null);
@@ -82,10 +302,18 @@ export function ExecutionPanel({ code, className = '' }: ExecutionPanelProps) {
     const request: ExecutionRequest = {
       code: code,
       input_data: inputData.trim() || undefined,
+      project_id: projectName,
+      version: projectVersion,
+      flow_data: flowData,
     };
 
     // Check if streaming is enabled in the generated code
     const streamingEnabled = hasStreamingEnabled();
+    console.log('Execution decision:', { 
+      streamingEnabled, 
+      codeLength: code.length, 
+      codeSnippet: code.substring(0, 200) + '...' 
+    });
 
     if (streamingEnabled) {
       // Use streaming execution
@@ -98,52 +326,64 @@ export function ExecutionPanel({ code, className = '' }: ExecutionPanelProps) {
           request,
           (chunk: string) => {
             // Handle streaming chunk
+            // console.log('Received streaming chunk:', chunk);
             setStreamingOutput(prev => prev + chunk);
           },
-          () => {
+          (finalOutput: string, backendExecutionTime?: number) => {
             // Handle completion
             setIsExecuting(false);
             setIsStreaming(false);
             
-            const endTime = new Date();
-            const executionTime = streamStartTime ? 
-              (endTime.getTime() - streamStartTime.getTime()) / 1000 : 0;
+            // Use backend execution time if provided, otherwise fallback to frontend calculation
+            const executionTime = backendExecutionTime ?? (streamStartTime ? 
+              (new Date().getTime() - streamStartTime.getTime()) / 1000 : 0);
+            
+            console.log('Streaming completion:', {
+              backendExecutionTime,
+              frontendCalculatedTime: streamStartTime ? (new Date().getTime() - streamStartTime.getTime()) / 1000 : 0,
+              usingExecutionTime: executionTime
+            });
 
             const result: ExecutionResult = {
               success: true,
-              output: streamingOutput,
-              execution_time: executionTime,
-              timestamp: new Date().toISOString(),
+              output: finalOutput,
+              execution_time: Math.max(executionTime, 0.001), // Ensure at least 1ms
+              timestamp: streamStartTime?.toISOString() || new Date().toISOString(),
             };
             
             setCurrentExecution(result);
             
-            // Add to execution logs
-            const log: ExecutionLog = {
-              id: Date.now().toString(),
-              timestamp: result.timestamp,
-              result: result,
-            };
-            setExecutionLogs(prev => [log, ...prev].slice(0, 10));
+            // Log execution completion
+            console.log(`Streaming execution completed: ${Date.now()}`);
+            
+            // Save to backend history and artifacts
+            const executionId = Date.now().toString();
+            saveExecutionToHistory(executionId, result, code, inputData);
+            saveExecutionArtifacts(executionId, result, code, inputData);
           },
-          (error: string) => {
+          (error: string, partialOutput: string, backendExecutionTime?: number) => {
             // Handle error
             setIsExecuting(false);
             setIsStreaming(false);
             
-            const endTime = new Date();
-            const executionTime = streamStartTime ? 
-              (endTime.getTime() - streamStartTime.getTime()) / 1000 : 0;
+            // Use backend execution time if provided, otherwise fallback to frontend calculation
+            const executionTime = backendExecutionTime ?? (streamStartTime ? 
+              (new Date().getTime() - streamStartTime.getTime()) / 1000 : 0);
 
             const errorResult: ExecutionResult = {
               success: false,
-              output: streamingOutput,
+              output: partialOutput,
               error: error,
-              execution_time: executionTime,
-              timestamp: new Date().toISOString(),
+              execution_time: Math.max(executionTime, 0.001), // Ensure at least 1ms
+              timestamp: streamStartTime?.toISOString() || new Date().toISOString(),
             };
             
             setCurrentExecution(errorResult);
+            
+            // Save error to backend history and artifacts
+            const errorLogId = Date.now().toString();
+            saveExecutionToHistory(errorLogId, errorResult, code, inputData);
+            saveExecutionArtifacts(errorLogId, errorResult, code, inputData);
           }
         );
       } catch (error) {
@@ -151,27 +391,44 @@ export function ExecutionPanel({ code, className = '' }: ExecutionPanelProps) {
         setIsStreaming(false);
         console.error('Streaming execution failed:', error);
         
+        const message = error instanceof Error ? error.message : 'Unknown streaming error';
+        setError(`Streaming execution failed: ${message}`);
+        
+        const endTime = new Date();
+        const executionTime = streamStartTime ? 
+          (endTime.getTime() - streamStartTime.getTime()) / 1000 : 0;
+
         const errorResult: ExecutionResult = {
           success: false,
           output: '',
           error: `Failed to execute streaming code: ${error instanceof Error ? error.message : 'Unknown error'}`,
-          execution_time: 0,
-          timestamp: new Date().toISOString(),
+          execution_time: Math.max(executionTime, 0.001), // Ensure at least 1ms
+          timestamp: streamStartTime?.toISOString() || new Date().toISOString(),
         };
         
         setCurrentExecution(errorResult);
+        
+        // Save catch error to backend history and artifacts
+        const catchErrorLogId = Date.now().toString();
+        saveExecutionToHistory(catchErrorLogId, errorResult, code, inputData);
+        saveExecutionArtifacts(catchErrorLogId, errorResult, code, inputData);
       }
     } else {
       // Use regular execution
       try {
         const response = await apiClient.executeCode(request);
         
-        // The result will be updated via WebSocket, but we can also set it immediately
+        // Set execution complete and update result
+        console.log('Regular execution: Setting execution complete');
+        setIsExecuting(false);
         setCurrentExecution(response.result);
         
       } catch (error) {
         setIsExecuting(false);
         console.error('Execution failed:', error);
+        
+        const message = error instanceof Error ? error.message : 'Unknown execution error';
+        setError(`Execution failed: ${message}`);
         
         const errorResult: ExecutionResult = {
           success: false,
@@ -182,6 +439,11 @@ export function ExecutionPanel({ code, className = '' }: ExecutionPanelProps) {
         };
         
         setCurrentExecution(errorResult);
+        
+        // Save regular execution error to backend history and artifacts
+        const regularErrorLogId = Date.now().toString();
+        saveExecutionToHistory(regularErrorLogId, errorResult, code, inputData);
+        saveExecutionArtifacts(regularErrorLogId, errorResult, code, inputData);
       }
     }
   };
@@ -214,7 +476,7 @@ export function ExecutionPanel({ code, className = '' }: ExecutionPanelProps) {
         </div>
         <div className="flex items-center space-x-2">
           {!backendAvailable && (
-            <span className="text-xs text-red-500 mr-2">Backend Offline</span>
+            <span className="text-xs text-red-500 mr-2">Backend Connecting</span>
           )}
           <button
             onClick={isExecuting ? handleStop : handleExecute}
@@ -240,6 +502,58 @@ export function ExecutionPanel({ code, className = '' }: ExecutionPanelProps) {
         </div>
       </div>
 
+      {/* Error Display */}
+      {error && (
+        <div className="p-4 border-b border-gray-200">
+          <div className="bg-red-50 border border-red-200 rounded-md p-3">
+            <div className="flex items-center">
+              <AlertTriangle className="w-4 h-4 text-red-500 mr-2" />
+              <div className="flex-1">
+                <p className="text-sm text-red-700">{error}</p>
+                <button
+                  onClick={() => setError(null)}
+                  className="text-xs text-red-500 hover:text-red-700 mt-1"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Storage Error Display */}
+      {storageError && (
+        <div className="p-4 border-b border-gray-200">
+          <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3">
+            <div className="flex items-center">
+              <AlertTriangle className="w-4 h-4 text-yellow-500 mr-2" />
+              <div className="flex-1">
+                <p className="text-sm text-yellow-700">{storageError}</p>
+                <div className="flex items-center space-x-2 mt-2">
+                  <button
+                    onClick={() => setStorageError(null)}
+                    className="text-xs text-yellow-600 hover:text-yellow-800"
+                  >
+                    Dismiss
+                  </button>
+                  <button
+                    onClick={() => {
+                      setStorageError(null);
+                      loadStoredExecutions();
+                    }}
+                    className="text-xs text-yellow-600 hover:text-yellow-800 flex items-center"
+                  >
+                    <RefreshCw className="w-3 h-3 mr-1" />
+                    Retry
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Input Data Section */}
       <div className="p-4 border-b border-gray-200 bg-gray-50">
         <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -247,7 +561,11 @@ export function ExecutionPanel({ code, className = '' }: ExecutionPanelProps) {
         </label>
         <textarea
           value={inputData}
-          onChange={(e) => setInputData(e.target.value)}
+          onChange={(e) => {
+            const newValue = e.target.value;
+            setInputData(newValue);
+            setStoredInputData(newValue); // Save to localStorage
+          }}
           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 text-sm"
           placeholder="Enter input data for your agent..."
           rows={2}
@@ -298,7 +616,7 @@ export function ExecutionPanel({ code, className = '' }: ExecutionPanelProps) {
       {/* Execution Results */}
       <div className="flex-1 min-h-0 flex flex-col">
         {/* Show streaming output in real-time */}
-        {isStreaming && streamingOutput && (
+        {isStreaming && (
           <div className="flex-1 overflow-auto">
             <div className="p-4 border-b border-gray-200">
               <div className="flex items-center space-x-2 mb-2">
@@ -308,8 +626,8 @@ export function ExecutionPanel({ code, className = '' }: ExecutionPanelProps) {
                   <span>Streaming</span>
                 </div>
               </div>
-              <pre className="bg-gray-900 text-green-400 p-3 rounded text-xs overflow-auto font-mono">
-                {streamingOutput}
+              <pre className="bg-gray-900 text-green-400 p-3 rounded text-xs font-mono whitespace-pre-wrap break-words overflow-y-auto">
+                {streamingOutput || '...'}
                 <span className="animate-pulse">█</span>
               </pre>
             </div>
@@ -323,7 +641,7 @@ export function ExecutionPanel({ code, className = '' }: ExecutionPanelProps) {
             {currentExecution.output && (
               <div className="p-4 border-b border-gray-200">
                 <h4 className="text-sm font-medium text-gray-700 mb-2">Output</h4>
-                <pre className="bg-gray-900 text-green-400 p-3 rounded text-xs overflow-auto font-mono">
+                <pre className="bg-gray-900 text-green-400 p-3 rounded text-xs font-mono whitespace-pre-wrap break-words overflow-y-auto">
                   {currentExecution.output}
                 </pre>
               </div>
@@ -333,7 +651,7 @@ export function ExecutionPanel({ code, className = '' }: ExecutionPanelProps) {
             {currentExecution.error && (
               <div className="p-4 border-b border-gray-200">
                 <h4 className="text-sm font-medium text-red-700 mb-2">Error</h4>
-                <pre className="bg-red-50 text-red-800 p-3 rounded text-xs overflow-auto font-mono border border-red-200">
+                <pre className="bg-red-50 text-red-800 p-3 rounded text-xs font-mono border border-red-200 whitespace-pre-wrap break-words overflow-y-auto">
                   {currentExecution.error}
                 </pre>
               </div>
@@ -354,37 +672,65 @@ export function ExecutionPanel({ code, className = '' }: ExecutionPanelProps) {
           </div>
         )}
 
-        {/* Execution History */}
-        {executionLogs.length > 0 && (
+        {/* Stored Executions */}
+        {(storedExecutions.length > 0 || loadingStoredExecutions) && (
           <div className="border-t border-gray-200">
-            <div className="p-3 bg-gray-50">
-              <h4 className="text-sm font-medium text-gray-700">Execution History</h4>
+            <div className="p-3 bg-gray-50 flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <FolderOpen className="w-4 h-4 text-gray-600" />
+                <h4 className="text-sm font-medium text-gray-700">Stored Executions</h4>
+                <span className="text-xs text-gray-500">({projectName})</span>
+              </div>
+              <button
+                onClick={loadStoredExecutions}
+                disabled={loadingStoredExecutions}
+                className="text-xs text-blue-600 hover:text-blue-800 disabled:opacity-50"
+              >
+                {loadingStoredExecutions ? 'Loading...' : 'Refresh'}
+              </button>
             </div>
             <div className="max-h-40 overflow-auto">
-              {executionLogs.map((log) => (
-                <div key={log.id} className="p-3 border-b border-gray-100 hover:bg-gray-50">
-                  <div className="flex items-center justify-between text-xs">
-                    <div className="flex items-center space-x-2">
-                      {getStatusIcon(log.result)}
-                      <span className={log.result.success ? 'text-green-600' : 'text-red-600'}>
-                        {log.result.success ? 'Success' : 'Failed'}
-                      </span>
+              {loadingStoredExecutions ? (
+                <div className="p-4 text-center">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mx-auto mb-2"></div>
+                  <p className="text-xs text-gray-600">Loading stored executions...</p>
+                </div>
+              ) : storedExecutions.length === 0 ? (
+                <div className="p-4 text-center text-xs text-gray-500">
+                  No stored executions available
+                </div>
+              ) : (
+                storedExecutions.slice(0, 10).map((execution) => (
+                  <div key={execution.execution_id} 
+                    className={`p-3 border-b border-gray-100 hover:bg-gray-50 cursor-pointer ${
+                      selectedStoredExecution?.execution_id === execution.execution_id ? 'bg-blue-50' : ''
+                    }`}
+                    onClick={() => loadStoredExecutionResult(execution)}
+                    title={`Execution ID: ${execution.execution_id}`}>
+                    <div className="flex items-center justify-between text-xs">
+                      <div className="flex items-center space-x-2">
+                        <FileText className="w-3 h-3 text-gray-500" />
+                        <span className="text-gray-700">
+                          {execution.execution_id.substring(0, 8)}...
+                        </span>
+                        <span className="text-gray-500 text-xs bg-gray-100 px-1 rounded">
+                          {execution.artifacts.length} files
+                        </span>
+                      </div>
+                      <div className="text-gray-500">
+                        {new Date(execution.created_at).toLocaleTimeString()}
+                      </div>
                     </div>
-                    <div className="text-gray-500">
-                      {new Date(log.timestamp).toLocaleTimeString()} 
-                      ({formatExecutionTime(log.result.execution_time)})
+                    <div className="mt-1 text-xs text-gray-600">
+                      Version: {execution.version} • Size: {(execution.total_size / 1024).toFixed(1)}KB
                     </div>
                   </div>
-                  {log.result.output && (
-                    <div className="mt-1 text-xs text-gray-600 truncate">
-                      Output: {log.result.output.substring(0, 100)}...
-                    </div>
-                  )}
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
         )}
+
       </div>
 
       {/* Backend Status Footer */}
@@ -395,7 +741,14 @@ export function ExecutionPanel({ code, className = '' }: ExecutionPanelProps) {
               {backendAvailable ? ' Connected' : ' Disconnected'}
             </span>
           </span>
-          <span>Port: 8000</span>
+          <div className="flex items-center space-x-2">
+            {selectedStoredExecution && (
+              <span className="text-blue-600">
+                Loaded: {selectedStoredExecution.execution_id.substring(0, 8)}...
+              </span>
+            )}
+            <span>Port: 8000</span>
+          </div>
         </div>
       </div>
     </div>

@@ -9,14 +9,6 @@ interface ToolNodeData {
   parameters?: Record<string, any>;
 }
 
-const builtInTools = [
-  'web_search',
-  'calculator',
-  'file_reader',
-  'api_caller',
-  'database_query',
-  'email_sender',
-];
 
 export function ToolNode({ data, selected, id }: NodeProps) {
   const { deleteElements } = useReactFlow();

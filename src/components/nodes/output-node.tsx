@@ -1,5 +1,5 @@
 import { Handle, Position, type NodeProps, useReactFlow } from '@xyflow/react';
-import { ArrowLeft, FileText, Settings, X } from 'lucide-react';
+import { ArrowLeft, Settings, X } from 'lucide-react';
 
 interface OutputNodeData {
   label?: string;

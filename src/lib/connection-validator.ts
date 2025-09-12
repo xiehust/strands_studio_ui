@@ -54,47 +54,63 @@ const connectionRules: ConnectionRule[] = [
     targetHandle: 'input',
     description: 'Agent output can connect to output nodes',
   },
+
+  // ORCHESTRATOR AGENT CONNECTIONS
   
-  // Agents can connect to control flow
+  // Input nodes can connect to orchestrator agents
   {
-    sourceType: 'agent',
+    sourceType: 'input',
     sourceHandle: 'output',
-    targetType: 'control',
-    targetHandle: 'input',
-    description: 'Agent output can connect to control flow',
+    targetType: 'orchestrator-agent',
+    targetHandle: 'user-input',
+    description: 'Input can provide user input to orchestrator agent',
   },
   
-  // Control flow can connect to other agents
+  // Tools can connect to orchestrator agents
   {
-    sourceType: 'control',
-    sourceHandle: 'true',
-    targetType: 'agent',
-    targetHandle: 'system-prompt',
-    description: 'Control flow true branch can trigger another agent',
-  },
-  {
-    sourceType: 'control',
-    sourceHandle: 'false',
-    targetType: 'agent',
-    targetHandle: 'system-prompt',
-    description: 'Control flow false branch can trigger another agent',
+    sourceType: 'tool',
+    sourceHandle: 'tool-output',
+    targetType: 'orchestrator-agent',
+    targetHandle: 'tools',
+    description: 'Tools can be attached to orchestrator agents',
   },
   
-  // Control flow can connect to outputs
+  // Custom tools can connect to orchestrator agents
   {
-    sourceType: 'control',
-    sourceHandle: 'true',
+    sourceType: 'custom-tool',
+    sourceHandle: 'tool-output',
+    targetType: 'orchestrator-agent',
+    targetHandle: 'tools',
+    description: 'Custom tools can be attached to orchestrator agents',
+  },
+  
+  // MCP tools can connect to orchestrator agents
+  {
+    sourceType: 'mcp-tool',
+    sourceHandle: 'mcp-tools',
+    targetType: 'orchestrator-agent',
+    targetHandle: 'tools',
+    description: 'MCP server tools can be attached to orchestrator agents',
+  },
+  
+  // Orchestrator agents can connect to regular agents (key feature)
+  {
+    sourceType: 'orchestrator-agent',
+    sourceHandle: 'sub-agents',
+    targetType: 'agent',
+    targetHandle: 'orchestrator-input',
+    description: 'Orchestrator agent can coordinate regular agents as tools',
+  },
+  
+  // Orchestrator agents can connect to outputs
+  {
+    sourceType: 'orchestrator-agent',
+    sourceHandle: 'output',
     targetType: 'output',
     targetHandle: 'input',
-    description: 'Control flow true branch can connect to output',
+    description: 'Orchestrator agent output can connect to output nodes',
   },
-  {
-    sourceType: 'control',
-    sourceHandle: 'false',
-    targetType: 'output',
-    targetHandle: 'input',
-    description: 'Control flow false branch can connect to output',
-  },
+  
 ];
 
 export function isValidConnection(
@@ -109,7 +125,7 @@ export function isValidConnection(
   }
 
   // Special validation for input nodes based on input type
-  if (sourceNode.type === 'input' && targetNode.type === 'agent') {
+  if (sourceNode.type === 'input' && (targetNode.type === 'agent' || targetNode.type === 'orchestrator-agent')) {
     const inputType = sourceNode.data?.inputType || 'user-prompt';
     const targetHandle = connection.targetHandle;
     

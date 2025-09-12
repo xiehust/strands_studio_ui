@@ -1,5 +1,5 @@
 import { Handle, Position, type NodeProps, useReactFlow } from '@xyflow/react';
-import { Code, FileCode, Settings, X } from 'lucide-react';
+import { Code, Settings, X } from 'lucide-react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
@@ -61,7 +61,7 @@ export function CustomToolNode({ data, selected, id }: NodeProps) {
             <div className="text-xs">
               <span className="font-medium text-gray-600">Parameters:</span>
               <div className="text-gray-700 mt-1">
-                {parameters.map((param, index) => (
+                {parameters.map((param) => (
                   <span key={param} className="inline-block bg-gray-100 px-2 py-1 rounded text-xs mr-1 mb-1">
                     {param}
                   </span>

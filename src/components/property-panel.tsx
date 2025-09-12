@@ -19,10 +19,15 @@ export function PropertyPanel({
   }
 
   const handleInputChange = (field: string, value: any) => {
-    onUpdateNode(selectedNode.id, {
-      ...selectedNode.data,
-      [field]: value,
-    });
+    try {
+      onUpdateNode(selectedNode.id, {
+        ...selectedNode.data,
+        [field]: value,
+      });
+    } catch (error) {
+      console.error('Failed to update node property:', error);
+      // In a production app, you might want to show a toast notification here
+    }
   };
 
   const bedrockModels = [
@@ -512,10 +517,174 @@ export function PropertyPanel({
     </div>
   );
 
+  const renderOrchestratorAgentProperties = (data: any) => (
+    <div className="space-y-4">
+      {/* Basic Agent Properties */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-2">
+          Orchestrator Name
+        </label>
+        <input
+          type="text"
+          value={data.label || ''}
+          onChange={(e) => handleInputChange('label', e.target.value)}
+          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500"
+          placeholder="Orchestrator Agent"
+        />
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-2">
+          Model Provider
+        </label>
+        <select
+          value={data.modelProvider || 'AWS Bedrock'}
+          onChange={(e) => {
+            if (e.target.value === 'AWS Bedrock') {
+              onUpdateNode(selectedNode.id, {
+                ...selectedNode.data,
+                modelProvider: e.target.value,
+                modelId: bedrockModels[0].model_id,
+                modelName: bedrockModels[0].model_name,
+              });
+            } else {
+              onUpdateNode(selectedNode.id, {
+                ...selectedNode.data,
+                modelProvider: e.target.value,
+                modelId: '',
+                modelName: '',
+              });
+            }
+          }}
+          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500"
+        >
+          <option value="AWS Bedrock">AWS Bedrock</option>
+          <option value="OpenAI">OpenAI</option>
+          <option value="Anthropic">Anthropic</option>
+        </select>
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-2">
+          Model
+        </label>
+        {data.modelProvider === 'AWS Bedrock' || !data.modelProvider ? (
+          <select
+            value={data.modelId || bedrockModels[0].model_id}
+            onChange={(e) => {
+              const selectedModel = bedrockModels.find(m => m.model_id === e.target.value);
+              if (selectedModel) {
+                onUpdateNode(selectedNode.id, {
+                  ...selectedNode.data,
+                  modelId: selectedModel.model_id,
+                  modelName: selectedModel.model_name,
+                });
+              }
+            }}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500"
+          >
+            {bedrockModels.map((model) => (
+              <option key={model.model_id} value={model.model_id}>
+                {model.model_name}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            type="text"
+            value={data.modelName || ''}
+            onChange={(e) => handleInputChange('modelName', e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500"
+            placeholder="Enter model name"
+          />
+        )}
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-2">
+          System Prompt
+        </label>
+        <textarea
+          value={data.systemPrompt || ''}
+          onChange={(e) => handleInputChange('systemPrompt', e.target.value)}
+          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500"
+          placeholder="You are an orchestrator agent that coordinates multiple specialized agents..."
+          rows={4}
+        />
+      </div>
+
+      {/* Orchestrator-Specific Properties */}
+      <div className="border-t pt-4">
+        <h4 className="text-sm font-semibold text-purple-800 mb-3">Orchestration Settings</h4>
+        
+
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Coordination Prompt
+          </label>
+          <textarea
+            value={data.coordinationPrompt || ''}
+            onChange={(e) => handleInputChange('coordinationPrompt', e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500"
+            placeholder="Instructions for how to coordinate and aggregate results from sub-agents..."
+            rows={3}
+          />
+        </div>
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-2">
+          Temperature: {data.temperature || 0.7}
+        </label>
+        <input
+          type="range"
+          min="0"
+          max="1"
+          step="0.1"
+          value={data.temperature || 0.7}
+          onChange={(e) => handleInputChange('temperature', parseFloat(e.target.value))}
+          className="w-full"
+        />
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-2">
+          Max Tokens
+        </label>
+        <input
+          type="number"
+          value={data.maxTokens || 4000}
+          onChange={(e) => handleInputChange('maxTokens', parseInt(e.target.value))}
+          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500"
+          min="100"
+          max="100000"
+        />
+      </div>
+
+      <div>
+        <label className="flex items-center space-x-2">
+          <input
+            type="checkbox"
+            checked={data.streaming || false}
+            onChange={(e) => handleInputChange('streaming', e.target.checked)}
+            className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+          />
+          <span className="text-sm font-medium text-gray-700">Enable Streaming</span>
+        </label>
+        <p className="text-xs text-gray-500 mt-1">
+          Stream responses in real-time for better user experience
+        </p>
+      </div>
+    </div>
+  );
+
   const renderProperties = () => {
     switch (selectedNode.type) {
       case 'agent':
         return renderAgentProperties(selectedNode.data);
+      case 'orchestrator-agent':
+        return renderOrchestratorAgentProperties(selectedNode.data);
       case 'tool':
         return renderToolProperties(selectedNode.data);
       case 'mcp-tool':

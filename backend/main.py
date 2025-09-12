@@ -13,10 +13,23 @@ import uuid
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
 import uvicorn
+
+# Import storage components
+from app.models.storage import (
+    ArtifactRequest,
+    ArtifactResponse,
+    RetrieveArtifactRequest,
+    ArtifactContent,
+    ProjectInfo,
+    VersionInfo,
+    ExecutionInfo,
+    StorageStats
+)
+from app.services.storage_service import StorageService
 
 # Configure logging
 import os
@@ -101,7 +114,7 @@ async def log_requests(request: Request, call_next):
 # CORS middleware for frontend communication
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -134,6 +147,9 @@ class ProjectData(BaseModel):
 class ExecutionRequest(BaseModel):
     code: str
     input_data: Optional[str] = None
+    project_id: Optional[str] = "default-project"
+    version: Optional[str] = "1.0.0"
+    flow_data: Optional[dict] = None
 
 class ExecutionResult(BaseModel):
     success: bool
@@ -142,9 +158,21 @@ class ExecutionResult(BaseModel):
     execution_time: float
     timestamp: str
 
+class ExecutionHistoryItem(BaseModel):
+    execution_id: str
+    project_id: Optional[str] = None
+    version: Optional[str] = None
+    result: ExecutionResult
+    code: Optional[str] = None
+    input_data: Optional[str] = None
+    created_at: str
+
 # In-memory storage (replace with database in production)
 projects_storage: Dict[str, ProjectData] = {}
 execution_results: Dict[str, ExecutionResult] = {}
+
+# Initialize storage service
+storage_service = StorageService("storage")
 
 # WebSocket connections for real-time updates
 active_connections: List[WebSocket] = []
@@ -253,6 +281,9 @@ async def execute_code(request: ExecutionRequest):
         
         execution_results[execution_id] = result
         
+        # Save to execution history
+        await save_to_execution_history(execution_id, result, request.code, request.input_data, request.project_id, request.version, request.flow_data)
+        
         # Notify WebSocket connections
         await notify_execution_complete(execution_id, result)
         
@@ -279,6 +310,9 @@ async def execute_code(request: ExecutionRequest):
         execution_results[execution_id] = result
         logger.error(f"Code execution failed: {error_msg}")
         
+        # Save to execution history (even failed executions)
+        await save_to_execution_history(execution_id, result, request.code, request.input_data, request.project_id, request.version, request.flow_data)
+        
         # Notify WebSocket connections
         await notify_execution_complete(execution_id, result)
         
@@ -288,86 +322,221 @@ async def execute_code(request: ExecutionRequest):
 async def execute_code_stream(request: ExecutionRequest):
     """Execute Python code with streaming response using Strands Agent SDK"""
     execution_id = str(uuid.uuid4())
+    start_time = datetime.now()
     logger.info(f"Starting streaming execution - ID: {execution_id}")
     
     async def generate_stream():
         try:
             logger.info(f"Setting up streaming environment - ID: {execution_id}")
             
-            # Extract the agent and user input from the generated code
-            code_lines = request.code.strip().split('\n')
+            # Import Strands Agent SDK
+            logger.info("Importing Strands Agent SDK for streaming")
+            from strands import Agent, tool
+            from strands.models import BedrockModel
+            from strands_tools import calculator, file_read, shell, current_time
             
-            # Find the global agent variable line to get agent name
-            agent_name = None
-            user_input = "Hello, how can you help me?"
+            # Import MCP dependencies if needed
+            mcp_imports = {}
+            if 'MCPClient' in request.code:
+                logger.info("MCP Client detected in code, importing MCP dependencies")
+                try:
+                    from strands.tools.mcp import MCPClient
+                    from mcp import stdio_client, StdioServerParameters
+                    from mcp.client.streamable_http import streamablehttp_client
+                    from mcp.client.sse import sse_client
+                    
+                    mcp_imports.update({
+                        'MCPClient': MCPClient,
+                        'stdio_client': stdio_client,
+                        'streamablehttp_client': streamablehttp_client,
+                        'sse_client': sse_client,
+                        'StdioServerParameters': StdioServerParameters,
+                    })
+                except ImportError as e:
+                    logger.warning(f"MCP dependencies not available: {e}")
             
-            for line in code_lines:
-                if "global " in line and "_agent" in line:
-                    # Extract agent name from global declaration
-                    parts = line.split("global ")[1].strip()
-                    agent_name = parts.split(',')[0].strip()
-                    break
-                elif "user_input = " in line and '"' in line:
-                    # Extract user input
-                    user_input = line.split('"')[1]
+            # Create a safe execution environment
+            globals_dict = {
+                '__builtins__': __builtins__,
+                'Agent': Agent,
+                'tool': tool,
+                'BedrockModel': BedrockModel,
+                'calculator': calculator,
+                'file_read': file_read,
+                'shell': shell,
+                'current_time': current_time,
+                'print': print,
+                'str': str,
+                'int': int,
+                'float': float,
+                'list': list,
+                'dict': dict,
+                'len': len,
+                'range': range,
+                'json': json,
+                'asyncio': asyncio,
+                'input_data': request.input_data,  # Make input data available to executed code
+                **mcp_imports,  # Add MCP imports if available
+            }
             
-            if not agent_name:
-                agent_name = "test_agent"  # fallback
-                
-            logger.info(f"Detected agent: {agent_name}, input: {user_input[:50]}... - ID: {execution_id}")
+            locals_dict = {}
             
-            # Create the execution environment
-            global_vars = {}
-            local_vars = {}
+            # Execute the setup code (imports, agent configuration, main function definition)
+            logger.info(f"Executing setup code - ID: {execution_id}")
+            exec(request.code, globals_dict, locals_dict)
             
-            # Execute the code to create the agent
-            logger.info(f"Executing agent setup code - ID: {execution_id}")
-            exec(request.code, global_vars, local_vars)
+            # Make globals available to locals for function access
+            for key, value in globals_dict.items():
+                if key not in locals_dict:
+                    locals_dict[key] = value
             
-            # Get the agent from the execution environment
-            agent = local_vars.get(agent_name) or global_vars.get(agent_name)
+            # Also make all local definitions available as globals for main function
+            for key, value in locals_dict.items():
+                if key not in globals_dict:
+                    globals_dict[key] = value
             
-            if not agent:
-                logger.error(f"Agent '{agent_name}' not found in execution environment - ID: {execution_id}")
-                yield f"data: Error: Could not find agent '{agent_name}' in execution environment\n\n"
+            # Check if there's a main function and if it's async
+            main_func = locals_dict.get('main') or globals_dict.get('main')
+            if not main_func or not callable(main_func):
+                logger.error(f"No callable main function found - ID: {execution_id}")
+                yield f"data: Error: No callable main function found in the code\n\n"
+                yield f"data: [STREAM_COMPLETE]\n\n"
                 return
             
-            logger.info(f"Agent found: {type(agent).__name__} - ID: {execution_id}")
+            import inspect
+            logger.info(f"Main function type: {type(main_func).__name__} - ID: {execution_id}")
+            logger.info(f"Is coroutine function: {inspect.iscoroutinefunction(main_func)} - ID: {execution_id}")
+            logger.info(f"Is async gen function: {inspect.isasyncgenfunction(main_func)} - ID: {execution_id}")
             
-            # Check if agent has streaming capability
-            if hasattr(agent, 'stream_async'):
-                logger.info(f"Starting streaming response - ID: {execution_id}")
-                yield f"data: Starting streaming response...\n\n"
-                
-                chunk_count = 0
-                async for event in agent.stream_async(user_input):
-                    if "data" in event:
-                        # Send the streaming chunk
-                        chunk = event["data"]
-                        chunk_count += 1
-                        yield f"data: {chunk}\n\n"
-                    elif "tool" in event:
-                        # Send tool usage information
-                        tool_info = event.get("tool", {})
-                        tool_name = tool_info.get("name", "unknown")
-                        logger.info(f"Tool used: {tool_name} - ID: {execution_id}")
-                        yield f"data: [Using tool: {tool_name}]\n\n"
-                
-                logger.info(f"Streaming completed - {chunk_count} chunks sent - ID: {execution_id}")
+            if not (inspect.iscoroutinefunction(main_func) or inspect.isasyncgenfunction(main_func)):
+                logger.error(f"Main function is not async - ID: {execution_id}")
+                yield f"data: Error: Main function must be async for streaming\n\n"
                 yield f"data: [STREAM_COMPLETE]\n\n"
+                return
+            
+            logger.info(f"Found async main function, starting streaming execution - ID: {execution_id}")
+            
+            # Create a custom async generator that captures the streaming
+            async def stream_main():
+                # Set up the execution context for the main function
+                try:
+                    # Check if the main function is a generator (has yield statements)
+                    import inspect
+                    if inspect.isasyncgenfunction(main_func):
+                        # The main function is an async generator, stream from it directly
+                        logger.info(f"Main function is an async generator, streaming directly - ID: {execution_id}")
+                        async for chunk in main_func():
+                            if chunk is not None:
+                                yield chunk
+                    elif 'yield' in request.code:
+                        # The main function contains yield statements but may not be detected as generator
+                        # This happens when the yield is conditional or inside try/except
+                        logger.info(f"Detected yield in code, attempting to stream from main function - ID: {execution_id}")
+                        try:
+                            # Try to call main as a generator
+                            result = main_func()
+                            if hasattr(result, '__aiter__'):
+                                # It's an async iterator/generator
+                                async for chunk in result:
+                                    if chunk is not None:
+                                        yield chunk
+                            elif hasattr(result, '__await__'):
+                                # It's a coroutine, await it
+                                final_result = await result
+                                if final_result is not None:
+                                    yield str(final_result)
+                            elif inspect.isgenerator(result) or inspect.isasyncgen(result):
+                                # It's a generator or async generator
+                                if inspect.isasyncgen(result):
+                                    async for chunk in result:
+                                        if chunk is not None:
+                                            yield chunk
+                                else:
+                                    for chunk in result:
+                                        if chunk is not None:
+                                            yield chunk
+                            else:
+                                # It's some other object, convert to string
+                                yield str(result)
+                        except Exception as e:
+                            logger.warning(f"Failed to stream from main function, falling back - ID: {execution_id}: {e}")
+                            # Fallback to regular execution
+                            try:
+                                result = await main_func()
+                                if result is not None:
+                                    # Check if the result is an async generator
+                                    if inspect.isasyncgen(result):
+                                        async for chunk in result:
+                                            if chunk is not None:
+                                                yield chunk
+                                    else:
+                                        yield str(result)
+                            except Exception as fallback_error:
+                                logger.error(f"Fallback execution also failed - ID: {execution_id}: {fallback_error}")
+                                yield f"Error: {str(fallback_error)}"
+                    else:
+                        # Regular async function without streaming
+                        logger.info(f"Regular async function, executing once - ID: {execution_id}")
+                        result = await main_func()
+                        if result is not None:
+                            # Check if the result is an async generator
+                            if inspect.isasyncgen(result):
+                                async for chunk in result:
+                                    if chunk is not None:
+                                        yield chunk
+                            else:
+                                yield str(result)
+                    
+                except Exception as e:
+                    logger.error(f"Error in stream_main - ID: {execution_id}: {e}")
+                    yield f"Error in main function: {str(e)}"
+            
+            # Start streaming from the main function
+            chunk_count = 0
+            try:
+                async for stream_data in stream_main():
+                    # Ensure proper SSE format and preserve newlines
+                    if stream_data:
+                        # Convert stream_data to string and ensure it preserves formatting
+                        chunk_str = str(stream_data)
+                        if not chunk_str.startswith("data: "):
+                            yield f"data: {chunk_str}\n\n"
+                        else:
+                            yield f"{chunk_str}\n\n" if not chunk_str.endswith("\n\n") else chunk_str
+                    chunk_count += 1
+                
+                end_time = datetime.now()
+                execution_time = (end_time - start_time).total_seconds()
+                logger.info(f"Streaming completed - {chunk_count} chunks sent - ID: {execution_id}, Duration: {execution_time:.3f}s")
+                yield f"data: [STREAM_COMPLETE:{execution_time}]\n\n"
+                
+            except Exception as e:
+                end_time = datetime.now()
+                execution_time = (end_time - start_time).total_seconds()
+                logger.error(f"Streaming error in main execution - ID: {execution_id}: {e}")
+                yield f"data: Error: {str(e)}\n\n"
+                yield f"data: [STREAM_COMPLETE:{execution_time}]\n\n"
+                
+        except ImportError as e:
+            end_time = datetime.now()
+            execution_time = (end_time - start_time).total_seconds()
+            if "strands" in str(e) or "strands_tools" in str(e):
+                error_msg = f"Strands Agent SDK not available. Please install strands-agents and strands-agents-tools packages. Error: {str(e)}"
+                logger.error(f"Strands SDK import error - ID: {execution_id}: {error_msg}")
+                yield f"data: Error: {error_msg}\n\n"
+                yield f"data: [STREAM_COMPLETE:{execution_time}]\n\n"
             else:
-                # Fallback to regular execution if streaming not available
-                logger.info(f"Using fallback execution (no streaming) - ID: {execution_id}")
-                response = agent(user_input)
-                yield f"data: {str(response)}\n\n"
-                yield f"data: [STREAM_COMPLETE]\n\n"
-                
+                logger.error(f"Import error - ID: {execution_id}: {e}")
+                yield f"data: Error: Import error: {str(e)}\n\n"
+                yield f"data: [STREAM_COMPLETE:{execution_time}]\n\n"
         except Exception as e:
+            end_time = datetime.now()
+            execution_time = (end_time - start_time).total_seconds()
             error_msg = f"Streaming execution failed: {str(e)}"
             logger.error(f"Streaming execution error - ID: {execution_id}: {error_msg}")
             logger.error(f"Full traceback - ID: {execution_id}: {traceback.format_exc()}")
             yield f"data: Error: {error_msg}\n\n"
-            yield f"data: [STREAM_COMPLETE]\n\n"
+            yield f"data: [STREAM_COMPLETE:{execution_time}]\n\n"
     
     return StreamingResponse(
         generate_stream(),
@@ -376,6 +545,8 @@ async def execute_code_stream(request: ExecutionRequest):
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "Access-Control-Allow-Origin": "*",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+            "Transfer-Encoding": "chunked",
         }
     )
 
@@ -390,6 +561,194 @@ async def get_execution_result(execution_id: str):
     
     logger.info(f"Execution result found - ID: {execution_id}")
     return execution_results[execution_id]
+
+# Execution History Endpoints
+@app.post("/api/execution-history")
+async def save_execution_history(item: ExecutionHistoryItem):
+    """Save execution result to persistent storage (delegates to storage service)"""
+    logger.info(f"Saving execution to persistent storage - ID: {item.execution_id}")
+    
+    # Set created_at if not provided
+    if not item.created_at:
+        item.created_at = datetime.now().isoformat()
+    
+    # Use the save_to_execution_history function which saves to file storage
+    await save_to_execution_history(
+        execution_id=item.execution_id,
+        result=item.result,
+        code=item.code,
+        input_data=item.input_data,
+        project_id=item.project_id,
+        version=item.version
+    )
+    
+    logger.info(f"Execution saved to persistent storage - ID: {item.execution_id}")
+    return {"message": "Execution saved to persistent storage", "execution_id": item.execution_id}
+
+@app.get("/api/execution-history")
+async def get_execution_history(
+    project_id: Optional[str] = None,
+    version: Optional[str] = None,
+    limit: Optional[int] = 50
+):
+    """Get execution history from persistent storage"""
+    logger.info(f"Retrieving execution history from storage - project_id: {project_id}, version: {version}, limit: {limit}")
+    
+    try:
+        # If project_id is specified, get executions from that project
+        if project_id:
+            # Get project versions first
+            versions_to_check = []
+            if version:
+                versions_to_check = [version]
+            else:
+                # Get all versions for the project
+                try:
+                    project_versions = await storage_service.get_project_versions(project_id)
+                    versions_to_check = [v.version for v in project_versions]
+                except Exception:
+                    logger.warning(f"Could not get versions for project {project_id}")
+                    versions_to_check = ["1.0.0"]  # Default fallback
+            
+            # Collect executions from all versions and convert to ExecutionHistoryItem format
+            all_executions = []
+            for ver in versions_to_check:
+                try:
+                    version_infos = await storage_service.get_project_versions(project_id)
+                    for version_info in version_infos:
+                        if version_info.version == ver:
+                            # Get detailed execution info for each execution ID
+                            for execution_id in version_info.executions:
+                                try:
+                                    execution_info = await storage_service.get_execution_info(
+                                        project_id, ver, execution_id
+                                    )
+                                    # Convert ExecutionInfo to ExecutionHistoryItem by loading result.json
+                                    history_item = await _convert_execution_info_to_history_item(execution_info)
+                                    if history_item:
+                                        all_executions.append(history_item)
+                                except Exception as e:
+                                    logger.warning(f"Could not get execution info for {project_id}/{ver}/{execution_id}: {e}")
+                            break
+                except Exception as e:
+                    logger.warning(f"Error getting executions for {project_id}/{ver}: {e}")
+            
+            # Sort by timestamp (newest first) and apply limit
+            all_executions.sort(key=lambda x: x.created_at, reverse=True)
+            if limit:
+                all_executions = all_executions[:limit]
+                
+            logger.info(f"Returning {len(all_executions)} execution history items from storage")
+            return {"executions": all_executions}
+        else:
+            # Get all projects and their executions
+            projects = await storage_service.list_projects()
+            all_executions = []
+            
+            for project in projects:
+                # project.versions is List[str], so we need to get VersionInfo for each version
+                for version_str in project.versions:
+                    try:
+                        # Get version info which contains the execution IDs
+                        version_infos = await storage_service.get_project_versions(project.project_id)
+                        for version_info in version_infos:
+                            if version_info.version == version_str:
+                                # Now get detailed execution info for each execution ID
+                                for execution_id in version_info.executions:
+                                    try:
+                                        execution_info = await storage_service.get_execution_info(
+                                            project.project_id, version_str, execution_id
+                                        )
+                                        # Convert ExecutionInfo to ExecutionHistoryItem by loading result.json
+                                        history_item = await _convert_execution_info_to_history_item(execution_info)
+                                        if history_item:
+                                            all_executions.append(history_item)
+                                    except Exception as e:
+                                        logger.warning(f"Could not get execution info for {project.project_id}/{version_str}/{execution_id}: {e}")
+                                break
+                    except Exception as e:
+                        logger.warning(f"Could not get version info for {project.project_id}/{version_str}: {e}")
+            
+            # Sort by timestamp (newest first) and apply limit
+            all_executions.sort(key=lambda x: x.created_at, reverse=True)
+            if limit:
+                all_executions = all_executions[:limit]
+                
+            logger.info(f"Returning {len(all_executions)} execution history items from storage")
+            return {"executions": all_executions}
+            
+    except Exception as e:
+        logger.error(f"Error retrieving execution history: {e}")
+        return {"executions": []}
+
+@app.get("/api/execution-history/{execution_id}")
+async def get_execution_history_item(execution_id: str):
+    """Get a specific execution from persistent storage"""
+    logger.info(f"Retrieving execution history item from storage - ID: {execution_id}")
+    
+    try:
+        # Search through all projects and versions to find the execution
+        projects = await storage_service.list_projects()
+        
+        for project in projects:
+            for version in project.versions:
+                for execution in version.executions:
+                    if execution.execution_id == execution_id:
+                        logger.info(f"Execution history item found - ID: {execution_id}")
+                        return execution
+        
+        # If not found in any project/version
+        logger.warning(f"Execution history item not found in storage - ID: {execution_id}")
+        raise HTTPException(status_code=404, detail="Execution history item not found")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving execution history item - ID: {execution_id}, Error: {e}")
+        raise HTTPException(status_code=500, detail="Error retrieving execution history item")
+
+@app.delete("/api/execution-history/{execution_id}")
+async def delete_execution_history_item(execution_id: str):
+    """Delete an execution from persistent storage"""
+    logger.info(f"Deleting execution history item from storage - ID: {execution_id}")
+    
+    try:
+        # Search through all projects and versions to find and delete the execution
+        projects = await storage_service.list_projects()
+        
+        for project in projects:
+            for version in project.versions:
+                for execution in version.executions:
+                    if execution.execution_id == execution_id:
+                        # Found the execution, delete its artifacts
+                        try:
+                            # Delete all artifact types for this execution
+                            for file_type in ["generate.py", "result.json", "flow.json", "metadata.json"]:
+                                try:
+                                    await storage_service.delete_artifact(
+                                        project.project_id, 
+                                        version.version, 
+                                        execution.execution_id, 
+                                        file_type
+                                    )
+                                except Exception as e:
+                                    logger.warning(f"Could not delete {file_type} for execution {execution_id}: {e}")
+                            
+                            logger.info(f"Deleted execution history item from storage - ID: {execution_id}")
+                            return {"message": "Execution history item deleted successfully"}
+                        except Exception as e:
+                            logger.error(f"Error deleting execution artifacts - ID: {execution_id}, Error: {e}")
+                            raise HTTPException(status_code=500, detail="Error deleting execution artifacts")
+        
+        # If not found in any project/version
+        logger.warning(f"Execution history item not found for deletion - ID: {execution_id}")
+        raise HTTPException(status_code=404, detail="Execution history item not found")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting execution history item - ID: {execution_id}, Error: {e}")
+        raise HTTPException(status_code=500, detail="Error deleting execution history item")
 
 # WebSocket for real-time updates
 @app.websocket("/ws")
@@ -433,6 +792,172 @@ async def notify_execution_complete(execution_id: str, result: ExecutionResult):
     
     for conn in disconnected:
         active_connections.remove(conn)
+
+async def _convert_execution_info_to_history_item(execution_info: ExecutionInfo) -> Optional[ExecutionHistoryItem]:
+    """Convert ExecutionInfo to ExecutionHistoryItem by loading result.json"""
+    try:
+        # Look for result.json artifact
+        result_artifact = None
+        for artifact in execution_info.artifacts:
+            if artifact.file_type == "result.json":
+                result_artifact = artifact
+                break
+        
+        if not result_artifact:
+            logger.warning(f"No result.json found for execution {execution_info.execution_id}")
+            return None
+        
+        # Load the result data from storage
+        try:
+            artifact_content = await storage_service.retrieve_artifact(
+                execution_info.project_id,
+                execution_info.version,
+                execution_info.execution_id,
+                "result.json"
+            )
+            result_data = json.loads(artifact_content.content)
+            
+            # Create ExecutionResult from the loaded data
+            execution_result = ExecutionResult(
+                success=result_data.get("success", False),
+                output=result_data.get("output", ""),
+                error=result_data.get("error"),
+                execution_time=result_data.get("execution_time", 0.0),
+                timestamp=result_data.get("timestamp", execution_info.created_at.isoformat())
+            )
+            
+            # Try to load code from generate.py if available
+            code = None
+            try:
+                code_artifact = await storage_service.retrieve_artifact(
+                    execution_info.project_id,
+                    execution_info.version,
+                    execution_info.execution_id,
+                    "generate.py"
+                )
+                code = code_artifact.content
+            except Exception:
+                pass  # Code is optional
+            
+            # Try to load metadata for input_data if available
+            input_data = None
+            try:
+                metadata_artifact = await storage_service.retrieve_artifact(
+                    execution_info.project_id,
+                    execution_info.version,
+                    execution_info.execution_id,
+                    "metadata.json"
+                )
+                metadata = json.loads(metadata_artifact.content)
+                # input_data might be stored in metadata (legacy) but we don't have it in current structure
+                input_data = metadata.get("input_data")
+            except Exception:
+                pass  # Input data is optional
+            
+            # Create ExecutionHistoryItem
+            return ExecutionHistoryItem(
+                execution_id=execution_info.execution_id,
+                project_id=execution_info.project_id,
+                version=execution_info.version,
+                result=execution_result,
+                code=code,
+                input_data=input_data,
+                created_at=execution_info.created_at.isoformat()
+            )
+            
+        except Exception as e:
+            logger.warning(f"Failed to load result data for execution {execution_info.execution_id}: {e}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Error converting ExecutionInfo to ExecutionHistoryItem: {e}")
+        return None
+
+async def save_to_execution_history(
+    execution_id: str, 
+    result: ExecutionResult, 
+    code: str, 
+    input_data: Optional[str] = None,
+    project_id: Optional[str] = None,
+    version: Optional[str] = None,
+    flow_data: Optional[dict] = None
+):
+    """Save execution result as artifacts to persistent storage"""
+    try:
+        # Use default values if not provided
+        project_id = project_id or "default-project"
+        version = version or "1.0.0"
+        
+        # Create execution timestamp for directory name
+        execution_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+        execution_dir = f"exec-{execution_time}_{execution_id[:8]}"
+        
+        # Save generated code artifact
+        if code:
+            code_request = ArtifactRequest(
+                project_id=project_id,
+                version=version,
+                execution_id=execution_dir,
+                content=code,
+                file_type="generate.py"
+            )
+            await storage_service.save_artifact(code_request)
+            logger.info(f"Saved generate.py artifact - Project: {project_id}, Version: {version}, Execution: {execution_dir}")
+        
+        # Save execution result artifact
+        result_data = {
+            "success": result.success,
+            "output": result.output,
+            "error": result.error,
+            "execution_time": result.execution_time,
+            "timestamp": result.timestamp
+        }
+        result_request = ArtifactRequest(
+            project_id=project_id,
+            version=version,
+            execution_id=execution_dir,
+            content=json.dumps(result_data, indent=2),
+            file_type="result.json"
+        )
+        await storage_service.save_artifact(result_request)
+        logger.info(f"Saved result.json artifact - Project: {project_id}, Version: {version}, Execution: {execution_dir}")
+        
+        # Save metadata artifact
+        metadata = {
+            "execution_id": execution_id,
+            "project_id": project_id,
+            "version": version,
+            "timestamp": datetime.now().isoformat(),
+            "has_input_data": input_data is not None,
+            "code_length": len(code) if code else 0,
+            "success": result.success
+        }
+        metadata_request = ArtifactRequest(
+            project_id=project_id,
+            version=version,
+            execution_id=execution_dir,
+            content=json.dumps(metadata, indent=2),
+            file_type="metadata.json"
+        )
+        await storage_service.save_artifact(metadata_request)
+        logger.info(f"Saved metadata.json artifact - Project: {project_id}, Version: {version}, Execution: {execution_dir}")
+        
+        # Save flow data if available
+        if flow_data is None:
+            flow_data = {"nodes": [], "edges": [], "note": "Flow data not provided by frontend"}
+        flow_request = ArtifactRequest(
+            project_id=project_id,
+            version=version,
+            execution_id=execution_dir,
+            content=json.dumps(flow_data, indent=2),
+            file_type="flow.json"
+        )
+        await storage_service.save_artifact(flow_request)
+        logger.info(f"Saved flow.json artifact - Project: {project_id}, Version: {version}, Execution: {execution_dir}")
+        
+        logger.info(f"Successfully saved all execution artifacts - ID: {execution_id}")
+    except Exception as e:
+        logger.error(f"Failed to save execution artifacts - ID: {execution_id}, Error: {e}")
 
 async def execute_strands_code(code: str, input_data: Optional[str] = None) -> str:
     """Execute Python code with Strands Agent SDK integration"""
@@ -517,7 +1042,17 @@ async def execute_strands_code(code: str, input_data: Optional[str] = None) -> s
             # If there's a main function, call it
             if 'main' in locals_dict and callable(locals_dict['main']):
                 logger.info("Calling main function")
-                result = locals_dict['main']()
+                import inspect
+                import asyncio
+                
+                # Check if main function is async
+                if inspect.iscoroutinefunction(locals_dict['main']):
+                    logger.info("Main function is async, awaiting result")
+                    result = await locals_dict['main']()
+                else:
+                    logger.info("Main function is sync, calling directly")
+                    result = locals_dict['main']()
+                
                 if result is not None:
                     logger.info(f"Main function returned: {type(result).__name__}")
                     print(f"Main function result: {result}")
@@ -539,6 +1074,140 @@ async def execute_strands_code(code: str, input_data: Optional[str] = None) -> s
     except Exception as e:
         logger.error(f"Code execution exception: {e}")
         raise e
+
+# Storage API Endpoints
+@app.post("/api/storage/artifacts", response_model=ArtifactResponse)
+async def save_artifact(request: ArtifactRequest):
+    """Save an artifact to storage"""
+    logger.info(f"Saving artifact: {request.project_id}/{request.version}/{request.execution_id}/{request.file_type}")
+    try:
+        result = await storage_service.save_artifact(request)
+        if result.success:
+            logger.info(f"Artifact saved successfully: {result.file_path}")
+        else:
+            logger.error(f"Failed to save artifact: {result.message}")
+        return result
+    except Exception as e:
+        logger.error(f"Error in save_artifact endpoint: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/storage/artifacts/{project_id}/{version}/{execution_id}/{file_type}", response_model=ArtifactContent)
+async def retrieve_artifact(project_id: str, version: str, execution_id: str, file_type: str):
+    """Retrieve an artifact from storage"""
+    logger.info(f"Retrieving artifact: {project_id}/{version}/{execution_id}/{file_type}")
+    try:
+        result = await storage_service.retrieve_artifact(project_id, version, execution_id, file_type)
+        logger.info(f"Artifact retrieved successfully")
+        return result
+    except Exception as e:
+        logger.error(f"Error in retrieve_artifact endpoint: {e}")
+        raise
+
+@app.get("/api/storage/artifacts/{project_id}/{version}/{execution_id}/{file_type}/download")
+async def download_artifact(project_id: str, version: str, execution_id: str, file_type: str):
+    """Download an artifact file directly"""
+    logger.info(f"Downloading artifact: {project_id}/{version}/{execution_id}/{file_type}")
+    try:
+        # Use the storage service to get the file path
+        storage_path = storage_service.base_dir
+        from app.utils.path_utils import build_storage_path, get_file_extension
+        
+        artifact_path = build_storage_path(storage_path, project_id, version, execution_id)
+        file_name = file_type
+        if not file_name.endswith(get_file_extension(file_type)):
+            file_name += get_file_extension(file_type)
+        
+        file_path = artifact_path / file_name
+        
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="Artifact not found")
+        
+        # Determine content type based on file extension
+        content_type_map = {
+            '.py': 'text/x-python',
+            '.json': 'application/json',
+            '.txt': 'text/plain'
+        }
+        
+        extension = get_file_extension(file_type)
+        content_type = content_type_map.get(extension, 'text/plain')
+        
+        logger.info(f"Serving file: {file_path}")
+        return FileResponse(
+            path=str(file_path),
+            filename=file_name,
+            media_type=content_type
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in download_artifact endpoint: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/storage/artifacts/{project_id}/{version}/{execution_id}/{file_type}")
+async def delete_artifact(project_id: str, version: str, execution_id: str, file_type: str):
+    """Delete an artifact from storage"""
+    logger.info(f"Deleting artifact: {project_id}/{version}/{execution_id}/{file_type}")
+    try:
+        success = await storage_service.delete_artifact(project_id, version, execution_id, file_type)
+        if success:
+            logger.info(f"Artifact deleted successfully")
+            return {"message": "Artifact deleted successfully"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to delete artifact")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in delete_artifact endpoint: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/storage/projects", response_model=List[ProjectInfo])
+async def list_projects():
+    """List all projects in storage"""
+    logger.info("Listing all projects")
+    try:
+        projects = await storage_service.list_projects()
+        logger.info(f"Found {len(projects)} projects")
+        return projects
+    except Exception as e:
+        logger.error(f"Error in list_projects endpoint: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/storage/projects/{project_id}/versions", response_model=List[VersionInfo])
+async def get_project_versions(project_id: str):
+    """Get all versions for a project"""
+    logger.info(f"Getting versions for project: {project_id}")
+    try:
+        versions = await storage_service.get_project_versions(project_id)
+        logger.info(f"Found {len(versions)} versions for project {project_id}")
+        return versions
+    except Exception as e:
+        logger.error(f"Error in get_project_versions endpoint: {e}")
+        raise
+
+@app.get("/api/storage/projects/{project_id}/versions/{version}/executions/{execution_id}", response_model=ExecutionInfo)
+async def get_execution_info(project_id: str, version: str, execution_id: str):
+    """Get information about a specific execution"""
+    logger.info(f"Getting execution info: {project_id}/{version}/{execution_id}")
+    try:
+        execution_info = await storage_service.get_execution_info(project_id, version, execution_id)
+        logger.info(f"Found {len(execution_info.artifacts)} artifacts for execution {execution_id}")
+        return execution_info
+    except Exception as e:
+        logger.error(f"Error in get_execution_info endpoint: {e}")
+        raise
+
+@app.get("/api/storage/stats", response_model=StorageStats)
+async def get_storage_stats():
+    """Get storage system statistics"""
+    logger.info("Getting storage statistics")
+    try:
+        stats = await storage_service.get_storage_stats()
+        logger.info(f"Storage stats: {stats.total_projects} projects, {stats.total_artifacts} artifacts")
+        return stats
+    except Exception as e:
+        logger.error(f"Error in get_storage_stats endpoint: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     logger.info("Starting Strands UI Backend Server")

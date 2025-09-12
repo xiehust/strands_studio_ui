@@ -11,16 +11,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `npm run preview` - Preview production build
 
 ### Backend (FastAPI + Python)
-- `npm run backend:dev` - Start backend development server (uses venv)
+- `npm run backend:dev` - Start backend development server (uses uv)
 - `npm run backend:install` - Install backend dependencies
 - `npm run setup:backend` - Create virtual environment and install dependencies
 - `npm run dev:full` - Run both frontend and backend concurrently
 
 ### Backend Direct Commands
-- `cd backend && ./venv/bin/python main.py` - Start backend server directly
-- `cd backend && ./venv/bin/pip install -r requirements.txt` - Install backend deps directly
+- `cd backend && uv run main.py` - Start backend server directly
+- `cd backend && uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload` - Start with uvicorn directly
+- `cd backend && uv pip install -r requirements.txt` - Install backend deps directly
 
 ## Architecture Overview
+
+This is a **visual agent flow builder** that allows users to create, configure, and execute AI agent workflows through a drag-and-drop interface. The application generates Python code using the Strands Agent SDK and executes it with both regular and streaming capabilities.
+
+### Core Functionality
+- **Visual Flow Editor**: Drag-and-drop interface for building agent workflows using XYFlow/React
+- **Code Generation**: Automatically generates Python code from visual flows using the Strands Agent SDK
+- **Agent Execution**: Supports both regular and streaming execution of generated agent code
+- **Project Management**: Save, load, and manage multiple agent projects with persistent storage
+- **Execution History**: Track and replay previous agent executions with artifact storage
 
 ### Frontend Stack
 - **React 19** with TypeScript
@@ -32,31 +42,61 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Lucide React** for icons
 
 ### Backend Stack
-- **FastAPI** web framework
+- **FastAPI** web framework with streaming support
 - **Uvicorn** ASGI server
 - **Pydantic** for data validation
-- **WebSockets** support
-- **Custom strands-agents packages** (strands-agents, strands-agents-tools)
+- **WebSockets** for real-time execution updates
+- **File-based storage system** for projects and execution artifacts
+- **strands-agents** and **strands-agents-tools** packages for AI agent functionality
+
+### Key Application Components
+
+#### Node Types
+- **Agent Node**: Core AI agent with configurable LLM (AWS Bedrock Claude models)
+- **Orchestrator Agent Node**: Coordinates multiple sub-agents
+- **Input Node**: Provides user input or data to agents
+- **Output Node**: Displays agent results
+- **Tool Nodes**: Built-in tools (calculator, file_read, shell, current_time)
+- **Custom Tool Node**: User-defined Python functions with @tool decorator
+- **MCP Tool Node**: Model Context Protocol tool integration
+
+#### Core Panels
+- **Flow Editor**: Main visual canvas for building agent workflows
+- **Property Panel**: Configure selected node properties (model, prompts, streaming, etc.)
+- **Code Panel**: Generated Python code with Monaco editor
+- **Execution Panel**: Execute agents with real-time output and execution history
+- **Node Palette**: Drag-and-drop node library
+- **Project Manager**: Save/load projects with localStorage persistence
+
+#### Backend Architecture
+- **Execution Endpoints**: `/api/execute` (regular) and `/api/execute/stream` (streaming)
+- **Storage System**: File-based artifact storage in `backend/storage/` directory
+- **Project Structure**: `storage/{project_id}/{version}/{execution_id}/` with artifacts:
+  - `generate.py` - Generated agent code
+  - `result.json` - Execution results
+  - `flow.json` - Visual flow configuration
+  - `metadata.json` - Execution metadata
 
 ### Project Structure
-- `/src` - React frontend source code
-  - `/components` - Custom React components (BaseNode, NodeTooltip)
-  - `/lib` - Utility functions (uses shadcn/ui utils pattern)
-- `/backend` - Python FastAPI backend
-  - Uses Python virtual environment in `backend/venv/`
-  - Configuration via `.env` (see `.env.example`)
-- `/public` - Static assets
-- `/dist` - Production build output
-
-### Key Components
-The application appears to be focused on node-based UI interactions:
-- **BaseNode** - Core node component with header, content, and footer sections
-- **NodeTooltip** - Tooltip system for nodes with positioning support
-- **ReactFlow integration** - Node-based visual interface
+- `/src/components/` - React components organized by functionality
+  - `/nodes/` - Node type implementations (agent, tool, input, output)
+  - `flow-editor.tsx` - Main XYFlow canvas
+  - `execution-panel.tsx` - Agent execution interface
+  - `code-panel.tsx` - Code generation and editing
+  - `property-panel.tsx` - Node configuration
+- `/src/lib/` - Utility functions and core logic
+  - `code-generator.ts` - Converts visual flows to Python code
+  - `api-client.ts` - Backend communication and WebSocket handling
+  - `validation.ts` - Data validation utilities
+- `/backend/` - Python FastAPI server
+  - `main.py` - FastAPI application with execution endpoints
+  - `/app/models/` - Pydantic data models
+  - `/app/services/` - Storage and business logic services
+  - `/storage/` - File-based artifact storage (generated at runtime)
 
 ### Configuration Files
 - `vite.config.ts` - Vite configuration with React and Tailwind plugins
-- `components.json` - shadcn/ui configuration
+- `components.json` - shadcn/ui configuration (New York style)
 - `eslint.config.js` - ESLint with TypeScript and React plugins
 - `tailwind.config.js` - Tailwind CSS configuration
 - `tsconfig.json` - TypeScript configuration with path aliases (@/ -> ./src)
@@ -65,10 +105,26 @@ The application appears to be focused on node-based UI interactions:
 - Uses path alias `@/` for src directory imports
 - Backend expects CORS origins on localhost:3000 and localhost:5173
 - No test framework is currently configured
-- Backend uses custom strands-agents packages (external dependencies)
+- Backend managed by **uv** (not pip/venv directly)
+- Frontend uses localStorage for project persistence
+- Backend uses file-based storage for execution artifacts
+- Supports both sync and streaming agent execution
+- Agent streaming requires enabling "Enable Streaming" checkbox in property panel
 
+### Important Implementation Details
+- **Streaming Detection**: Frontend detects streaming by checking for `yield` statements in generated code OR agents with `streaming: true` property
+- **Code Generation**: Generates different code paths for regular vs streaming execution
+- **State Management**: Uses React state with WebSocket updates for real-time execution status
+- **Execution Flow**: Visual nodes → Code generation → Backend execution → Results display
+- **Error Handling**: Comprehensive error handling for validation, execution, and storage operations
 
 ### rules
 1. Always use context7 when I need code generation, setup or configuration steps, or library/API documentation. This means you should automatically use the Context7 MCP tools to resolve library id and get library docs without me having to explicitly ask.
 
-2. The python virtual env is managemend by uv, use `uv run` instead of using `python` directly 
+2. The python virtual env is managed by uv, use `uv run` instead of using `python` directly 
+
+# important-instruction-reminders
+Do what has been asked; nothing more, nothing less.
+NEVER create files unless they're absolutely necessary for achieving your goal.
+ALWAYS prefer editing an existing file to creating a new one.
+NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.

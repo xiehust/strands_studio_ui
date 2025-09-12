@@ -43,7 +43,7 @@ const getTransportLabel = (transportType: string) => {
 
 export function MCPToolNode({ data, selected, id }: NodeProps) {
   const { deleteElements } = useReactFlow();
-  const nodeData = data as MCPToolNodeData || {};
+  const nodeData = (data as unknown as MCPToolNodeData) || {};
   const { 
     label = 'MCP Server',
     serverName = 'mcp_server',
