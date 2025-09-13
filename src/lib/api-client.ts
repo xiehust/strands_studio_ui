@@ -263,9 +263,11 @@ class ApiClient {
               // Store error message but don't return immediately - wait for completion signal with timing
               errorMessage = chunk.substring(7); // Remove 'Error: ' prefix
             } else {
-              console.log('API client streaming chunk:', chunk);
-              accumulatedOutput += chunk;
-              onChunk(chunk);
+              console.log('API client streaming chunk:', JSON.stringify(chunk));
+              // Handle empty chunks as newlines (they represent \n characters from the LLM)
+              const processedChunk = chunk === '' ? '\n' : chunk;
+              accumulatedOutput += processedChunk;
+              onChunk(processedChunk);
             }
           }
         }

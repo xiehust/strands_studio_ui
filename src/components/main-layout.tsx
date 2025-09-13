@@ -11,6 +11,35 @@ import { ResizablePanel } from './resizable-panel';
 import { type StrandsProject, ProjectManager } from '../lib/project-manager';
 import { generateStrandsAgentCode } from '../lib/code-generator';
 
+// Auto-save key for localStorage
+const AUTOSAVE_FLOW_KEY = 'strands_autosave_flow';
+
+// Helper functions for auto-save
+const saveFlowToAutoSave = (nodes: Node[], edges: Edge[]) => {
+  try {
+    const flowData = { nodes, edges, timestamp: Date.now() };
+    localStorage.setItem(AUTOSAVE_FLOW_KEY, JSON.stringify(flowData));
+  } catch (error) {
+    console.error('Failed to auto-save flow:', error);
+  }
+};
+
+const loadFlowFromAutoSave = (): { nodes: Node[], edges: Edge[] } | null => {
+  try {
+    const stored = localStorage.getItem(AUTOSAVE_FLOW_KEY);
+    if (!stored) return null;
+    const flowData = JSON.parse(stored);
+    return { nodes: flowData.nodes || [], edges: flowData.edges || [] };
+  } catch (error) {
+    console.error('Failed to load auto-saved flow:', error);
+    return null;
+  }
+};
+
+const clearAutoSavedFlow = () => {
+  localStorage.removeItem(AUTOSAVE_FLOW_KEY);
+};
+
 export function MainLayout() {
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [nodes, setNodes] = useState<Node[]>([]);
@@ -23,10 +52,23 @@ export function MainLayout() {
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectDescription, setNewProjectDescription] = useState('');
 
-  // Load current project on mount
+  // Load current project on mount, or load auto-saved flow if no project
   useEffect(() => {
     const current = ProjectManager.getCurrentProject();
-    setCurrentProject(current);
+    if (current) {
+      setCurrentProject(current);
+      setNodes(current.nodes);
+      setEdges(current.edges);
+      // Clear auto-save since we have a project loaded
+      clearAutoSavedFlow();
+    } else {
+      // No current project, try to load auto-saved flow
+      const autoSaved = loadFlowFromAutoSave();
+      if (autoSaved) {
+        setNodes(autoSaved.nodes);
+        setEdges(autoSaved.edges);
+      }
+    }
   }, []);
 
   // Keep selectedNode synchronized with nodes array
@@ -38,6 +80,18 @@ export function MainLayout() {
       }
     }
   }, [nodes, selectedNode]);
+
+  // Auto-save flow when nodes or edges change (only if no current project)
+  useEffect(() => {
+    if (!currentProject && (nodes.length > 0 || edges.length > 0)) {
+      // Debounce the auto-save to avoid too frequent localStorage writes
+      const timer = setTimeout(() => {
+        saveFlowToAutoSave(nodes, edges);
+      }, 500);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [nodes, edges, currentProject]);
 
   // Listen for switch to execution panel event
   useEffect(() => {
@@ -99,6 +153,8 @@ export function MainLayout() {
     setNodes(project.nodes);
     setEdges(project.edges);
     setCurrentProject(project);
+    // Clear auto-save since we now have a project loaded
+    clearAutoSavedFlow();
   }, []);
 
   // Project management functions
@@ -136,6 +192,8 @@ export function MainLayout() {
     setNewProjectName('');
     setNewProjectDescription('');
     setShowNewProjectDialog(false);
+    // Clear auto-save since we now have a saved project
+    clearAutoSavedFlow();
   }, [newProjectName, newProjectDescription, nodes, edges]);
 
   const handleNewProject = useCallback(() => {
@@ -177,6 +235,8 @@ export function MainLayout() {
         setCurrentProject(imported);
         setNodes(imported.nodes);
         setEdges(imported.edges);
+        // Clear auto-save since we now have an imported project
+        clearAutoSavedFlow();
         alert('Project imported successfully!');
       } else {
         alert('Failed to import project. Please check the file format.');

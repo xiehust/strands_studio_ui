@@ -3,11 +3,9 @@ import {
   ArrowLeft, 
   Download, 
   FileText, 
-  Clock, 
   CheckCircle, 
   XCircle, 
   Copy,
-  ExternalLink,
   Code,
   Database,
   Settings

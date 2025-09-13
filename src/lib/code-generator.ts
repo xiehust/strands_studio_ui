@@ -16,7 +16,7 @@ export function generateStrandsAgentCode(
     'from strands_tools import calculator, file_read, shell, current_time',
     'import json',
     'import os',
-    'import asyncio',
+    'import asyncio'
   ]);
   
   // Check if MCP tools are used
@@ -117,18 +117,15 @@ export function generateStrandsAgentCode(
     }
 
     // Generate code for each regular agent (non-connected ones)
-    // Skip individual agent generation only if we have MCP tools AND no orchestrators
-    // If we have orchestrators, we always need individual agents for the agent-as-tool pattern
-    if (!hasMCPTools || orchestratorNodes.length > 0) {
-      const unconnectedAgents = orchestratorNodes.length > 0 
-        ? agentNodes.filter(agent => !isAgentConnectedToOrchestrator(agent, orchestratorNodes, edges))
-        : agentNodes;
-        
-      unconnectedAgents.forEach((agentNode, index) => {
-        const agentCode = generateAgentCode(agentNode, nodes, edges, index);
-        code += agentCode + '\n\n';
-      });
-    }
+    // Always generate individual agents unless they are connected to orchestrators as sub-agents
+    const unconnectedAgents = orchestratorNodes.length > 0 
+      ? agentNodes.filter(agent => !isAgentConnectedToOrchestrator(agent, orchestratorNodes, edges))
+      : agentNodes;
+      
+    unconnectedAgents.forEach((agentNode, index) => {
+      const agentCode = generateAgentCode(agentNode, nodes, edges, index);
+      code += agentCode + '\n\n';
+    });
 
     // Generate orchestrator agent code
     orchestratorNodes.forEach((orchestratorNode, index) => {
@@ -567,7 +564,6 @@ ${baseIndent}print("Starting streaming response...")
 ${baseIndent}async for event in ${agentName}.stream_async(user_input):
 ${baseIndent}    if "data" in event:
 ${baseIndent}        print(event['data'],end='',flush=True)
-${baseIndent}        yield event["data"]
 
 if __name__ == "__main__":
     asyncio.run(main())`;

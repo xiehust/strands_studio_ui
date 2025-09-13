@@ -494,17 +494,74 @@ async def execute_code_stream(request: ExecutionRequest):
                                 logger.error(f"Fallback execution also failed - ID: {execution_id}: {fallback_error}")
                                 yield f"Error: {str(fallback_error)}"
                     else:
-                        # Regular async function without streaming
-                        logger.info(f"Regular async function, executing once - ID: {execution_id}")
-                        result = await main_func()
-                        if result is not None:
-                            # Check if the result is an async generator
-                            if inspect.isasyncgen(result):
-                                async for chunk in result:
-                                    if chunk is not None:
-                                        yield chunk
-                            else:
-                                yield str(result)
+                        # Regular async function - check if it's a streaming agent by looking for stream_async in code
+                        if 'stream_async' in request.code:
+                            logger.info(f"Detected streaming agent code, setting up real-time print capture - ID: {execution_id}")
+                            
+                            # Create an async queue to capture print output in real-time
+                            import asyncio
+                            output_queue = asyncio.Queue()
+                            execution_done = asyncio.Event()
+                            original_print = print
+                            
+                            def streaming_print(*args, **kwargs):
+                                # Call original print to maintain console output
+                                original_print(*args, **kwargs)
+                                # Capture the output for streaming
+                                if args:
+                                    output = ' '.join(str(arg) for arg in args)
+                                    # Check if this looks like streaming data (not debug messages)
+                                    if output and output != "Starting streaming response...":
+                                        # Put the output in the queue (non-blocking)
+                                        try:
+                                            output_queue.put_nowait(output)
+                                        except asyncio.QueueFull:
+                                            pass  # Skip if queue is full
+                            
+                            # Replace print function in globals for the main function
+                            globals_dict['print'] = streaming_print
+                            
+                            # Run the main function in a separate task
+                            async def run_main():
+                                try:
+                                    result = await main_func()
+                                    if result is not None:
+                                        output_queue.put_nowait(str(result))
+                                except Exception as e:
+                                    output_queue.put_nowait(f"Error: {str(e)}")
+                                finally:
+                                    execution_done.set()
+                            
+                            # Start the main function
+                            main_task = asyncio.create_task(run_main())
+                            
+                            # Stream output as it becomes available
+                            while not execution_done.is_set() or not output_queue.empty():
+                                try:
+                                    # Wait for output with a timeout
+                                    output = await asyncio.wait_for(output_queue.get(), timeout=0.1)
+                                    if output:
+                                        yield output
+                                except asyncio.TimeoutError:
+                                    # Check if execution is done
+                                    if execution_done.is_set():
+                                        break
+                                    continue
+                            
+                            # Wait for the main task to complete
+                            await main_task
+                        else:
+                            # Regular async function without streaming
+                            logger.info(f"Regular async function, executing once - ID: {execution_id}")
+                            result = await main_func()
+                            if result is not None:
+                                # Check if the result is an async generator
+                                if inspect.isasyncgen(result):
+                                    async for chunk in result:
+                                        if chunk is not None:
+                                            yield chunk
+                                else:
+                                    yield str(result)
                     
                 except Exception as e:
                     logger.error(f"Error in stream_main - ID: {execution_id}: {e}")

@@ -34,7 +34,6 @@ const setStoredInputData = (data: string): void => {
 export function ExecutionPanel({ 
   code, 
   className = '', 
-  projectId = 'default-project',
   projectName = 'Untitled Project',
   projectVersion = '1.0.0',
   flowData
@@ -271,12 +270,12 @@ export function ExecutionPanel({
       node.data?.streaming === true
     ) || false;
     
-    console.log('Streaming detection:', { 
-      hasYield, 
-      hasStreamingComment, 
-      hasStreamingAgent, 
-      flowDataNodesCount: flowData?.nodes?.length || 0 
-    });
+    // console.log('Streaming detection:', { 
+    //   hasYield, 
+    //   hasStreamingComment, 
+    //   hasStreamingAgent, 
+    //   flowDataNodesCount: flowData?.nodes?.length || 0 
+    // });
     
     return hasYield || hasStreamingComment || hasStreamingAgent;
   }, [code, flowData]);
@@ -346,7 +345,7 @@ export function ExecutionPanel({
           request,
           (chunk: string) => {
             // Handle streaming chunk
-            // console.log('Received streaming chunk:', chunk);
+            console.log('Chunk:', JSON.stringify(chunk), 'Has \\n:', chunk.includes('\n'));
             setStreamingOutput(prev => prev + chunk);
           },
           (finalOutput: string, backendExecutionTime?: number) => {

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Clock, CheckCircle, XCircle, Search, Filter, FileText, Download, Eye } from 'lucide-react';
+import { Clock, CheckCircle, XCircle, Search, Filter, FileText, Eye } from 'lucide-react';
 import { 
   apiClient, 
   type ExecutionInfo, 
@@ -7,7 +7,6 @@ import {
   type VersionInfo,
   formatTimeAgo, 
   formatFileSize, 
-  formatDateTime,
   getFileTypeIcon 
 } from '../lib/api-client';
 

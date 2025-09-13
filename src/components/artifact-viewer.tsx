@@ -6,7 +6,6 @@ import {
   Code, 
   Database, 
   Settings,
-  ExternalLink,
   Loader,
   XCircle,
   CheckCircle
@@ -15,8 +14,7 @@ import {
   apiClient, 
   type ArtifactContent,
   type StorageMetadata,
-  formatFileSize,
-  getFileTypeIcon 
+  formatFileSize
 } from '../lib/api-client';
 
 interface ArtifactViewerProps {
