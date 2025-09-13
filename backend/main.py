@@ -150,6 +150,8 @@ class ExecutionRequest(BaseModel):
     project_id: Optional[str] = "default-project"
     version: Optional[str] = "1.0.0"
     flow_data: Optional[dict] = None
+    # API Keys for secure environment variable handling
+    openai_api_key: Optional[str] = None
 
 class ExecutionResult(BaseModel):
     success: bool
@@ -265,7 +267,7 @@ async def execute_code(request: ExecutionRequest):
     try:
         # Create execution environment
         logger.info(f"Executing Strands code - ID: {execution_id}")
-        execution_result = await execute_strands_code(request.code, request.input_data)
+        execution_result = await execute_strands_code(request.code, request.input_data, request.openai_api_key)
         
         end_time = datetime.now()
         execution_time = (end_time - start_time).total_seconds()
@@ -329,11 +331,26 @@ async def execute_code_stream(request: ExecutionRequest):
         try:
             logger.info(f"Setting up streaming environment - ID: {execution_id}")
             
+            # Set API keys as environment variables for security
+            if request.openai_api_key:
+                os.environ["OPENAI_API_KEY"] = request.openai_api_key
+                logger.info("OpenAI API key set in environment for streaming")
+            
             # Import Strands Agent SDK
             logger.info("Importing Strands Agent SDK for streaming")
             from strands import Agent, tool
             from strands.models import BedrockModel
             from strands_tools import calculator, file_read, shell, current_time
+            
+            # Import OpenAI model if needed
+            openai_imports = {}
+            if 'OpenAIModel' in request.code:
+                logger.info("OpenAI model detected in streaming code, importing OpenAI dependencies")
+                try:
+                    from strands.models.openai import OpenAIModel
+                    openai_imports['OpenAIModel'] = OpenAIModel
+                except ImportError as e:
+                    logger.warning(f"OpenAI model not available: {e}")
             
             # Import MCP dependencies if needed
             mcp_imports = {}
@@ -374,9 +391,11 @@ async def execute_code_stream(request: ExecutionRequest):
                 'len': len,
                 'range': range,
                 'json': json,
+                'os': os,  # Add os module for environment variables
                 'asyncio': asyncio,
                 'input_data': request.input_data,  # Make input data available to executed code
                 **mcp_imports,  # Add MCP imports if available
+                **openai_imports,  # Add OpenAI imports if available
             }
             
             locals_dict = {}
@@ -959,17 +978,32 @@ async def save_to_execution_history(
     except Exception as e:
         logger.error(f"Failed to save execution artifacts - ID: {execution_id}, Error: {e}")
 
-async def execute_strands_code(code: str, input_data: Optional[str] = None) -> str:
+async def execute_strands_code(code: str, input_data: Optional[str] = None, openai_api_key: Optional[str] = None) -> str:
     """Execute Python code with Strands Agent SDK integration"""
     logger.info("Starting execute_strands_code function")
     logger.debug(f"Code length: {len(code)} characters")
     
     try:
+        # Set API keys as environment variables for security
+        if openai_api_key:
+            os.environ["OPENAI_API_KEY"] = openai_api_key
+            logger.info("OpenAI API key set in environment")
+        
         # Import Strands Agent SDK
         logger.info("Importing Strands Agent SDK")
         from strands import Agent, tool
         from strands.models import BedrockModel
         from strands_tools import calculator, file_read, shell, current_time
+        
+        # Import OpenAI model if needed
+        openai_imports = {}
+        if 'OpenAIModel' in code:
+            logger.info("OpenAI model detected in code, importing OpenAI dependencies")
+            try:
+                from strands.models.openai import OpenAIModel
+                openai_imports['OpenAIModel'] = OpenAIModel
+            except ImportError as e:
+                logger.warning(f"OpenAI model not available: {e}")
         
         # Import MCP dependencies if needed
         mcp_imports = {}
@@ -1011,8 +1045,10 @@ async def execute_strands_code(code: str, input_data: Optional[str] = None) -> s
             'len': len,
             'range': range,
             'json': json,
+            'os': os,  # Add os module for environment variables
             'input_data': input_data,  # Make input data available to executed code
             **mcp_imports,  # Add MCP imports if available
+            **openai_imports,  # Add OpenAI imports if available
         }
         
         locals_dict = {}
@@ -1055,7 +1091,7 @@ async def execute_strands_code(code: str, input_data: Optional[str] = None) -> s
                 
                 if result is not None:
                     logger.info(f"Main function returned: {type(result).__name__}")
-                    print(f"Main function result: {result}")
+                    logger.info(f"Main function result: {result}")
         
         finally:
             sys.stdout = old_stdout

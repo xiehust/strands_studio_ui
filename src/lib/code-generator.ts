@@ -15,6 +15,7 @@ export function generateStrandsAgentCode(
     'from strands.models import BedrockModel',
     'from strands_tools import calculator, file_read, shell, current_time',
     'import json',
+    'import os',
     'import asyncio',
   ]);
   
@@ -36,6 +37,13 @@ export function generateStrandsAgentCode(
     const orchestratorNodes = nodes.filter(node => node.type === 'orchestrator-agent');
     const inputNodes = nodes.filter(node => node.type === 'input');
     const outputNodes = nodes.filter(node => node.type === 'output');
+    
+    // Check if any agents use OpenAI and add the import
+    const allAgentNodes = [...agentNodes, ...orchestratorNodes];
+    const hasOpenAIProvider = allAgentNodes.some(node => node.data?.modelProvider === 'OpenAI');
+    if (hasOpenAIProvider) {
+      imports.add('from strands.models.openai import OpenAIModel');
+    }
     
     // Validate mandatory nodes
     if (agentNodes.length === 0 && orchestratorNodes.length === 0) {
@@ -150,6 +158,7 @@ function generateAgentCode(
     systemPrompt = 'You are a helpful AI assistant.',
     temperature = 0.7,
     maxTokens = 4000,
+    baseUrl = '',
   } = data;
 
   // Use modelId for Bedrock, modelName for others
@@ -167,12 +176,11 @@ function generateAgentCode(
   // System prompt comes from agent property panel only (no input connections)
   const systemPromptValue = systemPrompt;
 
+  // Generate model configuration based on provider
+  const modelConfig = generateModelConfigForCode(agentVarName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string);
+
   return `# ${label} Configuration
-${agentVarName}_model = BedrockModel(
-    model_id="${modelIdentifier}",
-    temperature=${temperature},
-    max_tokens=${maxTokens}
-)
+${modelConfig}
 
 ${agentVarName} = Agent(
     model=${agentVarName}_model,
@@ -635,6 +643,7 @@ function generateAgentAsToolCode(
     systemPrompt = 'You are a helpful AI assistant.',
     temperature = 0.7,
     maxTokens = 4000,
+    baseUrl = '',
   } = data;
 
   const modelIdentifier = modelProvider === 'AWS Bedrock' ? modelId : modelName;
@@ -672,11 +681,7 @@ def ${functionName}(user_input: str) -> str:
         ${mcpClientVars.map(clientVar => `mcp_tools.extend(${clientVar}.list_tools_sync())`).join('\n        ')}
         
         # Create model for ${label}
-        ${functionName}_model = BedrockModel(
-            model_id="${modelIdentifier}",
-            temperature=${temperature},
-            max_tokens=${maxTokens}
-        )
+        ${generateModelConfigForTool(functionName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string)}
         
         # Create agent with MCP tools
         agent = Agent(
@@ -699,11 +704,7 @@ def ${functionName}(user_input: str) -> str:
     """${label} - ${(systemPrompt as string).substring(0, 100)}${(systemPrompt as string).length > 100 ? '...' : ''}"""
     
     # Create model for ${label}
-    ${functionName}_model = BedrockModel(
-        model_id="${modelIdentifier}",
-        temperature=${temperature},
-        max_tokens=${maxTokens}
-    )
+    ${generateModelConfigForTool(functionName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string)}
     
     # Create agent
     agent = Agent(
@@ -733,6 +734,7 @@ function generateOrchestratorCode(
     temperature = 0.7,
     maxTokens = 4000,
     coordinationPrompt = '',
+    baseUrl = '',
   } = data;
 
   const modelIdentifier = modelProvider === 'AWS Bedrock' ? modelId : modelName;
@@ -788,27 +790,91 @@ function generateOrchestratorCode(
 
   if (hasMCPTools) {
     // When MCP tools are present, only define the model - agent creation happens in main()
+    const modelConfig = generateModelConfigForCode(orchestratorName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string);
     return `# ${label} Configuration
-${orchestratorName}_model = BedrockModel(
-    model_id="${modelIdentifier}",
-    temperature=${temperature},
-    max_tokens=${maxTokens}
-)
+${modelConfig}
 
 # ${orchestratorName} will be created in main() with MCP tools`;
   } else {
     // Regular orchestrator without MCP tools
+    const modelConfig = generateModelConfigForCode(orchestratorName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string);
     return `# ${label} Configuration
-${orchestratorName}_model = BedrockModel(
-    model_id="${modelIdentifier}",
-    temperature=${temperature},
-    max_tokens=${maxTokens}
-)
+${modelConfig}
 
 ${orchestratorName} = Agent(
     model=${orchestratorName}_model,
     system_prompt="""${fullSystemPrompt}"""${toolsCode}
 )`;
+  }
+}
+
+function generateModelConfigForCode(
+  varName: string,
+  modelProvider: string,
+  modelIdentifier: string,
+  temperature: number,
+  maxTokens: number,
+  baseUrl: string
+): string {
+  if (modelProvider === 'OpenAI') {
+    const clientArgs = [];
+    // Always use environment variable for API key for security - never hardcode
+    clientArgs.push(`"api_key": os.environ.get("OPENAI_API_KEY")`);
+    if (baseUrl) {
+      clientArgs.push(`"base_url": "${baseUrl}"`);
+    }
+    
+    const clientArgsStr = `\n    client_args={\n        ${clientArgs.join(',\n        ')}\n    },`;
+    
+    return `${varName}_model = OpenAIModel(${clientArgsStr}
+    model_id="${modelIdentifier}",
+    params={
+        "max_tokens": ${maxTokens},
+        "temperature": ${temperature},
+    }
+)`;
+  } else {
+    // Default to Bedrock
+    return `${varName}_model = BedrockModel(
+    model_id="${modelIdentifier}",
+    temperature=${temperature},
+    max_tokens=${maxTokens}
+)`;
+  }
+}
+
+function generateModelConfigForTool(
+  varName: string,
+  modelProvider: string,
+  modelIdentifier: string,
+  temperature: number,
+  maxTokens: number,
+  baseUrl: string
+): string {
+  if (modelProvider === 'OpenAI') {
+    const clientArgs = [];
+    // Always use environment variable for API key for security - never hardcode
+    clientArgs.push(`\"api_key\": os.environ.get(\"OPENAI_API_KEY\")`);
+    if (baseUrl) {
+      clientArgs.push(`\"base_url\": \"${baseUrl}\"`);
+    }
+    
+    const clientArgsStr = `\n            client_args={\n                ${clientArgs.join(',\n                ')}\n            },`;
+    
+    return `${varName}_model = OpenAIModel(${clientArgsStr}
+            model_id=\"${modelIdentifier}\",
+            params={
+                \"max_tokens\": ${maxTokens},
+                \"temperature\": ${temperature},
+            }
+        )`;
+  } else {
+    // Default to Bedrock
+    return `${varName}_model = BedrockModel(
+            model_id=\"${modelIdentifier}\",
+            temperature=${temperature},
+            max_tokens=${maxTokens}
+        )`;
   }
 }
 

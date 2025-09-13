@@ -299,12 +299,32 @@ export function ExecutionPanel({
     setIsExecuting(true);
     setCurrentExecution(null);
     
+    // Extract API keys from agent nodes for secure backend handling
+    const extractApiKeys = () => {
+      const allNodes = flowData?.nodes || [];
+      const agentNodes = allNodes.filter(node => 
+        node.type === 'agent' || node.type === 'orchestrator-agent'
+      );
+      
+      // Find first OpenAI API key from any agent node
+      for (const node of agentNodes) {
+        const nodeData = node.data as any;
+        if (nodeData?.modelProvider === 'OpenAI' && nodeData?.apiKey) {
+          return { openai_api_key: nodeData.apiKey };
+        }
+      }
+      return {};
+    };
+    
+    const apiKeys = extractApiKeys();
+    
     const request: ExecutionRequest = {
       code: code,
       input_data: inputData.trim() || undefined,
       project_id: projectName,
       version: projectVersion,
       flow_data: flowData,
+      ...apiKeys,
     };
 
     // Check if streaming is enabled in the generated code

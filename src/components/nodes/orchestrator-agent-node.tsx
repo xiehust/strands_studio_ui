@@ -12,6 +12,9 @@ interface OrchestratorAgentNodeData {
   streaming?: boolean;
   // Orchestrator-specific properties
   coordinationPrompt?: string;
+  // OpenAI-specific fields
+  apiKey?: string;
+  baseUrl?: string;
 }
 
 export function OrchestratorAgentNode({ data, selected, id }: NodeProps) {
@@ -73,7 +76,7 @@ export function OrchestratorAgentNode({ data, selected, id }: NodeProps) {
         type="target"
         position={Position.Top}
         id="user-input"
-        className="!bg-purple-500"
+        className="!bg-green-500"
         style={{ top: -6, left: '50%', transform: 'translateX(-50%)' }}
       />
       <Handle
@@ -98,7 +101,7 @@ export function OrchestratorAgentNode({ data, selected, id }: NodeProps) {
         type="source"
         position={Position.Bottom}
         id="output"
-        className="!bg-purple-500"
+        className="!bg-indigo-500"
         style={{ bottom: -6 }}
       />
     </div>

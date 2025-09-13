@@ -10,6 +10,9 @@ interface AgentNodeData {
   temperature?: number;
   maxTokens?: number;
   streaming?: boolean;
+  // OpenAI-specific fields
+  apiKey?: string;
+  baseUrl?: string;
 }
 
 export function AgentNode({ data, selected, id }: NodeProps) {
@@ -70,7 +73,7 @@ export function AgentNode({ data, selected, id }: NodeProps) {
         type="target"
         position={Position.Top}
         id="user-input"
-        className="!bg-blue-500"
+        className="!bg-green-500"
         style={{ top: -6, left: '50%', transform: 'translateX(-50%)' }}
       />
       <Handle
@@ -93,7 +96,7 @@ export function AgentNode({ data, selected, id }: NodeProps) {
         type="source"
         position={Position.Bottom}
         id="output"
-        className="!bg-blue-500"
+        className="!bg-indigo-500"
         style={{ bottom: -6 }}
       />
     </div>

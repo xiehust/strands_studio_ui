@@ -115,7 +115,7 @@ export function CustomToolNode({ data, selected, id }: NodeProps) {
         type="source"
         position={Position.Right}
         id="tool-output"
-        className="!bg-purple-500"
+        className="!bg-orange-500"
         style={{ right: -6 }}
       />
     </div>

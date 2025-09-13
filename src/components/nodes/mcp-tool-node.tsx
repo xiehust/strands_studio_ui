@@ -125,7 +125,7 @@ export function MCPToolNode({ data, selected, id }: NodeProps) {
         type="source"
         position={Position.Right}
         id="mcp-tools"
-        className="!bg-purple-500"
+        className="!bg-orange-500"
         style={{ right: -6 }}
       />
     </div>
