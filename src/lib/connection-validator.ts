@@ -125,6 +125,36 @@ const connectionRules: ConnectionRule[] = [
 ];
 
 /**
+ * Checks if an MCP tool node is already connected to an agent
+ * @param mcpNodeId The ID of the MCP tool node
+ * @param edges All existing edges in the flow
+ * @returns the connected agent node ID if connected, null otherwise
+ */
+export function getMCPConnectedAgent(mcpNodeId: string, edges: Edge[]): string | null {
+  const connection = edges.find(edge => 
+    edge.source === mcpNodeId && 
+    edge.sourceHandle === 'mcp-tools'
+  );
+  return connection ? connection.target : null;
+}
+
+/**
+ * Gets all MCP tool nodes that are connected to a specific agent
+ * @param agentNodeId The ID of the agent node
+ * @param edges All existing edges in the flow
+ * @returns array of MCP tool node IDs connected to this agent
+ */
+export function getAgentConnectedMCPTools(agentNodeId: string, edges: Edge[]): string[] {
+  return edges
+    .filter(edge => 
+      edge.target === agentNodeId && 
+      edge.sourceHandle === 'mcp-tools' &&
+      edge.targetHandle === 'tools'
+    )
+    .map(edge => edge.source);
+}
+
+/**
  * Detects circular dependencies in orchestrator hierarchies
  * @param connection The proposed connection
  * @param nodes All nodes in the flow
@@ -265,8 +295,35 @@ export function isValidConnection(
     };
   }
 
+  // MCP tool nodes can only connect to one agent node
+  if (sourceNode.type === 'mcp-tool') {
+    const connectedAgentId = getMCPConnectedAgent(connection.source, edges);
+    
+    if (connectedAgentId) {
+      const connectedAgent = nodes.find(node => node.id === connectedAgentId);
+      const agentLabel = connectedAgent?.data?.label || `Agent ${connectedAgentId.slice(-4)}`;
+      
+      return {
+        valid: false,
+        message: `MCP server "${sourceNode.data?.label || sourceNode.data?.serverName || 'Unnamed'}" is already connected to "${agentLabel}". Each MCP server can only connect to one agent node.`
+      };
+    }
+  }
+
   // Prevent duplicate connections (same source handle to same target handle)
-  // This would need to be checked against existing edges in the actual implementation
+  const duplicateConnection = edges.find(edge => 
+    edge.source === connection.source && 
+    edge.target === connection.target &&
+    edge.sourceHandle === connection.sourceHandle &&
+    edge.targetHandle === connection.targetHandle
+  );
+  
+  if (duplicateConnection) {
+    return {
+      valid: false,
+      message: 'This connection already exists'
+    };
+  }
 
   return { valid: true };
 }

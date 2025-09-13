@@ -135,8 +135,9 @@ export function FlowEditor({
       if (validation.valid) {
         setEdges(addEdge(params, edges));
       } else {
-        // You could show a toast notification here
+        // Show user-friendly error message
         console.warn('Invalid connection:', validation.message);
+        alert(`Connection not allowed: ${validation.message}`);
       }
     },
     [setEdges, nodes, edges]

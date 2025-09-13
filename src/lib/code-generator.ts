@@ -207,7 +207,8 @@ function generateMCPSetupCode(nodes: Node[]): string {
       command = 'uvx',
       args = [],
       url = 'http://localhost:8000/mcp',
-      env = {}
+      env = {},
+      timeout = 30
     } = data;
 
     const clientVarName = `${(serverName as string).toLowerCase().replace(/[^a-z0-9]/g, '_')}_client_${mcpNode.id.slice(-4)}`;
@@ -218,24 +219,29 @@ function generateMCPSetupCode(nodes: Node[]): string {
       case 'stdio': {
         const argsStr = (args as string[]).length > 0 ? JSON.stringify(args) : '[]';
         const envStr = Object.keys(env as object).length > 0 ? `,\n        env=${JSON.stringify(env)}` : '';
-        mcpCode += `${clientVarName} = MCPClient(lambda: stdio_client(
-    StdioServerParameters(
-        command="${command}",
-        args=${argsStr}${envStr}
-    )
-))\n`;
+        mcpCode += `${clientVarName} = MCPClient(
+    lambda: stdio_client(
+        StdioServerParameters(
+            command="${command}",
+            args=${argsStr}${envStr}
+        )
+    ),
+    startup_timeout=${timeout}
+)\n`;
         break;
       }
         
       case 'streamable_http':
         mcpCode += `${clientVarName} = MCPClient(
-    lambda: streamablehttp_client("${url}")
+    lambda: streamablehttp_client("${url}"),
+    startup_timeout=${timeout}
 )\n`;
         break;
         
       case 'sse':
         mcpCode += `${clientVarName} = MCPClient(
-    lambda: sse_client("${url}")
+    lambda: sse_client("${url}"),
+    startup_timeout=${timeout}
 )\n`;
         break;
     }
@@ -387,15 +393,15 @@ if __name__ == "__main__":
   }
 
   if (hasMCPTools) {
-    // All MCP clients need to be in global scope and context managers
-    const allMcpClientVars = mcpNodes.map(node => {
+    // Only MCP tools directly connected to execution agent are used
+    const executionAgentMCPTools = findConnectedMCPTools(executionAgent, allNodes, edges);
+    const executionAgentMcpClientVars = executionAgentMCPTools.map(node => {
       const serverName = (node.data?.serverName as string) || 'mcp_server';
       return `${serverName.toLowerCase().replace(/[^a-z0-9]/g, '_')}_client_${node.id.slice(-4)}`;
     });
     
-    // But only MCP tools directly connected to execution agent are added to it
-    const executionAgentMCPTools = findConnectedMCPTools(executionAgent, allNodes, edges);
-    const executionAgentMcpClientVars = executionAgentMCPTools.map(node => {
+    // All MCP clients need to be in global scope for sub-agents
+    const allMcpClientVars = mcpNodes.map(node => {
       const serverName = (node.data?.serverName as string) || 'mcp_server';
       return `${serverName.toLowerCase().replace(/[^a-z0-9]/g, '_')}_client_${node.id.slice(-4)}`;
     });
@@ -411,10 +417,13 @@ if __name__ == "__main__":
     mainCode += `
     global ${allGlobals.join(', ')}
     
-    # Use MCP clients in context managers
-    with ${allMcpClientVars.join(', ')}:
+    # Use MCP clients in context managers (only those connected to execution agent)
+    ${executionAgentMcpClientVars.length > 0 
+      ? `with ${executionAgentMcpClientVars.join(', ')}:
         # Get tools from MCP servers
-        mcp_tools = []`;
+        mcp_tools = []`
+      : `# No MCP tools connected to execution agent
+    mcp_tools = []`}`;
     
     // Add tool collection only from MCP clients directly connected to execution agent
     executionAgentMcpClientVars.forEach(clientVar => {
@@ -471,14 +480,15 @@ if __name__ == "__main__":
         ? `${systemPrompt}\\n\\nCoordination Instructions: ${coordinationPrompt}`
         : systemPrompt;
       
+      const indentation = executionAgentMcpClientVars.length > 0 ? '        ' : '    ';
       mainCode += `
-        
-        # Create orchestrator agent with MCP tools
-        ${agentName} = Agent(
-            model=${agentName}_model,
-            system_prompt="""${fullSystemPrompt}""",
-            tools=${toolsArrayCode}
-        )`;
+${indentation}
+${indentation}# Create orchestrator agent ${executionAgentMcpClientVars.length > 0 ? 'with MCP tools' : ''}
+${indentation}${agentName} = Agent(
+${indentation}    model=${agentName}_model,
+${indentation}    system_prompt="""${fullSystemPrompt}""",
+${indentation}    tools=${toolsArrayCode}
+${indentation})`;
     } else {
       // Regular agent
       const connectedTools = findConnectedTools(executionAgent, allNodes, edges);
@@ -488,14 +498,15 @@ if __name__ == "__main__":
         ? `mcp_tools + [${regularToolsList.join(', ')}]`
         : 'mcp_tools';
       
+      const indentation = executionAgentMcpClientVars.length > 0 ? '        ' : '    ';
       mainCode += `
-        
-        # Create agent with MCP tools
-        ${agentName} = Agent(
-            model=${agentName}_model,
-            system_prompt="""${systemPrompt}""",
-            tools=${toolsArrayCode}
-        )`;
+${indentation}
+${indentation}# Create agent ${executionAgentMcpClientVars.length > 0 ? 'with MCP tools' : ''}
+${indentation}${agentName} = Agent(
+${indentation}    model=${agentName}_model,
+${indentation}    system_prompt="""${systemPrompt}""",
+${indentation}    tools=${toolsArrayCode}
+${indentation})`;
     }
   } else {
     // Sanitize agent names for global variables using connected agent
@@ -506,7 +517,9 @@ if __name__ == "__main__":
     global user_input, input_data, ${executionAgentName}`;
   }
 
-  const baseIndent = hasMCPTools ? '        ' : '    ';
+  // Determine indentation based on whether execution agent has MCP tools
+  const executionAgentHasMCPTools = hasMCPTools && findConnectedMCPTools(executionAgent, allNodes, edges).length > 0;
+  const baseIndent = executionAgentHasMCPTools ? '        ' : '    ';
   
   // Generate execution for the connected agent
   const label = (executionAgent.data?.label as string) || 'agent1';
@@ -516,18 +529,16 @@ if __name__ == "__main__":
   const connectedUserInputs = findConnectedUserInputs(executionAgent, allNodes, edges);
     
     // Generate user input logic that prioritizes input_data from execution panel
-    mainCode += `${baseIndent.slice(4)}
+    mainCode += `
 ${baseIndent}# User input - prioritize input_data from execution panel
 ${baseIndent}if input_data is not None and input_data.strip():
-${baseIndent}    user_input = input_data.strip()
-`;
+${baseIndent}    user_input = input_data.strip()`;
     
     if (connectedUserInputs.length > 0) {
-      mainCode += `${baseIndent}else:
+      mainCode += `
+${baseIndent}else:
 ${baseIndent}    # Fallback to connected input node
-${baseIndent}    user_input = "${connectedUserInputs[0].content || 'Hello, how can you help me?'}"
-${baseIndent}
-`;
+${baseIndent}    user_input = "${connectedUserInputs[0].content || 'Hello, how can you help me?'}"`;
     } else {
       // Fall back to finding any unconnected user-prompt input nodes (legacy behavior)
       const inputNodes = allNodes.filter(node => node.type === 'input');
@@ -541,17 +552,15 @@ ${baseIndent}
       });
       
       if (unconnectedInputs.length > 0) {
-        mainCode += `${baseIndent}else:
+        mainCode += `
+${baseIndent}else:
 ${baseIndent}    # Fallback to unconnected input node
-${baseIndent}    user_input = "${unconnectedInputs[0].data?.content || 'Hello, how can you help me?'}"
-${baseIndent}
-`;
+${baseIndent}    user_input = "${unconnectedInputs[0].data?.content || 'Hello, how can you help me?'}"`;
       } else {
-        mainCode += `${baseIndent}else:
+        mainCode += `
+${baseIndent}else:
 ${baseIndent}    # Default fallback
-${baseIndent}    user_input = "Hello, how can you help me?"
-${baseIndent}
-`;
+${baseIndent}    user_input = "Hello, how can you help me?"`;
       }
     }
     
@@ -559,7 +568,8 @@ ${baseIndent}
     const isStreaming = executionAgentData.streaming || false;
     
     if (isStreaming) {
-      mainCode += `${baseIndent}# Execute agent with streaming
+      mainCode += `
+${baseIndent}# Execute agent with streaming
 ${baseIndent}print("Starting streaming response...")
 ${baseIndent}async for event in ${agentName}.stream_async(user_input):
 ${baseIndent}    if "data" in event:
@@ -568,7 +578,8 @@ ${baseIndent}        print(event['data'],end='',flush=True)
 if __name__ == "__main__":
     asyncio.run(main())`;
     } else {
-      mainCode += `${baseIndent}# Execute agent (sync execution)
+      mainCode += `
+${baseIndent}# Execute agent (sync execution)
 ${baseIndent}response = ${agentName}(user_input)
 ${baseIndent}print("Agent Response:", str(response))
 ${baseIndent}
@@ -577,6 +588,12 @@ ${baseIndent}return str(response)
 if __name__ == "__main__":
     asyncio.run(main())`;
     }
+
+  // Add closing of the context manager if we have MCP tools
+  if (hasMCPTools && executionAgentHasMCPTools) {
+    // No need to add anything - the context manager closes automatically with Python's 'with' statement
+    // The indentation already handles the proper nesting
+  }
 
   return mainCode;
 }
