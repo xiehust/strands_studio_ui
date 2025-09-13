@@ -51,6 +51,7 @@ export function MainLayout() {
   const [showNewProjectDialog, setShowNewProjectDialog] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectDescription, setNewProjectDescription] = useState('');
+  const [lastSaveTime, setLastSaveTime] = useState<Date | null>(null);
 
   // Load current project on mount, or load auto-saved flow if no project
   useEffect(() => {
@@ -59,6 +60,7 @@ export function MainLayout() {
       setCurrentProject(current);
       setNodes(current.nodes);
       setEdges(current.edges);
+      setLastSaveTime(new Date(current.updatedAt)); // Set timestamp to project's last updated time
       // Clear auto-save since we have a project loaded
       clearAutoSavedFlow();
     } else {
@@ -153,6 +155,7 @@ export function MainLayout() {
     setNodes(project.nodes);
     setEdges(project.edges);
     setCurrentProject(project);
+    setLastSaveTime(new Date(project.updatedAt)); // Set timestamp to project's last updated time
     // Clear auto-save since we now have a project loaded
     clearAutoSavedFlow();
   }, []);
@@ -167,6 +170,7 @@ export function MainLayout() {
       });
       if (updated) {
         setCurrentProject(updated);
+        setLastSaveTime(new Date()); // Set save timestamp
       }
     } else {
       // Save as new project
@@ -189,6 +193,7 @@ export function MainLayout() {
 
     ProjectManager.setCurrentProject(newProject.id);
     setCurrentProject(newProject);
+    setLastSaveTime(new Date()); // Set save timestamp for new project
     setNewProjectName('');
     setNewProjectDescription('');
     setShowNewProjectDialog(false);
@@ -235,6 +240,7 @@ export function MainLayout() {
         setCurrentProject(imported);
         setNodes(imported.nodes);
         setEdges(imported.edges);
+        setLastSaveTime(new Date(imported.updatedAt)); // Set timestamp to imported project's time
         // Clear auto-save since we now have an imported project
         clearAutoSavedFlow();
         alert('Project imported successfully!');
@@ -279,6 +285,13 @@ export function MainLayout() {
           </div>
           <div className="flex items-center space-x-2">
             {/* Project Controls */}
+            {/* Save timestamp indicator */}
+            {lastSaveTime && (
+              <span className="text-xs text-blue-600 mr-2">
+                Saved at {lastSaveTime.toLocaleTimeString()}
+              </span>
+            )}
+            
             <button
               onClick={handleSaveCurrentProject}
               className="flex items-center px-3 py-2 rounded-md text-sm font-medium bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors"
@@ -323,9 +336,6 @@ export function MainLayout() {
               Export
             </button>
 
-            <div className="w-px h-6 bg-gray-300 mx-2" />
-
-            <div className="flex items-center space-x-2">
             <button
               onClick={() => setShowProjectManager(true)}
               className="flex items-center px-3 py-2 rounded-md text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors"
@@ -333,6 +343,10 @@ export function MainLayout() {
               <FolderOpen className="w-4 h-4 mr-2" />
               Open
             </button>
+
+            <div className="w-px h-6 bg-gray-300 mx-2" />
+
+            <div className="flex items-center space-x-2">
             
             <button
               onClick={() => {

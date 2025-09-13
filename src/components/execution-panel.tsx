@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Play, Square, Loader, CheckCircle, XCircle, Clock, Terminal, Zap, FolderOpen, FileText, AlertTriangle, RefreshCw } from 'lucide-react';
-import { apiClient, type ExecutionRequest, type ExecutionResult, type ExecutionHistoryItem, type ExecutionInfo, type ArtifactContent } from '../lib/api-client';
+import { apiClient, type ExecutionRequest, type ExecutionResult, type ExecutionHistoryItem } from '../lib/api-client';
 import { ValidationError, isExecutionResult } from '../lib/validation';
 
 interface ExecutionPanelProps {
@@ -45,10 +45,9 @@ export function ExecutionPanel({
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingOutput, setStreamingOutput] = useState('');
   const [streamStartTime, setStreamStartTime] = useState<Date | null>(null);
-  const [storedExecutions, setStoredExecutions] = useState<ExecutionInfo[]>([]);
+  const [storedExecutions, setStoredExecutions] = useState<ExecutionHistoryItem[]>([]);
   const [loadingStoredExecutions, setLoadingStoredExecutions] = useState(false);
-  const [selectedStoredExecution, setSelectedStoredExecution] = useState<ExecutionInfo | null>(null);
-  const [loadedArtifacts, setLoadedArtifacts] = useState<{ [key: string]: ArtifactContent }>({});
+  const [selectedStoredExecution, setSelectedStoredExecution] = useState<ExecutionHistoryItem | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [storageError, setStorageError] = useState<string | null>(null);
 
@@ -150,8 +149,8 @@ export function ExecutionPanel({
     
     setLoadingStoredExecutions(true);
     try {
-      // Load executions only for the current project
-      const executions = await apiClient.getExecutionHistory(projectName, projectVersion);
+      // Use the optimized endpoint that returns execution results in a single call
+      const executions = await apiClient.getExecutionHistoryItems(projectName, projectVersion);
       setStoredExecutions(executions);
       setStorageError(null); // Clear any previous storage errors
     } catch (error) {
@@ -164,65 +163,26 @@ export function ExecutionPanel({
     }
   };
 
-  const loadArtifact = async (execution: ExecutionInfo, fileType: string) => {
-    const key = `${execution.execution_id}_${fileType}`;
-    if (loadedArtifacts[key]) return loadedArtifacts[key];
-    
+
+  const loadStoredExecutionResult = (execution: ExecutionHistoryItem) => {
     try {
-      const artifact = await apiClient.getArtifact(
-        execution.project_id,
-        execution.version,
-        execution.execution_id,
-        fileType
-      );
+      // ExecutionHistoryItem already includes the result and input_data, no need for additional API calls
+      if (!isExecutionResult(execution.result)) {
+        throw new Error('Invalid execution result format');
+      }
       
-      setLoadedArtifacts(prev => ({ ...prev, [key]: artifact }));
-      return artifact;
-    } catch (error) {
-      console.error(`Failed to load ${fileType} artifact:`, error);
-      const message = error instanceof ValidationError ? error.message : 
-                      error instanceof Error ? error.message : `Failed to load ${fileType}`;
-      setStorageError(`Artifact load failed: ${message}`);
-      return null;
-    }
-  };
+      setCurrentExecution(execution.result);
+      setSelectedStoredExecution(execution);
+      setError(null); // Clear any previous errors
 
-  const loadStoredExecutionResult = async (execution: ExecutionInfo) => {
-    try {
-      const resultArtifact = await loadArtifact(execution, 'result.json');
-      if (resultArtifact) {
-        try {
-          const result = JSON.parse(resultArtifact.content);
-          if (!isExecutionResult(result)) {
-            throw new Error('Invalid execution result format');
-          }
-          setCurrentExecution(result);
-          setSelectedStoredExecution(execution);
-          setError(null); // Clear any previous errors
-
-          // Also load metadata to get the input_data
-          try {
-            const metadataArtifact = await loadArtifact(execution, 'metadata.json');
-            if (metadataArtifact) {
-              const metadata = JSON.parse(metadataArtifact.content);
-              
-              // Check for input_data in metadata, handle both undefined and empty string
-              if (metadata.input_data !== undefined && metadata.input_data !== null) {
-                setInputData(metadata.input_data || ''); // Handle empty string case
-                // Don't update localStorage when loading stored execution data
-                // Let user manually save if they want to persist it
-              } else {
-                // Clear input data if stored execution had no input
-                setInputData('');
-              }
-            }
-          } catch (metadataError) {
-            console.warn('Failed to load metadata for input data:', metadataError);
-            // Don't fail the whole operation if metadata loading fails
-          }
-        } catch (parseError) {
-          throw new Error(`Invalid execution result format: ${parseError instanceof Error ? parseError.message : 'Unknown parsing error'}`);
-        }
+      // Set input data from the execution history item
+      if (execution.input_data !== undefined && execution.input_data !== null) {
+        setInputData(execution.input_data || ''); // Handle empty string case
+        // Don't update localStorage when loading stored execution data
+        // Let user manually save if they want to persist it
+      } else {
+        // Clear input data if stored execution had no input
+        setInputData('');
       }
     } catch (error) {
       console.error('Failed to load stored execution result:', error);
@@ -267,7 +227,7 @@ export function ExecutionPanel({
     // Also check if any agent nodes have streaming enabled in flowData
     const hasStreamingAgent = flowData?.nodes?.some(node => 
       (node.type === 'agent' || node.type === 'orchestrator-agent') && 
-      node.data?.streaming === true
+      (node.data as any)?.streaming === true
     ) || false;
     
     // console.log('Streaming detection:', { 
@@ -733,7 +693,7 @@ export function ExecutionPanel({
                           {execution.execution_id.substring(0, 8)}...
                         </span>
                         <span className="text-gray-500 text-xs bg-gray-100 px-1 rounded">
-                          {execution.artifacts.length} files
+                          {execution.result.success ? '✓' : '✗'}
                         </span>
                       </div>
                       <div className="text-gray-500">
@@ -741,7 +701,7 @@ export function ExecutionPanel({
                       </div>
                     </div>
                     <div className="mt-1 text-xs text-gray-600">
-                      Version: {execution.version} • Size: {(execution.total_size / 1024).toFixed(1)}KB
+                      Version: {execution.version} • Time: {execution.result.execution_time.toFixed(2)}s
                     </div>
                   </div>
                 ))
