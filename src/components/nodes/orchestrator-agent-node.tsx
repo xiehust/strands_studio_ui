@@ -84,7 +84,14 @@ export function OrchestratorAgentNode({ data, selected, id }: NodeProps) {
         position={Position.Left}
         id="tools"
         className="!bg-orange-500"
-        style={{ left: -6, top: '30%' }}
+        style={{ left: -6, top: '25%' }}
+      />
+      <Handle
+        type="target"
+        position={Position.Left}
+        id="orchestrator-input"
+        className="!bg-purple-400"
+        style={{ left: -6, top: '55%' }}
       />
 
       {/* Sub-Agents Handle */}

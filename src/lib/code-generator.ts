@@ -106,6 +106,14 @@ export function generateStrandsAgentCode(
         const agentAsToolCode = generateAgentAsToolCode(agentNode, nodes, edges, index);
         code += agentAsToolCode + '\n\n';
       });
+      
+      // Find orchestrators connected to other orchestrator agents (hierarchical)
+      const connectedSubOrchestrators = findConnectedSubOrchestrators(orchestratorNodes, edges);
+      
+      connectedSubOrchestrators.forEach((orchestratorNode, index) => {
+        const orchestratorAsToolCode = generateOrchestratorAsToolCode(orchestratorNode, nodes, edges, index + connectedAgentNodes.length);
+        code += orchestratorAsToolCode + '\n\n';
+      });
     }
 
     // Generate code for each regular agent (non-connected ones)
@@ -431,25 +439,25 @@ if __name__ == "__main__":
     const isOrchestrator = executionAgent.type === 'orchestrator-agent';
     
     if (isOrchestrator) {
-      // For orchestrator agents, create with sub-agents and tools
+      // For orchestrator agents, create with sub-agents and sub-orchestrators and tools
       const subAgentEdges = edges.filter(
         edge => edge.source === executionAgent.id && edge.sourceHandle === 'sub-agents'
       );
-      const subAgentNodes = subAgentEdges.map(edge => 
+      const subNodes = subAgentEdges.map(edge => 
         allNodes.find(node => node.id === edge.target)
       ).filter(Boolean);
       
-      const subAgentFunctions = subAgentNodes.map(agent => {
-        const labelText = (agent!.data?.label as string) || 'agent';
+      const subFunctions = subNodes.map(subNode => {
+        const labelText = (subNode!.data?.label as string) || 'node';
         const baseName = sanitizePythonVariableName(labelText);
-        return `${baseName}_${agent!.id.slice(-4)}`;
+        return `${baseName}_${subNode!.id.slice(-4)}`;
       });
       
       // Find connected non-MCP tools and MCP tools
       const connectedTools = findConnectedTools(executionAgent, allNodes, edges);
       const connectedMCPTools = findConnectedMCPTools(executionAgent, allNodes, edges);
       const regularToolsList = connectedTools.map(tool => tool.code);
-      const allRegularTools = [...regularToolsList, ...subAgentFunctions];
+      const allRegularTools = [...regularToolsList, ...subFunctions];
       
       // Only include mcp_tools if orchestrator has direct MCP connections
       // If only sub-agents have MCP tools, they handle their own MCP context
@@ -616,6 +624,33 @@ function findConnectedSubAgents(
   return agentNodes.filter(agent => connectedAgentIds.has(agent.id));
 }
 
+/**
+ * Finds all sub-orchestrators connected to orchestrator nodes (for hierarchical orchestrators)
+ */
+function findConnectedSubOrchestrators(
+  orchestratorNodes: Node[],
+  edges: Edge[]
+): Node[] {
+  const connectedOrchestratorIds = new Set<string>();
+  
+  orchestratorNodes.forEach(orchestrator => {
+    const subOrchestratorEdges = edges.filter(
+      edge => edge.source === orchestrator.id && 
+             edge.sourceHandle === 'sub-agents' &&
+             edge.targetHandle === 'orchestrator-input'
+    );
+    
+    subOrchestratorEdges.forEach(edge => {
+      const targetOrchestrator = orchestratorNodes.find(orch => orch.id === edge.target);
+      if (targetOrchestrator) {
+        connectedOrchestratorIds.add(targetOrchestrator.id);
+      }
+    });
+  });
+  
+  return orchestratorNodes.filter(orch => connectedOrchestratorIds.has(orch.id));
+}
+
 function isAgentConnectedToOrchestrator(
   agentNode: Node,
   orchestratorNodes: Node[],
@@ -718,6 +753,119 @@ def ${functionName}(user_input: str) -> str:
   }
 }
 
+/**
+ * Generates orchestrator-as-tool function for hierarchical orchestrators
+ */
+function generateOrchestratorAsToolCode(
+  orchestratorNode: Node,
+  allNodes: Node[],
+  edges: Edge[],
+  index: number
+): string {
+  const data = orchestratorNode.data || {};
+  const {
+    label = `OrchestratorAgent${index + 1}`,
+    modelProvider = 'AWS Bedrock',
+    modelId = 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+    modelName = 'Claude 3.7 Sonnet',
+    systemPrompt = 'You are an orchestrator agent that coordinates multiple specialized agents.',
+    temperature = 0.7,
+    maxTokens = 4000,
+    coordinationPrompt = '',
+    baseUrl = '',
+  } = data;
+
+  const modelIdentifier = modelProvider === 'AWS Bedrock' ? modelId : modelName;
+  // Sanitize function name to be Python-compatible
+  const baseName = sanitizePythonVariableName(label as string);
+  const functionName = `${baseName}_${orchestratorNode.id.slice(-4)}`; // Add unique suffix
+  
+  // Find connected sub-agents (both regular agents and sub-orchestrators)
+  const subAgentEdges = edges.filter(
+    edge => edge.source === orchestratorNode.id && edge.sourceHandle === 'sub-agents'
+  );
+  const subNodes = subAgentEdges.map(edge => 
+    allNodes.find(node => node.id === edge.target)
+  ).filter(Boolean);
+  
+  const subFunctions = subNodes.map(subNode => {
+    const labelText = (subNode!.data?.label as string) || 'node';
+    const baseName = sanitizePythonVariableName(labelText);
+    return `${baseName}_${subNode!.id.slice(-4)}`;
+  });
+  
+  // Find regular tools and MCP tools connected to orchestrator
+  const connectedTools = findConnectedTools(orchestratorNode, allNodes, edges);
+  const connectedMCPTools = findConnectedMCPTools(orchestratorNode, allNodes, edges);
+  
+  // Combine regular tools and sub-node functions
+  const regularToolsList = connectedTools.map(tool => tool.code);
+  const allRegularTools = [...regularToolsList, ...subFunctions];
+  
+  const hasMCPTools = connectedMCPTools.length > 0;
+  const fullSystemPrompt = coordinationPrompt 
+    ? `${systemPrompt}\\n\\nCoordination Instructions: ${coordinationPrompt}`
+    : systemPrompt;
+  
+  if (hasMCPTools) {
+    // Generate MCP-aware orchestrator-as-tool function
+    const mcpClientVars = connectedMCPTools.map(mcpNode => {
+      const serverName = (mcpNode.data?.serverName as string) || 'mcp_server';
+      return `${serverName.toLowerCase().replace(/[^a-z0-9]/g, '_')}_client_${mcpNode.id.slice(-4)}`;
+    });
+    
+    const toolsArrayCode = allRegularTools.length > 0 
+      ? `mcp_tools + [${allRegularTools.join(', ')}]`
+      : 'mcp_tools';
+    
+    return `@tool
+def ${functionName}(user_input: str) -> str:
+    """${label} - ${(systemPrompt as string).substring(0, 100)}${(systemPrompt as string).length > 100 ? '...' : ''}"""
+    
+    # Get MCP tools from global context
+    global ${mcpClientVars.join(', ')}
+    mcp_tools = []
+    with ${mcpClientVars.join(', ')}:
+        ${mcpClientVars.map(clientVar => `mcp_tools.extend(${clientVar}.list_tools_sync())`).join('\n        ')}
+        
+        # Create model for ${label}
+        ${generateModelConfigForTool(functionName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string)}
+        
+        # Create orchestrator agent with MCP tools
+        agent = Agent(
+            model=${functionName}_model,
+            system_prompt="""${fullSystemPrompt}""",
+            tools=${toolsArrayCode}
+        )
+        
+        # Execute and return result
+        response = agent(user_input)
+    return str(response)`;
+  } else {
+    // Regular orchestrator-as-tool function without MCP tools
+    const toolsCode = allRegularTools.length > 0 
+      ? `,\n        tools=[${allRegularTools.join(', ')}]`
+      : '';
+
+    return `@tool
+def ${functionName}(user_input: str) -> str:
+    """${label} - ${(systemPrompt as string).substring(0, 100)}${(systemPrompt as string).length > 100 ? '...' : ''}"""
+    
+    # Create model for ${label}
+    ${generateModelConfigForTool(functionName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string)}
+    
+    # Create orchestrator agent
+    agent = Agent(
+        model=${functionName}_model,
+        system_prompt="""${fullSystemPrompt}"""${toolsCode}
+    )
+    
+    # Execute and return result
+    response = agent(user_input)
+    return str(response)`;
+  }
+}
+
 function generateOrchestratorCode(
   orchestratorNode: Node,
   allNodes: Node[],
@@ -741,36 +889,36 @@ function generateOrchestratorCode(
   // Sanitize orchestrator name to be Python-compatible
   const orchestratorName = sanitizePythonVariableName(label as string);
   
-  // Find connected sub-agents
+  // Find connected sub-agents (both regular agents and sub-orchestrators)
   const subAgentEdges = edges.filter(
     edge => edge.source === orchestratorNode.id && edge.sourceHandle === 'sub-agents'
   );
-  const subAgentNodes = subAgentEdges.map(edge => 
+  const subNodes = subAgentEdges.map(edge => 
     allNodes.find(node => node.id === edge.target)
   ).filter(Boolean);
   
-  const subAgentFunctions = subAgentNodes.map(agent => {
-    // Sanitize agent name to be Python-compatible
-    const labelText = (agent!.data?.label as string) || 'agent';
+  const subFunctions = subNodes.map(subNode => {
+    // Sanitize node name to be Python-compatible (works for both agents and orchestrators)
+    const labelText = (subNode!.data?.label as string) || 'node';
     const baseName = sanitizePythonVariableName(labelText);
-    return `${baseName}_${agent!.id.slice(-4)}`;
+    return `${baseName}_${subNode!.id.slice(-4)}`;
   });
   
   // Find regular tools and MCP tools connected to orchestrator
   const connectedTools = findConnectedTools(orchestratorNode, allNodes, edges);
   const connectedMCPTools = findConnectedMCPTools(orchestratorNode, allNodes, edges);
   
-  // Combine regular tools and sub-agent functions
+  // Combine regular tools and sub-node functions (both agents and orchestrators)
   const regularToolsList = connectedTools.map(tool => tool.code);
-  const allRegularTools = [...regularToolsList, ...subAgentFunctions];
+  const allRegularTools = [...regularToolsList, ...subFunctions];
   
   // Generate tools code - handle MCP tools if present
-  // Check if orchestrator itself has MCP tools OR any of its sub-agents have MCP tools
-  const subAgentHasMCPTools = subAgentNodes.some(subAgent => {
-    const subAgentMCPTools = findConnectedMCPTools(subAgent!, allNodes, edges);
-    return subAgentMCPTools.length > 0;
+  // Check if orchestrator itself has MCP tools OR any of its sub-nodes have MCP tools
+  const subNodeHasMCPTools = subNodes.some(subNode => {
+    const subNodeMCPTools = findConnectedMCPTools(subNode!, allNodes, edges);
+    return subNodeMCPTools.length > 0;
   });
-  const hasMCPTools = connectedMCPTools.length > 0 || subAgentHasMCPTools;
+  const hasMCPTools = connectedMCPTools.length > 0 || subNodeHasMCPTools;
   let toolsCode = '';
   
   if (hasMCPTools) {

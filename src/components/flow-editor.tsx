@@ -131,7 +131,7 @@ export function FlowEditor({
 
   const onConnect: OnConnect = useCallback(
     (params: Connection) => {
-      const validation = isValidConnection(params, nodes);
+      const validation = isValidConnection(params, nodes, edges);
       if (validation.valid) {
         setEdges(addEdge(params, edges));
       } else {
@@ -144,10 +144,10 @@ export function FlowEditor({
 
   const isValidConnectionCallback = useCallback(
     (connection: Connection) => {
-      const validation = isValidConnection(connection, nodes);
+      const validation = isValidConnection(connection, nodes, edges);
       return validation.valid;
     },
-    [nodes]
+    [nodes, edges]
   );
 
   const onNodeClick = useCallback(

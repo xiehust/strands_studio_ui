@@ -1,4 +1,4 @@
-import { type Node, type Connection } from '@xyflow/react';
+import { type Node, type Connection, type Edge } from '@xyflow/react';
 
 interface ConnectionRule {
   sourceType: string;
@@ -111,11 +111,94 @@ const connectionRules: ConnectionRule[] = [
     description: 'Orchestrator agent output can connect to output nodes',
   },
   
+  // HIERARCHICAL ORCHESTRATOR CONNECTIONS
+  
+  // Orchestrator agents can connect to other orchestrator agents (hierarchical structure)
+  {
+    sourceType: 'orchestrator-agent',
+    sourceHandle: 'sub-agents',
+    targetType: 'orchestrator-agent',
+    targetHandle: 'orchestrator-input',
+    description: 'Orchestrator agent can coordinate other orchestrator agents hierarchically',
+  },
+  
 ];
+
+/**
+ * Detects circular dependencies in orchestrator hierarchies
+ * @param connection The proposed connection
+ * @param nodes All nodes in the flow
+ * @param edges All existing edges in the flow  
+ * @returns true if the connection would create a circular dependency
+ */
+export function wouldCreateCircularDependency(
+  connection: Connection,
+  nodes: Node[],
+  edges: Edge[]
+): boolean {
+  // Only check for orchestrator-to-orchestrator connections
+  const sourceNode = nodes.find(node => node.id === connection.source);
+  const targetNode = nodes.find(node => node.id === connection.target);
+  
+  if (!sourceNode || !targetNode || 
+      sourceNode.type !== 'orchestrator-agent' || 
+      targetNode.type !== 'orchestrator-agent') {
+    return false;
+  }
+  
+  // Check if target can already reach source through existing connections
+  return canReachNode(targetNode.id, sourceNode.id, edges, nodes);
+}
+
+/**
+ * Helper function to check if one node can reach another through existing connections
+ * Uses depth-first search to traverse the orchestrator hierarchy
+ * @param fromId Starting node ID
+ * @param toId Target node ID to find
+ * @param edges All edges in the flow
+ * @param nodes All nodes in the flow
+ * @param visited Set of visited node IDs to prevent infinite loops
+ * @returns true if fromId can reach toId
+ */
+function canReachNode(
+  fromId: string, 
+  toId: string, 
+  edges: Edge[], 
+  nodes: Node[], 
+  visited: Set<string> = new Set()
+): boolean {
+  if (fromId === toId) {
+    return true;
+  }
+  
+  if (visited.has(fromId)) {
+    return false;
+  }
+  
+  visited.add(fromId);
+  
+  // Find all orchestrator-agent nodes that this orchestrator connects to via sub-agents
+  const outgoingEdges = edges.filter(
+    edge => edge.source === fromId && 
+           edge.sourceHandle === 'sub-agents'
+  );
+  
+  for (const edge of outgoingEdges) {
+    const targetNode = nodes.find(node => node.id === edge.target);
+    if (targetNode?.type === 'orchestrator-agent') {
+      if (canReachNode(edge.target, toId, edges, nodes, visited)) {
+        return true;
+      }
+    }
+  }
+  
+  return false;
+}
 
 export function isValidConnection(
   connection: Connection,
-  nodes: Node[]
+  nodes: Node[],
+  edges: Edge[] = []
 ): { valid: boolean; message?: string } {
   const sourceNode = nodes.find((node) => node.id === connection.source);
   const targetNode = nodes.find((node) => node.id === connection.target);
@@ -172,6 +255,14 @@ export function isValidConnection(
   // Prevent self-connections
   if (connection.source === connection.target) {
     return { valid: false, message: 'Nodes cannot connect to themselves' };
+  }
+  
+  // Prevent circular dependencies in orchestrator hierarchies
+  if (wouldCreateCircularDependency(connection, nodes, edges)) {
+    return { 
+      valid: false, 
+      message: 'This connection would create a circular dependency in the orchestrator hierarchy' 
+    };
   }
 
   // Prevent duplicate connections (same source handle to same target handle)
