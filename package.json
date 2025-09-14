@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "backend:dev": "cd backend && uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload",
+    "backend:prod": "cd backend && uv run uvicorn main:app --host 0.0.0.0 --port 8000",
     "backend:install": "cd backend && ./venv/bin/pip install -r requirements.txt",
     "dev:full": "concurrently \"npm run dev\" \"npm run backend:dev\"",
     "setup:backend": "python3 -m venv backend/venv && cd backend && ./venv/bin/pip install -r requirements.txt"

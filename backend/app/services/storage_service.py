@@ -238,33 +238,38 @@ class StorageService:
     async def get_project_versions(self, project_id: str) -> List[VersionInfo]:
         """
         Get all versions for a project
-        
+
         Args:
             project_id: Project identifier
-            
+
         Returns:
             List of version information
         """
         try:
             logger.info(f"Getting versions for project: {project_id}")
             versions = []
-            
-            project_path = self.base_dir / project_id
+
+            # Import sanitize_path_component here to avoid circular imports
+            from ..utils.path_utils import sanitize_path_component
+
+            # Use sanitized project ID for filesystem operations
+            sanitized_project_id = sanitize_path_component(project_id)
+            project_path = self.base_dir / sanitized_project_id
             if not project_path.exists():
                 raise HTTPException(status_code=404, detail="Project not found")
-            
+
             for version_dir in project_path.iterdir():
                 if version_dir.is_dir():
                     version_info = await self._get_version_info(project_id, version_dir.name)
                     if version_info:
                         versions.append(version_info)
-            
+
             # Sort versions by creation time
             versions.sort(key=lambda v: v.created_at, reverse=True)
-            
+
             logger.info(f"Found {len(versions)} versions for project {project_id}")
             return versions
-            
+
         except HTTPException:
             raise
         except Exception as e:
@@ -475,7 +480,12 @@ class StorageService:
     async def _get_project_info(self, project_id: str) -> Optional[ProjectInfo]:
         """Get information about a project"""
         try:
-            project_path = self.base_dir / project_id
+            # Import sanitize_path_component here to avoid circular imports
+            from ..utils.path_utils import sanitize_path_component
+
+            # Use sanitized project ID for filesystem operations
+            sanitized_project_id = sanitize_path_component(project_id)
+            project_path = self.base_dir / sanitized_project_id
             if not project_path.exists():
                 return None
             
@@ -522,7 +532,13 @@ class StorageService:
     async def _get_version_info(self, project_id: str, version: str) -> Optional[VersionInfo]:
         """Get information about a project version"""
         try:
-            version_path = self.base_dir / project_id / version
+            # Import sanitize_path_component here to avoid circular imports
+            from ..utils.path_utils import sanitize_path_component
+
+            # Use sanitized IDs for filesystem operations
+            sanitized_project_id = sanitize_path_component(project_id)
+            sanitized_version = sanitize_path_component(version)
+            version_path = self.base_dir / sanitized_project_id / sanitized_version
             if not version_path.exists():
                 return None
             

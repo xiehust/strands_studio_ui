@@ -44,14 +44,30 @@ class ArtifactRequest(BaseModel):
     
     @validator('project_id', 'version', 'execution_id')
     def validate_identifiers(cls, v):
-        """Validate that identifiers are safe for filesystem use"""
+        """Sanitize identifiers for filesystem use"""
         if not v or not isinstance(v, str):
             raise ValueError("Identifier must be a non-empty string")
-        # Remove unsafe characters for filesystem paths
-        safe_chars = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.")
-        if not all(c in safe_chars for c in v):
-            raise ValueError("Identifier contains unsafe characters")
-        return v
+
+        # Sanitize the identifier for filesystem use
+        # Replace common unsafe characters with safe alternatives
+        sanitized = v.replace(' ', '_')  # Replace spaces with underscores
+        sanitized = sanitized.replace('(', '[')  # Replace ( with [
+        sanitized = sanitized.replace(')', ']')  # Replace ) with ]
+        sanitized = sanitized.replace('/', '-')  # Replace / with -
+        sanitized = sanitized.replace('\\', '-')  # Replace \ with -
+        sanitized = sanitized.replace(':', '-')  # Replace : with -
+        sanitized = sanitized.replace('*', '-')  # Replace * with -
+        sanitized = sanitized.replace('?', '-')  # Replace ? with -
+        sanitized = sanitized.replace('"', "'")  # Replace " with '
+        sanitized = sanitized.replace('<', '[')  # Replace < with [
+        sanitized = sanitized.replace('>', ']')  # Replace > with ]
+        sanitized = sanitized.replace('|', '-')  # Replace | with -
+
+        # Ensure we don't have empty string after sanitization
+        if not sanitized.strip():
+            raise ValueError("Identifier becomes empty after sanitization")
+
+        return sanitized
     
     @validator('file_type')
     def validate_file_type(cls, v):

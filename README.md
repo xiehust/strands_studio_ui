@@ -46,11 +46,48 @@ npm run backend:dev
 npm run dev:full
 ```
 
-### Build
+### Production Deployment
+
+#### Quick Start (Recommended)
+```bash
+# Start all services in production mode
+./start_all.sh
+
+# Stop all services
+./stop_all.sh
+```
+
+#### Manual Commands
 ```bash
 # Build for production
 npm run build
+
+# Build and preview frontend
+npm run preview
+
+# Start backend in production mode
+cd backend && uv run uvicorn main:app --host 0.0.0.0 --port 8000
+
+# Or use the npm script
+npm run backend:prod
 ```
+
+#### Production Features
+- **Automated Setup**: `start_all.sh` handles dependency installation, building, and service startup
+- **Background Execution**: Services run in the background with proper logging
+- **Health Checks**: Automatic verification that services started successfully
+- **Port Management**: Checks for port conflicts and provides warnings
+- **Graceful Shutdown**: `stop_all.sh` properly stops all services and cleans up processes
+- **Log Management**: Centralized logging in `logs/` directory
+
+#### Production URLs
+- **Frontend**: http://localhost:5173
+- **Backend API**: http://localhost:8000
+- **API Documentation**: http://localhost:8000/docs
+
+#### Log Files
+- Frontend logs: `logs/frontend.log`
+- Backend logs: `logs/backend.log`
 
 ## Tech Stack
 

@@ -508,8 +508,6 @@ async def execute_code_stream(request: ExecutionRequest):
                             def streaming_print(*args, **kwargs):
                                 # Capture the output for streaming
                                 if args:
-                                    logger.info(f"args:{args[0]}")
-                                    # output = ' '.join(str(arg) for arg in args)
                                     output = args[0]
                                     # Check if this looks like streaming data (not debug messages)
                                     if output and output != "Starting streaming response...":
@@ -543,7 +541,6 @@ async def execute_code_stream(request: ExecutionRequest):
                                     output = await asyncio.wait_for(output_queue.get(), timeout=0.1)
                                     if output:
                                         yield output
-                                        logger.info(f"output:{output}")
                                 except asyncio.TimeoutError:
                                     # Check if execution is done
                                     if execution_done.is_set():

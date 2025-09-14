@@ -1,19 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { FolderOpen, Download, Trash2, X } from 'lucide-react';
 import { ProjectManager, type StrandsProject } from '../lib/project-manager';
-import { type Node, type Edge } from '@xyflow/react';
 
 interface ProjectManagerComponentProps {
-  nodes: Node[];
-  edges: Edge[];
   onLoadProject: (project: StrandsProject) => void;
   onClose: () => void;
   className?: string;
 }
 
 export function ProjectManagerComponent({
-  nodes,
-  edges,
   onLoadProject,
   onClose,
   className = ''

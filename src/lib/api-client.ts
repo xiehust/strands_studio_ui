@@ -40,6 +40,10 @@ export interface ExecutionHistoryItem {
   created_at: string;
 }
 
+export interface ExecutionHistoryResponse {
+  executions: ExecutionHistoryItem[];
+}
+
 export interface ProjectData {
   id: string;
   name: string;
@@ -441,8 +445,8 @@ class ApiClient {
       params.append('limit', '50');
       
       const url = `/api/execution-history${params.toString() ? '?' + params.toString() : ''}`;
-      const response = await this.request(url);
-      
+      const response = await this.request<ExecutionHistoryResponse>(url);
+
       // The backend returns { executions: ExecutionHistoryItem[] }
       if (response && Array.isArray(response.executions)) {
         return response.executions;

@@ -4,21 +4,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Development Commands
 
-### Frontend (React + Vite)
-- `npm run dev` - Start development server (localhost:5173)
+### Development Mode
+- `npm run dev` - Start frontend development server (localhost:5173)
+- `npm run backend:dev` - Start backend development server (uses uv)
+- `npm run dev:full` - Run both frontend and backend concurrently
 - `npm run build` - Build for production (TypeScript compilation + Vite build)
 - `npm run lint` - Run ESLint
 - `npm run preview` - Preview production build
 
-### Backend (FastAPI + Python)
-- `npm run backend:dev` - Start backend development server (uses uv)
+### Production Mode (Recommended)
+- `./start_all.sh` - Start all services in production mode (background with logging)
+- `./stop_all.sh` - Stop all production services and cleanup processes
+
+### Backend Management
 - `npm run backend:install` - Install backend dependencies
 - `npm run setup:backend` - Create virtual environment and install dependencies
-- `npm run dev:full` - Run both frontend and backend concurrently
+- `npm run backend:prod` - Start backend in production mode
 
 ### Backend Direct Commands
 - `cd backend && uv run main.py` - Start backend server directly
 - `cd backend && uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload` - Start with uvicorn directly
+- `cd backend && uv run uvicorn main:app --host 0.0.0.0 --port 8000` - Start backend in production mode
 - `cd backend && uv pip install -r requirements.txt` - Install backend deps directly
 
 ## Architecture Overview
@@ -111,6 +117,14 @@ This is a **visual agent flow builder** that allows users to create, configure, 
 - Backend uses file-based storage for execution artifacts
 - Supports both sync and streaming agent execution
 - Agent streaming requires enabling "Enable Streaming" checkbox in property panel
+
+### Production Deployment
+- **Production Scripts**: Use `./start_all.sh` and `./stop_all.sh` for production deployment
+- **Logging**: Production logs are stored in `logs/frontend.log` and `logs/backend.log`
+- **Process Management**: Scripts handle PID files, graceful shutdown, and cleanup
+- **Health Checks**: Automatic verification that services started successfully
+- **Port Management**: Default ports are 5173 (frontend) and 8000 (backend)
+- **Background Execution**: Services run as background processes with proper logging
 
 ### Important Implementation Details
 - **Streaming Detection**: Frontend detects streaming by checking for `yield` statements in generated code OR agents with `streaming: true` property

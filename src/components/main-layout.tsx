@@ -443,8 +443,6 @@ export function MainLayout() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <ProjectManagerComponent
             className="w-96 max-h-96 m-4"
-            nodes={nodes}
-            edges={edges}
             onLoadProject={handleLoadProject}
             onClose={() => setShowProjectManager(false)}
           />
