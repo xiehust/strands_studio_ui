@@ -79,8 +79,18 @@ npm run backend:prod
 - **Port Management**: Checks for port conflicts and provides warnings
 - **Graceful Shutdown**: `stop_all.sh` properly stops all services and cleans up processes
 - **Log Management**: Centralized logging in `logs/` directory
+- **Secure Proxy Architecture**: Backend only accessible internally via Vite proxy
+- **Single Port Exposure**: Only frontend port (5173) needs to be exposed
 - **Cloud Deployment**: Auto-detects public IP for EC2 deployment
 - **ALB Support**: Compatible with AWS Application Load Balancer
+
+#### Deployment Architecture
+
+The application uses a **secure proxy architecture** where:
+- **Frontend** (port 5173): Publicly accessible, serves the React application
+- **Backend** (port 8000): Internal only, proxied through frontend
+- **All API requests** are automatically routed through the frontend to backend
+- **Only port 5173** needs to be exposed in firewalls/security groups
 
 #### Deployment Scenarios
 
@@ -88,12 +98,14 @@ npm run backend:prod
 ```bash
 ./start_all.sh
 # Access: http://localhost:5173
+# API Docs: http://localhost:5173/docs
 ```
 
 ##### Direct EC2 Deployment
 ```bash
 ./start_all.sh
 # Auto-detects public IP (e.g., http://35.88.128.160:5173)
+# API Docs: http://35.88.128.160:5173/docs
 ```
 
 ##### AWS ALB Deployment
@@ -101,13 +113,19 @@ npm run backend:prod
 export ALB_HOSTNAME=your-alb-hostname.us-west-2.elb.amazonaws.com
 ./start_all.sh
 # Access: http://your-alb-hostname.us-west-2.elb.amazonaws.com:5173
+# API Docs: http://your-alb-hostname.us-west-2.elb.amazonaws.com:5173/docs
 ```
 
-#### Production URLs
-- **Local**: http://localhost:5173 (frontend), http://localhost:8000 (backend)
-- **EC2**: http://PUBLIC_IP:5173 (frontend), http://PUBLIC_IP:8000 (backend)
-- **ALB**: http://ALB_HOSTNAME:5173 (frontend), http://ALB_HOSTNAME:8000 (backend)
-- **API Documentation**: Always available at backend URL + `/docs`
+#### Network Configuration
+
+**Security Groups / Firewall Rules:**
+- **Inbound**: Only allow port 5173 (frontend)
+- **Port 8000**: Not exposed externally (backend is internal-only)
+
+**Access URLs:**
+- **Application**: `http://YOUR_HOST:5173`
+- **API Documentation**: `http://YOUR_HOST:5173/docs` (proxied to backend)
+- **Health Check**: `http://YOUR_HOST:5173/health` (proxied to backend)
 
 #### Log Files
 - Frontend logs: `logs/frontend.log`

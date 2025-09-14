@@ -35,60 +35,14 @@ fi
 # Create logs directory if it doesn't exist
 mkdir -p logs
 
-# Detect if we're running on a cloud instance (has public IP different from localhost)
-detect_public_ip() {
-    # Try to get public IP from AWS metadata service (works for EC2)
-    local public_ip=""
-    if command -v curl &> /dev/null; then
-        public_ip=$(curl -s --connect-timeout 3 http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || echo "")
-    fi
+# Detect deployment environment and configure accordingly
+setup_deployment_config() {
+    # Clean up any existing .env.local file (we now use Vite proxy)
+    rm -f .env.local
 
-    # If AWS metadata doesn't work, try other methods
-    if [ -z "$public_ip" ]; then
-        # Try to get external IP via external service
-        public_ip=$(curl -s --connect-timeout 3 https://api.ipify.org 2>/dev/null || echo "")
-    fi
-
-    echo "$public_ip"
-}
-
-# Set up environment variables for API URL
-setup_api_url() {
-    local public_ip=$(detect_public_ip)
-
-    # Check if ALB_HOSTNAME environment variable is set (for ALB deployments)
-    if [ -n "$ALB_HOSTNAME" ]; then
-        echo -e "${BLUE}🌐 ALB deployment detected: $ALB_HOSTNAME${NC}"
-        echo -e "${BLUE}📡 Configuring API URL for ALB deployment...${NC}"
-
-        # Create .env.local for ALB deployment
-        cat > .env.local << EOF
-# Auto-generated for ALB deployment
-VITE_API_BASE_URL=http://$ALB_HOSTNAME:8000
-EOF
-        echo -e "${GREEN}✅ Created .env.local with API URL: http://$ALB_HOSTNAME:8000${NC}"
-        echo -e "${YELLOW}💡 Frontend will connect to backend at: http://$ALB_HOSTNAME:8000${NC}"
-        echo -e "${YELLOW}💡 Access your application at: http://$ALB_HOSTNAME:5173${NC}"
-
-    elif [ -n "$public_ip" ] && [ "$public_ip" != "127.0.0.1" ] && [ "$public_ip" != "localhost" ]; then
-        echo -e "${BLUE}🌐 Detected public IP: $public_ip${NC}"
-        echo -e "${BLUE}📡 Configuring API URL for cloud deployment...${NC}"
-
-        # Create .env.local for production build
-        cat > .env.local << EOF
-# Auto-generated for cloud deployment
-VITE_API_BASE_URL=http://$public_ip:8000
-EOF
-        echo -e "${GREEN}✅ Created .env.local with API URL: http://$public_ip:8000${NC}"
-        echo -e "${YELLOW}💡 Frontend will connect to backend at: http://$public_ip:8000${NC}"
-        echo -e "${YELLOW}💡 Access your application at: http://$public_ip:5173${NC}"
-    else
-        echo -e "${BLUE}🏠 Local deployment detected, using localhost configuration${NC}"
-        # Remove .env.local if it exists to use default localhost behavior
-        rm -f .env.local
-        echo -e "${YELLOW}💡 Frontend will use dynamic API URL detection${NC}"
-        echo -e "${YELLOW}💡 For ALB deployment, set ALB_HOSTNAME environment variable${NC}"
-    fi
+    echo -e "${BLUE}🔧 Using Vite proxy configuration for backend requests${NC}"
+    echo -e "${BLUE}🛡️  Backend port 8000 will not be exposed externally${NC}"
+    echo -e "${GREEN}✅ Frontend will proxy all API requests to backend internally${NC}"
 }
 
 # Function to check if port is in use
@@ -119,17 +73,17 @@ if [ ! -d "node_modules" ]; then
     npm install
 fi
 
-# Set up API URL configuration for cloud deployment
-setup_api_url
+# Set up deployment configuration
+setup_deployment_config
 
 # Build frontend for production
 echo -e "${BLUE}🏗️  Building frontend for production...${NC}"
 npm run build
 
-# Start backend in production mode (background)
-echo -e "${BLUE}🔧 Starting backend server...${NC}"
+# Start backend in production mode (background) - only accessible locally
+echo -e "${BLUE}🔧 Starting backend server (internal only)...${NC}"
 cd backend
-nohup uv run uvicorn main:app --host 0.0.0.0 --port 8000 > ../logs/backend.log 2>&1 &
+nohup uv run uvicorn main:app --host 127.0.0.1 --port 8000 > ../logs/backend.log 2>&1 &
 BACKEND_PID=$!
 echo $BACKEND_PID > ../logs/backend.pid
 cd ..
@@ -167,10 +121,29 @@ fi
 echo ""
 echo -e "${GREEN}🎉 All services started successfully!${NC}"
 echo ""
-echo -e "${BLUE}📍 Application URLs:${NC}"
-echo -e "   Frontend: ${GREEN}http://localhost:5173${NC}"
-echo -e "   Backend:  ${GREEN}http://localhost:8000${NC}"
-echo -e "   API Docs: ${GREEN}http://localhost:8000/docs${NC}"
+
+# Get deployment URLs
+if [ -n "$ALB_HOSTNAME" ]; then
+    ACCESS_URL="http://$ALB_HOSTNAME:5173"
+elif command -v curl &> /dev/null; then
+    PUBLIC_IP=$(curl -s --connect-timeout 3 http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || curl -s --connect-timeout 3 https://api.ipify.org 2>/dev/null || echo "")
+    if [ -n "$PUBLIC_IP" ] && [ "$PUBLIC_IP" != "127.0.0.1" ] && [ "$PUBLIC_IP" != "localhost" ]; then
+        ACCESS_URL="http://$PUBLIC_IP:5173"
+    else
+        ACCESS_URL="http://localhost:5173"
+    fi
+else
+    ACCESS_URL="http://localhost:5173"
+fi
+
+echo -e "${BLUE}📍 Application Access:${NC}"
+echo -e "   Application: ${GREEN}$ACCESS_URL${NC}"
+echo -e "   API Docs:    ${GREEN}$ACCESS_URL/docs${NC} (proxied to backend)"
+echo ""
+echo -e "${BLUE}🔧 Architecture:${NC}"
+echo -e "   • Frontend: Port 5173 (publicly accessible)"
+echo -e "   • Backend:  Port 8000 (internal only, proxied through frontend)"
+echo -e "   • All API requests automatically routed through frontend proxy"
 echo ""
 echo -e "${BLUE}📝 Logs:${NC}"
 echo -e "   Frontend: ${YELLOW}logs/frontend.log${NC}"
@@ -179,4 +152,4 @@ echo ""
 echo -e "${BLUE}🛑 To stop all services:${NC}"
 echo -e "   Run: ${YELLOW}./stop_all.sh${NC}"
 echo ""
-echo -e "${GREEN}✨ Strands UI is now running in production mode!${NC}"
+echo -e "${GREEN}✨ Strands UI is now running in production mode with secure proxy configuration!${NC}"

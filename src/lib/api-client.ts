@@ -5,36 +5,17 @@
 
 import { validatePathComponents, validateProjectOnly, validateProjectAndVersion, ValidationError } from './validation';
 
-// Dynamic API base URL configuration
+// API base URL configuration using Vite proxy
 const getApiBaseUrl = (): string => {
-  // First check for environment variable (set at build time)
+  // Check for explicit override (useful for external backend scenarios)
   if (import.meta.env.VITE_API_BASE_URL) {
     return import.meta.env.VITE_API_BASE_URL;
   }
 
-  // For development, use localhost
-  if (import.meta.env.DEV) {
-    return 'http://localhost:8000';
-  }
-
-  // For production, dynamically construct based on current host
-  const protocol = window.location.protocol;
-  const hostname = window.location.hostname;
-
-  // If accessing via localhost in production, use localhost
-  if (hostname === 'localhost' || hostname === '127.0.0.1') {
-    return 'http://localhost:8000';
-  }
-
-  // Handle ALB (Application Load Balancer) scenarios
-  if (hostname.includes('.elb.amazonaws.com') || hostname.includes('.amazonaws.com')) {
-    // For ALB, assume it's configured to proxy both frontend and backend
-    // Use the same protocol and host, but backend port 8000
-    return `${protocol}//${hostname}:8000`;
-  }
-
-  // For direct EC2 access or other cloud providers, use same host with backend port
-  return `${protocol}//${hostname}:8000`;
+  // Use relative URLs to leverage Vite proxy in both dev and production
+  // This routes requests through the frontend server (port 5173) to backend (port 8000)
+  // Benefits: Only one port exposed, better security, simplified networking
+  return '';
 };
 
 const API_BASE_URL = getApiBaseUrl();
@@ -335,7 +316,12 @@ class ApiClient {
       this.wsConnection.close();
     }
 
-    const wsUrl = this.baseUrl.replace('http://', 'ws://').replace('https://', 'wss://');
+    // Use relative WebSocket URL to leverage Vite proxy
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = this.baseUrl ?
+      this.baseUrl.replace('http://', 'ws://').replace('https://', 'wss://') :
+      `${protocol}//${window.location.host}`;
+
     this.wsConnection = new WebSocket(`${wsUrl}/ws`);
 
     this.wsConnection.onopen = () => {

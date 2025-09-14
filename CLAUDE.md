@@ -123,39 +123,70 @@ This is a **visual agent flow builder** that allows users to create, configure, 
 - **Logging**: Production logs are stored in `logs/frontend.log` and `logs/backend.log`
 - **Process Management**: Scripts handle PID files, graceful shutdown, and cleanup
 - **Health Checks**: Automatic verification that services started successfully
-- **Port Management**: Default ports are 5173 (frontend) and 8000 (backend)
+- **Secure Proxy Architecture**: Backend (port 8000) only accessible internally
+- **Single Port Exposure**: Only frontend port (5173) needs to be exposed externally
 - **Background Execution**: Services run as background processes with proper logging
 - **Cloud Compatibility**: Auto-detects EC2 public IP for cloud deployment
 - **ALB Support**: Compatible with AWS Application Load Balancer deployments
+
+### Proxy Architecture
+
+The application uses **Vite's built-in proxy** for secure backend communication:
+
+```typescript
+// vite.config.ts
+preview: {
+  proxy: {
+    '/api': { target: 'http://localhost:8000' },
+    '/health': { target: 'http://localhost:8000' },
+    '/ws': { target: 'ws://localhost:8000', ws: true }
+  }
+}
+```
+
+**Benefits:**
+- **Security**: Backend not exposed to internet
+- **Simplified Networking**: Only one port to manage
+- **CORS Elimination**: No cross-origin issues
+- **Unified Access**: All endpoints available through frontend URL
 
 ### Cloud Deployment Options
 
 #### Local Development
 ```bash
 ./start_all.sh
-# Uses localhost configuration automatically
+# Access: http://localhost:5173
+# API Docs: http://localhost:5173/docs (proxied to backend)
 ```
 
 #### Direct EC2 Deployment
 ```bash
 ./start_all.sh
-# Auto-detects public IP via AWS metadata service or external IP service
-# Creates .env.local with VITE_API_BASE_URL=http://PUBLIC_IP:8000
+# Access: http://PUBLIC_IP:5173
+# API Docs: http://PUBLIC_IP:5173/docs (proxied to backend)
+# Backend: 127.0.0.1:8000 (internal only)
 ```
 
 #### AWS ALB (Application Load Balancer) Deployment
 ```bash
 export ALB_HOSTNAME=your-alb-hostname.us-west-2.elb.amazonaws.com
 ./start_all.sh
-# Creates .env.local with VITE_API_BASE_URL=http://ALB_HOSTNAME:8000
-# Vite preview server configured to allow all hosts (ALB compatible)
+# Access: http://ALB_HOSTNAME:5173
+# API Docs: http://ALB_HOSTNAME:5173/docs (proxied to backend)
+# Backend: 127.0.0.1:8000 (internal only)
 ```
 
 ### Environment Configuration
-- **Dynamic API URL Detection**: Frontend automatically detects correct backend URL
-- **Environment Variable Override**: Set `VITE_API_BASE_URL` to override auto-detection
+- **Vite Proxy**: All API requests automatically routed through frontend
+- **Backend Binding**: Backend bound to 127.0.0.1 (localhost only) for security
+- **Environment Variable Override**: Set `VITE_API_BASE_URL` for external backend scenarios
 - **ALB Hostname Support**: Use `ALB_HOSTNAME` environment variable for load balancer deployments
-- **Vite Host Configuration**: Preview server configured with `allowedHosts: true` for ALB compatibility
+- **Host Configuration**: Preview server configured with `allowedHosts: true` for ALB compatibility
+
+### Network Security
+- **Firewall/Security Groups**: Only allow inbound port 5173
+- **Backend Isolation**: Port 8000 not accessible from external networks
+- **Internal Communication**: Frontend-to-backend communication via localhost
 
 ### Important Implementation Details
 - **Streaming Detection**: Frontend detects streaming by checking for `yield` statements in generated code OR agents with `streaming: true` property

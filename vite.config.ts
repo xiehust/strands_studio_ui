@@ -15,11 +15,48 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 5173,
     strictPort: true,
-    allowedHosts: true // Allow all hosts for maximum compatibility with ALBs and cloud deployments
+    allowedHosts: true, // Allow all hosts for maximum compatibility with ALBs and cloud deployments
+    proxy: {
+      // Proxy all /api and /health requests to backend
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        secure: false
+      },
+      '/health': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        secure: false
+      },
+      // Proxy WebSocket connections for real-time updates
+      '/ws': {
+        target: 'ws://localhost:8000',
+        ws: true,
+        changeOrigin: true
+      }
+    }
   },
   server: {
     host: '0.0.0.0',
     port: 5173,
-    strictPort: true
+    strictPort: true,
+    proxy: {
+      // Same proxy configuration for development server
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        secure: false
+      },
+      '/health': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        secure: false
+      },
+      '/ws': {
+        target: 'ws://localhost:8000',
+        ws: true,
+        changeOrigin: true
+      }
+    }
   }
 })
