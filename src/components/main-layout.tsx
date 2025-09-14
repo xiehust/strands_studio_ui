@@ -406,6 +406,8 @@ export function MainLayout() {
               selectedNode={selectedNode}
               onClose={handleClosePanel}
               onUpdateNode={handleUpdateNode}
+              edges={edges}
+              nodes={nodes}
             />
           )}
           

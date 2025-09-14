@@ -1,22 +1,44 @@
-import { type Node } from '@xyflow/react';
+import { type Node, type Edge } from '@xyflow/react';
 import { Settings, X } from 'lucide-react';
 
 interface PropertyPanelProps {
   selectedNode: Node | null;
   onClose: () => void;
   onUpdateNode: (nodeId: string, data: any) => void;
+  edges?: Edge[];
+  nodes?: Node[];
   className?: string;
 }
 
-export function PropertyPanel({ 
-  selectedNode, 
-  onClose, 
-  onUpdateNode, 
-  className = '' 
+export function PropertyPanel({
+  selectedNode,
+  onClose,
+  onUpdateNode,
+  edges = [],
+  nodes = [],
+  className = ''
 }: PropertyPanelProps) {
   if (!selectedNode) {
     return null;
   }
+
+  // Check if the selected node has an output node connected
+  const hasConnectedOutputNode = () => {
+    if (!selectedNode || (selectedNode.type !== 'agent' && selectedNode.type !== 'orchestrator-agent')) {
+      return true; // For non-agent nodes, always allow streaming
+    }
+
+    // Find all edges where this node is the source from its output handle
+    const outgoingEdges = edges.filter(edge =>
+      edge.source === selectedNode.id && edge.sourceHandle === 'output'
+    );
+
+    // For each outgoing edge, check if the target node is an output node
+    return outgoingEdges.some(edge => {
+      const targetNode = nodes.find(node => node.id === edge.target);
+      return targetNode && targetNode.type === 'output';
+    });
+  };
 
   const handleInputChange = (field: string, value: any) => {
     try {
@@ -225,13 +247,17 @@ export function PropertyPanel({
           <input
             type="checkbox"
             checked={data.streaming || false}
+            disabled={!hasConnectedOutputNode()}
             onChange={(e) => handleInputChange('streaming', e.target.checked)}
-            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
           />
           <span className="text-sm font-medium text-gray-700">Enable Streaming</span>
         </label>
         <p className="text-xs text-gray-500 mt-1">
-          Stream responses in real-time for better user experience
+          {hasConnectedOutputNode()
+            ? "Stream responses in real-time for better user experience"
+            : "Connect an Output node to enable streaming mode"
+          }
         </p>
       </div>
     </div>
@@ -741,13 +767,17 @@ export function PropertyPanel({
           <input
             type="checkbox"
             checked={data.streaming || false}
+            disabled={!hasConnectedOutputNode()}
             onChange={(e) => handleInputChange('streaming', e.target.checked)}
-            className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+            className="rounded border-gray-300 text-purple-600 focus:ring-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
           />
           <span className="text-sm font-medium text-gray-700">Enable Streaming</span>
         </label>
         <p className="text-xs text-gray-500 mt-1">
-          Stream responses in real-time for better user experience
+          {hasConnectedOutputNode()
+            ? "Stream responses in real-time for better user experience"
+            : "Connect an Output node to enable streaming mode"
+          }
         </p>
       </div>
     </div>

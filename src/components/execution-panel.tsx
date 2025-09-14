@@ -305,7 +305,7 @@ export function ExecutionPanel({
           request,
           (chunk: string) => {
             // Handle streaming chunk
-            console.log('Chunk:', JSON.stringify(chunk), 'Has \\n:', chunk.includes('\n'));
+            // console.log('Chunk:', JSON.stringify(chunk), 'Has \\n:', chunk.includes('\n'));
             setStreamingOutput(prev => prev + chunk);
           },
           (finalOutput: string, backendExecutionTime?: number) => {

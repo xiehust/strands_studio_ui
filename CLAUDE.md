@@ -85,8 +85,9 @@ This is a **visual agent flow builder** that allows users to create, configure, 
   - `code-panel.tsx` - Code generation and editing
   - `property-panel.tsx` - Node configuration
 - `/src/lib/` - Utility functions and core logic
-  - `code-generator.ts` - Converts visual flows to Python code
-  - `api-client.ts` - Backend communication and WebSocket handling
+  - `code-generator.ts` - Converts visual flows to Python code with MCP support and streaming detection
+  - `api-client.ts` - Backend communication and WebSocket handling with streaming chunk processing
+  - `connection-validator.ts` - Node connection rules and validation logic
   - `validation.ts` - Data validation utilities
 - `/backend/` - Python FastAPI server
   - `main.py` - FastAPI application with execution endpoints
@@ -117,8 +118,25 @@ This is a **visual agent flow builder** that allows users to create, configure, 
 - **State Management**: Uses React state with WebSocket updates for real-time execution status
 - **Execution Flow**: Visual nodes → Code generation → Backend execution → Results display
 - **Error Handling**: Comprehensive error handling for validation, execution, and storage operations
+- **Connection Validation**: Enforces node connection rules via `connection-validator.ts` - prevents invalid connections and provides user feedback
+- **MCP Integration**: Each MCP server node can only connect to one agent node to prevent resource conflicts
+- **MCP Client Configuration**: Timeout values from MCP node properties are passed as `startup_timeout` parameter to MCPClient
+- **Execution History Optimization**: Uses single API call (`/api/execution-history`) instead of multiple requests for better performance
 
-### rules
+### Critical Architecture Rules
+1. **MCP Connection Constraints**: Each MCP server node can only connect to one agent node. This prevents resource conflicts and ensures proper context management in generated code.
+
+2. **Streaming Implementation**: 
+   - Frontend detects streaming by checking `yield` statements in generated code OR `streaming: true` in agent properties
+   - Empty SSE chunks (`data: `) represent newlines and must be converted to `\n` characters
+   - MCP clients are only started in context managers when directly connected to the execution agent
+
+3. **Code Generation Context**: 
+   - MCP clients use proper indentation (4 spaces base, 8 spaces inside context managers)
+   - Timeout values from MCP node properties are passed as `startup_timeout` parameter
+   - Only connected tools are included in agent initialization
+
+### Development Rules
 1. Always use context7 when I need code generation, setup or configuration steps, or library/API documentation. This means you should automatically use the Context7 MCP tools to resolve library id and get library docs without me having to explicitly ask.
 
 2. The python virtual env is managed by uv, use `uv run` instead of using `python` directly 

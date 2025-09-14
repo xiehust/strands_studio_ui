@@ -233,25 +233,41 @@ class ApiClient {
 
         // Decode the chunk and add to buffer
         buffer += decoder.decode(value, { stream: true });
-        
-        // Process complete lines
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // Keep incomplete line in buffer
 
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const chunk = line.substring(6); // Remove 'data: ' prefix
-            
-            if (chunk === '[STREAM_COMPLETE]') {
+        // Process complete SSE events (separated by \n\n)
+        const events = buffer.split('\n\n');
+        buffer = events.pop() || ''; // Keep incomplete event in buffer
+
+        for (const event of events) {
+          if (!event.trim()) continue; // Skip empty events
+
+          // Collect all data fields in this event
+          let eventData = '';
+          const lines = event.split('\n');
+
+          // Simply concatenate all data field values, treating empty fields as newlines
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const chunk = line.substring(6); // Remove 'data: ' prefix
+              eventData += (chunk === '' ? '\n' : chunk);
+            } else if (line === 'data:') {
+              // Handle "data:" with no space - represents empty data field (newline)
+              eventData += '\n';
+            }
+          }
+
+          // Process the accumulated event data
+          if (eventData !== '' || lines.some(line => line === 'data:' || line.startsWith('data: '))) {
+            if (eventData === '[STREAM_COMPLETE]') {
               if (errorMessage) {
                 onError(errorMessage, accumulatedOutput);
               } else {
                 onComplete(accumulatedOutput);
               }
               return;
-            } else if (chunk.startsWith('[STREAM_COMPLETE:')) {
+            } else if (eventData.startsWith('[STREAM_COMPLETE:')) {
               // Parse execution time from format: [STREAM_COMPLETE:10.234]
-              const match = chunk.match(/^\[STREAM_COMPLETE:([\d.]+)\]$/);
+              const match = eventData.match(/^\[STREAM_COMPLETE:([\d.]+)\]$/);
               const executionTime = match ? parseFloat(match[1]) : undefined;
               if (errorMessage) {
                 onError(errorMessage, accumulatedOutput, executionTime);
@@ -259,15 +275,13 @@ class ApiClient {
                 onComplete(accumulatedOutput, executionTime);
               }
               return;
-            } else if (chunk.startsWith('Error: ')) {
+            } else if (eventData.startsWith('Error: ')) {
               // Store error message but don't return immediately - wait for completion signal with timing
-              errorMessage = chunk.substring(7); // Remove 'Error: ' prefix
+              errorMessage = eventData.substring(7); // Remove 'Error: ' prefix
             } else {
-              console.log('API client streaming chunk:', JSON.stringify(chunk));
-              // Handle empty chunks as newlines (they represent \n characters from the LLM)
-              const processedChunk = chunk === '' ? '\n' : chunk;
-              accumulatedOutput += processedChunk;
-              onChunk(processedChunk);
+              // Process the event data
+              accumulatedOutput += eventData;
+              onChunk(eventData);
             }
           }
         }

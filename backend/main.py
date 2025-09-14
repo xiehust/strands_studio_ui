@@ -505,11 +505,11 @@ async def execute_code_stream(request: ExecutionRequest):
                             original_print = print
                             
                             def streaming_print(*args, **kwargs):
-                                # Call original print to maintain console output
-                                original_print(*args, **kwargs)
                                 # Capture the output for streaming
                                 if args:
-                                    output = ' '.join(str(arg) for arg in args)
+                                    logger.info(f"args:{args[0]}")
+                                    # output = ' '.join(str(arg) for arg in args)
+                                    output = args[0]
                                     # Check if this looks like streaming data (not debug messages)
                                     if output and output != "Starting streaming response...":
                                         # Put the output in the queue (non-blocking)
@@ -542,6 +542,7 @@ async def execute_code_stream(request: ExecutionRequest):
                                     output = await asyncio.wait_for(output_queue.get(), timeout=0.1)
                                     if output:
                                         yield output
+                                        logger.info(f"output:{output}")
                                 except asyncio.TimeoutError:
                                     # Check if execution is done
                                     if execution_done.is_set():
@@ -576,7 +577,10 @@ async def execute_code_stream(request: ExecutionRequest):
                         # Convert stream_data to string and ensure it preserves formatting
                         chunk_str = str(stream_data)
                         if not chunk_str.startswith("data: "):
-                            yield f"data: {chunk_str}\n\n"
+                            # Properly escape newlines in SSE data by splitting into multiple data: lines
+                            lines = chunk_str.split('\n')
+                            sse_data = '\n'.join(f'data: {line}' for line in lines)
+                            yield f"{sse_data}\n\n"
                         else:
                             yield f"{chunk_str}\n\n" if not chunk_str.endswith("\n\n") else chunk_str
                     chunk_count += 1
@@ -1172,11 +1176,12 @@ async def execute_strands_code(code: str, input_data: Optional[str] = None, open
 @app.post("/api/storage/artifacts", response_model=ArtifactResponse)
 async def save_artifact(request: ArtifactRequest):
     """Save an artifact to storage"""
-    logger.info(f"Saving artifact: {request.project_id}/{request.version}/{request.execution_id}/{request.file_type}")
+    # logger.info(f"Saving artifact: {request.project_id}/{request.version}/{request.execution_id}/{request.file_type}")
     try:
         result = await storage_service.save_artifact(request)
         if result.success:
-            logger.info(f"Artifact saved successfully: {result.file_path}")
+            # logger.info(f"Artifact saved successfully: {result.file_path}")
+            pass
         else:
             logger.error(f"Failed to save artifact: {result.message}")
         return result
@@ -1190,7 +1195,7 @@ async def retrieve_artifact(project_id: str, version: str, execution_id: str, fi
     logger.info(f"Retrieving artifact: {project_id}/{version}/{execution_id}/{file_type}")
     try:
         result = await storage_service.retrieve_artifact(project_id, version, execution_id, file_type)
-        logger.info(f"Artifact retrieved successfully")
+        # logger.info(f"Artifact retrieved successfully")
         return result
     except Exception as e:
         logger.error(f"Error in retrieve_artifact endpoint: {e}")

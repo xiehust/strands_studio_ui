@@ -59,7 +59,7 @@ class StorageService:
             Response with operation result and metadata
         """
         try:
-            logger.info(f"Saving artifact: {request.project_id}/{request.version}/{request.execution_id}/{request.file_type}")
+            # logger.info(f"Saving artifact: {request.project_id}/{request.version}/{request.execution_id}/{request.file_type}")
             
             # Validate file type
             if not validate_file_type(request.file_type):
@@ -118,7 +118,7 @@ class StorageService:
             # Save metadata
             await self._save_metadata(storage_path, metadata)
             
-            logger.info(f"Artifact saved successfully: {file_path}")
+            # logger.info(f"Artifact saved successfully: {file_path}")
             
             return ArtifactResponse(
                 success=True,
