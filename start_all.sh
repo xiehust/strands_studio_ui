@@ -5,7 +5,7 @@
 
 set -e  # Exit on any error
 
-echo "🚀 Starting Strands UI in Production Mode..."
+echo "🚀 Starting Open Studio for Strands Agent UI in Production Mode..."
 
 # Colors for output
 GREEN='\033[0;32m'
