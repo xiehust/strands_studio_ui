@@ -5,7 +5,32 @@
 
 import { validatePathComponents, validateProjectOnly, validateProjectAndVersion, ValidationError } from './validation';
 
-const API_BASE_URL = 'http://localhost:8000';
+// Dynamic API base URL configuration
+const getApiBaseUrl = (): string => {
+  // First check for environment variable (set at build time)
+  if (import.meta.env.VITE_API_BASE_URL) {
+    return import.meta.env.VITE_API_BASE_URL;
+  }
+
+  // For development, use localhost
+  if (import.meta.env.DEV) {
+    return 'http://localhost:8000';
+  }
+
+  // For production, dynamically construct based on current host
+  const protocol = window.location.protocol;
+  const hostname = window.location.hostname;
+
+  // If accessing via localhost in production, use localhost
+  if (hostname === 'localhost' || hostname === '127.0.0.1') {
+    return 'http://localhost:8000';
+  }
+
+  // For remote access (EC2, etc.), use same host with backend port
+  return `${protocol}//${hostname}:8000`;
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 export interface ExecutionRequest {
   code: string;

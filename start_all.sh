@@ -35,6 +35,46 @@ fi
 # Create logs directory if it doesn't exist
 mkdir -p logs
 
+# Detect if we're running on a cloud instance (has public IP different from localhost)
+detect_public_ip() {
+    # Try to get public IP from AWS metadata service (works for EC2)
+    local public_ip=""
+    if command -v curl &> /dev/null; then
+        public_ip=$(curl -s --connect-timeout 3 http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || echo "")
+    fi
+
+    # If AWS metadata doesn't work, try other methods
+    if [ -z "$public_ip" ]; then
+        # Try to get external IP via external service
+        public_ip=$(curl -s --connect-timeout 3 https://api.ipify.org 2>/dev/null || echo "")
+    fi
+
+    echo "$public_ip"
+}
+
+# Set up environment variables for API URL
+setup_api_url() {
+    local public_ip=$(detect_public_ip)
+
+    if [ -n "$public_ip" ] && [ "$public_ip" != "127.0.0.1" ] && [ "$public_ip" != "localhost" ]; then
+        echo -e "${BLUE}🌐 Detected public IP: $public_ip${NC}"
+        echo -e "${BLUE}📡 Configuring API URL for cloud deployment...${NC}"
+
+        # Create .env.local for production build
+        cat > .env.local << EOF
+# Auto-generated for cloud deployment
+VITE_API_BASE_URL=http://$public_ip:8000
+EOF
+        echo -e "${GREEN}✅ Created .env.local with API URL: http://$public_ip:8000${NC}"
+        echo -e "${YELLOW}💡 Frontend will connect to backend at: http://$public_ip:8000${NC}"
+        echo -e "${YELLOW}💡 Access your application at: http://$public_ip:5173${NC}"
+    else
+        echo -e "${BLUE}🏠 Local deployment detected, using localhost configuration${NC}"
+        # Remove .env.local if it exists to use default localhost behavior
+        rm -f .env.local
+    fi
+}
+
 # Function to check if port is in use
 check_port() {
     local port=$1
@@ -62,6 +102,9 @@ if [ ! -d "node_modules" ]; then
     echo -e "${BLUE}📦 Installing frontend dependencies...${NC}"
     npm install
 fi
+
+# Set up API URL configuration for cloud deployment
+setup_api_url
 
 # Build frontend for production
 echo -e "${BLUE}🏗️  Building frontend for production...${NC}"
