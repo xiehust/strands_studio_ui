@@ -56,7 +56,21 @@ detect_public_ip() {
 setup_api_url() {
     local public_ip=$(detect_public_ip)
 
-    if [ -n "$public_ip" ] && [ "$public_ip" != "127.0.0.1" ] && [ "$public_ip" != "localhost" ]; then
+    # Check if ALB_HOSTNAME environment variable is set (for ALB deployments)
+    if [ -n "$ALB_HOSTNAME" ]; then
+        echo -e "${BLUE}🌐 ALB deployment detected: $ALB_HOSTNAME${NC}"
+        echo -e "${BLUE}📡 Configuring API URL for ALB deployment...${NC}"
+
+        # Create .env.local for ALB deployment
+        cat > .env.local << EOF
+# Auto-generated for ALB deployment
+VITE_API_BASE_URL=http://$ALB_HOSTNAME:8000
+EOF
+        echo -e "${GREEN}✅ Created .env.local with API URL: http://$ALB_HOSTNAME:8000${NC}"
+        echo -e "${YELLOW}💡 Frontend will connect to backend at: http://$ALB_HOSTNAME:8000${NC}"
+        echo -e "${YELLOW}💡 Access your application at: http://$ALB_HOSTNAME:5173${NC}"
+
+    elif [ -n "$public_ip" ] && [ "$public_ip" != "127.0.0.1" ] && [ "$public_ip" != "localhost" ]; then
         echo -e "${BLUE}🌐 Detected public IP: $public_ip${NC}"
         echo -e "${BLUE}📡 Configuring API URL for cloud deployment...${NC}"
 
@@ -72,6 +86,8 @@ EOF
         echo -e "${BLUE}🏠 Local deployment detected, using localhost configuration${NC}"
         # Remove .env.local if it exists to use default localhost behavior
         rm -f .env.local
+        echo -e "${YELLOW}💡 Frontend will use dynamic API URL detection${NC}"
+        echo -e "${YELLOW}💡 For ALB deployment, set ALB_HOSTNAME environment variable${NC}"
     fi
 }
 

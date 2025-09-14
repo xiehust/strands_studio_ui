@@ -26,7 +26,14 @@ const getApiBaseUrl = (): string => {
     return 'http://localhost:8000';
   }
 
-  // For remote access (EC2, etc.), use same host with backend port
+  // Handle ALB (Application Load Balancer) scenarios
+  if (hostname.includes('.elb.amazonaws.com') || hostname.includes('.amazonaws.com')) {
+    // For ALB, assume it's configured to proxy both frontend and backend
+    // Use the same protocol and host, but backend port 8000
+    return `${protocol}//${hostname}:8000`;
+  }
+
+  // For direct EC2 access or other cloud providers, use same host with backend port
   return `${protocol}//${hostname}:8000`;
 };
 

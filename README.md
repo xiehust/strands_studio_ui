@@ -79,11 +79,35 @@ npm run backend:prod
 - **Port Management**: Checks for port conflicts and provides warnings
 - **Graceful Shutdown**: `stop_all.sh` properly stops all services and cleans up processes
 - **Log Management**: Centralized logging in `logs/` directory
+- **Cloud Deployment**: Auto-detects public IP for EC2 deployment
+- **ALB Support**: Compatible with AWS Application Load Balancer
+
+#### Deployment Scenarios
+
+##### Local Development
+```bash
+./start_all.sh
+# Access: http://localhost:5173
+```
+
+##### Direct EC2 Deployment
+```bash
+./start_all.sh
+# Auto-detects public IP (e.g., http://35.88.128.160:5173)
+```
+
+##### AWS ALB Deployment
+```bash
+export ALB_HOSTNAME=your-alb-hostname.us-west-2.elb.amazonaws.com
+./start_all.sh
+# Access: http://your-alb-hostname.us-west-2.elb.amazonaws.com:5173
+```
 
 #### Production URLs
-- **Frontend**: http://localhost:5173
-- **Backend API**: http://localhost:8000
-- **API Documentation**: http://localhost:8000/docs
+- **Local**: http://localhost:5173 (frontend), http://localhost:8000 (backend)
+- **EC2**: http://PUBLIC_IP:5173 (frontend), http://PUBLIC_IP:8000 (backend)
+- **ALB**: http://ALB_HOSTNAME:5173 (frontend), http://ALB_HOSTNAME:8000 (backend)
+- **API Documentation**: Always available at backend URL + `/docs`
 
 #### Log Files
 - Frontend logs: `logs/frontend.log`

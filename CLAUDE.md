@@ -125,6 +125,37 @@ This is a **visual agent flow builder** that allows users to create, configure, 
 - **Health Checks**: Automatic verification that services started successfully
 - **Port Management**: Default ports are 5173 (frontend) and 8000 (backend)
 - **Background Execution**: Services run as background processes with proper logging
+- **Cloud Compatibility**: Auto-detects EC2 public IP for cloud deployment
+- **ALB Support**: Compatible with AWS Application Load Balancer deployments
+
+### Cloud Deployment Options
+
+#### Local Development
+```bash
+./start_all.sh
+# Uses localhost configuration automatically
+```
+
+#### Direct EC2 Deployment
+```bash
+./start_all.sh
+# Auto-detects public IP via AWS metadata service or external IP service
+# Creates .env.local with VITE_API_BASE_URL=http://PUBLIC_IP:8000
+```
+
+#### AWS ALB (Application Load Balancer) Deployment
+```bash
+export ALB_HOSTNAME=your-alb-hostname.us-west-2.elb.amazonaws.com
+./start_all.sh
+# Creates .env.local with VITE_API_BASE_URL=http://ALB_HOSTNAME:8000
+# Vite preview server configured to allow all hosts (ALB compatible)
+```
+
+### Environment Configuration
+- **Dynamic API URL Detection**: Frontend automatically detects correct backend URL
+- **Environment Variable Override**: Set `VITE_API_BASE_URL` to override auto-detection
+- **ALB Hostname Support**: Use `ALB_HOSTNAME` environment variable for load balancer deployments
+- **Vite Host Configuration**: Preview server configured with `allowedHosts: true` for ALB compatibility
 
 ### Important Implementation Details
 - **Streaming Detection**: Frontend detects streaming by checking for `yield` statements in generated code OR agents with `streaming: true` property
