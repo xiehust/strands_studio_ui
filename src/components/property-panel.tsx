@@ -122,7 +122,7 @@ export function PropertyPanel({
         >
           <option value="AWS Bedrock">AWS Bedrock</option>
           <option value="OpenAI">OpenAI</option>
-          <option value="Anthropic">Anthropic</option>
+          {/* <option value="Anthropic">Anthropic</option> */}
         </select>
       </div>
 
@@ -288,7 +288,7 @@ export function PropertyPanel({
           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
         >
           <option value="built-in">Built-in</option>
-          <option value="custom">Custom</option>
+          {/* <option value="custom">Custom</option> */}
         </select>
       </div>
 
@@ -304,12 +304,12 @@ export function PropertyPanel({
           >
             <option value="calculator">Calculator</option>
             <option value="file_read">File Reader</option>
+            <option value="file_write">File Write</option>
             <option value="shell">Shell Command</option>
             <option value="current_time">Current Time</option>
-            <option value="web_search">Web Search (demo)</option>
-            <option value="api_caller">API Caller (demo)</option>
-            <option value="database_query">Database Query (demo)</option>
-            <option value="email_sender">Email Sender (demo)</option>
+            <option value="http_request">Http Request</option>
+            <option value="editor">Editor</option>
+            <option value="retrieve">Retrieve (KB)</option>
           </select>
         ) : (
           <input

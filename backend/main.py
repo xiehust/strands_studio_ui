@@ -335,7 +335,8 @@ async def execute_code_stream(request: ExecutionRequest):
             if request.openai_api_key:
                 os.environ["OPENAI_API_KEY"] = request.openai_api_key
                 logger.info("OpenAI API key set in environment for streaming")
-            
+            # Env for strands tool
+            os.environ['BYPASS_TOOL_CONSENT'] = "true"
             # Import Strands Agent SDK
             logger.info("Importing Strands Agent SDK for streaming")
             from strands import Agent, tool
@@ -1056,6 +1057,8 @@ async def execute_strands_code(code: str, input_data: Optional[str] = None, open
         from strands.models import BedrockModel
         from strands_tools import calculator, file_read, shell, current_time
         
+        # Env for strands tool
+        os.environ['BYPASS_TOOL_CONSENT'] = "true"
         # Import OpenAI model if needed
         openai_imports = {}
         if 'OpenAIModel' in code:
