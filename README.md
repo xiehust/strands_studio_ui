@@ -152,15 +152,20 @@ The application consists of a React frontend for the visual editor and a FastAPI
 - [x] MCP server node
 - [x] Built tool node
 - [x] Custom tool node
-- [ ] Structural Output Node
-- [ ] Swarm Agent Node
+- [ ] Structural Output Node - to do 
+- [ ] Swarm Agent Node - to do 
 
 ### Flows
 - [x] Single agent mode
 - [x] Agents as tool mode
-- [ ] Graph mode
-- [ ] Workflow mode
+- [ ] Graph mode - to do 
+- [ ] Workflow mode - to do 
 
-### Other
+### Execution
 - [x] Single turn execution run
-- [ ] Multi turns execution run
+- [ ] Multi turns execution run - to do 
+
+### Deployment
+- [ ] One-click deploy to Bedrock AgentCore - to do 
+- [ ] One-click deploy to Lambda - to do 
+- [ ] One-click deploy to ECS Fargate - to do 
