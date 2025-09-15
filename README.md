@@ -2,7 +2,7 @@
 
 A visual drag-and-drop interface for creating, configuring, and executing AI agent workflows. Build complex agent interactions through an intuitive node-based editor that generates Python code using the Strands Agent SDK.
 
-⚠️ **Disclaimer: The Studio is Not an official Amazon product - independent open-source project**
+⚠️ **Disclaimer: The Studio is NOT an official Amazon product - independent open-source project**
 
 ## Features
 
