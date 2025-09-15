@@ -35,7 +35,7 @@ backend/**/*.pyo
 backend/**/*.pyd
 backend/.env
 backend/logs/
-
+backend/tests/
 # Python
 *.pyc
 *.pyo

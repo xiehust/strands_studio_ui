@@ -16,7 +16,8 @@ export function generateStrandsAgentCode(
     'from strands_tools import calculator, file_read, shell, current_time',
     'import json',
     'import os',
-    'import asyncio'
+    'import asyncio',
+    'import argparse'
   ]);
   
   // Check if MCP tools are used
@@ -379,7 +380,7 @@ function generateMainExecutionCode(
   const mcpNodes = allNodes.filter(node => node.type === 'mcp-tool');
   
   let mainCode = `# Main execution
-async def main():`;
+async def main(user_input_arg: str = None, input_data_arg: str = None):`;
 
   // Find the agent that should be executed (connected to input)
   const executionAgent = findConnectedAgent(allNodes, edges);
@@ -389,7 +390,17 @@ async def main():`;
     return ""
 
 if __name__ == "__main__":
-    asyncio.run(main())`;
+    parser = argparse.ArgumentParser(description='Execute Strands Agent')
+    parser.add_argument('--user-input', type=str, help='User input prompt')
+    parser.add_argument('--input-data', type=str, help='Input data for the agent')
+
+    args = parser.parse_args()
+
+    # Priority: --user-input flag > --input-data flag
+    user_input_param = args.user_input or args.input_data
+    input_data_param = args.input_data
+
+    asyncio.run(main(user_input_param, input_data_param))`;
   }
 
   if (hasMCPTools) {
@@ -412,7 +423,7 @@ if __name__ == "__main__":
       const pythonCode = (node.data?.pythonCode as string) || '';
       return extractFunctionName(pythonCode) || 'custom_tool';
     });
-    const allGlobals = ['user_input', 'input_data', ...allMcpClientVars, ...customToolGlobals];
+    const allGlobals = ['input_data', ...allMcpClientVars, ...customToolGlobals];
     
     mainCode += `
     global ${allGlobals.join(', ')}
@@ -487,17 +498,18 @@ ${indentation}# Create orchestrator agent ${executionAgentMcpClientVars.length >
 ${indentation}${agentName} = Agent(
 ${indentation}    model=${agentName}_model,
 ${indentation}    system_prompt="""${fullSystemPrompt}""",
-${indentation}    tools=${toolsArrayCode}
+${indentation}    tools=${toolsArrayCode},
+${indentation}    callback_handler=None
 ${indentation})`;
     } else {
       // Regular agent
       const connectedTools = findConnectedTools(executionAgent, allNodes, edges);
       const nonMCPTools = connectedTools.filter(tool => tool.node.type !== 'mcp-tool');
       const regularToolsList = nonMCPTools.map(tool => tool.code);
-      const toolsArrayCode = regularToolsList.length > 0 
+      const toolsArrayCode = regularToolsList.length > 0
         ? `mcp_tools + [${regularToolsList.join(', ')}]`
         : 'mcp_tools';
-      
+
       const indentation = executionAgentMcpClientVars.length > 0 ? '        ' : '    ';
       mainCode += `
 ${indentation}
@@ -505,7 +517,8 @@ ${indentation}# Create agent ${executionAgentMcpClientVars.length > 0 ? 'with MC
 ${indentation}${agentName} = Agent(
 ${indentation}    model=${agentName}_model,
 ${indentation}    system_prompt="""${systemPrompt}""",
-${indentation}    tools=${toolsArrayCode}
+${indentation}    tools=${toolsArrayCode},
+${indentation}    callback_handler=None
 ${indentation})`;
     }
   } else {
@@ -514,7 +527,7 @@ ${indentation})`;
     
     mainCode += `
     # Access the global variables
-    global user_input, input_data, ${executionAgentName}`;
+    global input_data, ${executionAgentName}`;
   }
 
   // Determine indentation based on whether execution agent has MCP tools
@@ -528,11 +541,13 @@ ${indentation})`;
   // Check if this agent has connected user inputs
   const connectedUserInputs = findConnectedUserInputs(executionAgent, allNodes, edges);
     
-    // Generate user input logic that prioritizes input_data from execution panel
+    // Generate user input logic that prioritizes command-line arguments
     mainCode += `
-${baseIndent}# User input - prioritize input_data from execution panel
-${baseIndent}if input_data is not None and input_data.strip():
-${baseIndent}    user_input = input_data.strip()`;
+${baseIndent}# User input - prioritize command-line arguments over execution panel data
+${baseIndent}if user_input_arg is not None and user_input_arg.strip():
+${baseIndent}    user_input = user_input_arg.strip()
+${baseIndent}elif input_data_arg is not None and input_data_arg.strip():
+${baseIndent}    user_input = input_data_arg.strip()`;
     
     if (connectedUserInputs.length > 0) {
       mainCode += `
@@ -576,7 +591,17 @@ ${baseIndent}    if "data" in event:
 ${baseIndent}        print(event['data'],end='',flush=True)
 
 if __name__ == "__main__":
-    asyncio.run(main())`;
+    parser = argparse.ArgumentParser(description='Execute Strands Agent')
+    parser.add_argument('--user-input', type=str, help='User input prompt')
+    parser.add_argument('--input-data', type=str, help='Input data for the agent')
+
+    args = parser.parse_args()
+
+    # Priority: --user-input flag > --input-data flag
+    user_input_param = args.user_input or args.input_data
+    input_data_param = args.input_data
+
+    asyncio.run(main(user_input_param, input_data_param))`;
     } else {
       mainCode += `
 ${baseIndent}# Execute agent (sync execution)
@@ -586,7 +611,17 @@ ${baseIndent}
 ${baseIndent}return str(response)
 
 if __name__ == "__main__":
-    asyncio.run(main())`;
+    parser = argparse.ArgumentParser(description='Execute Strands Agent')
+    parser.add_argument('--user-input', type=str, help='User input prompt')
+    parser.add_argument('--input-data', type=str, help='Input data for the agent')
+
+    args = parser.parse_args()
+
+    # Priority: --user-input flag > --input-data flag
+    user_input_param = args.user_input or args.input_data
+    input_data_param = args.input_data
+
+    asyncio.run(main(user_input_param, input_data_param))`;
     }
 
   // Add closing of the context manager if we have MCP tools
@@ -735,7 +770,8 @@ def ${functionName}(user_input: str) -> str:
         agent = Agent(
             model=${functionName}_model,
             system_prompt="""${systemPrompt}""",
-            tools=${toolsArrayCode}
+            tools=${toolsArrayCode},
+            callback_handler=None
         )
         
         # Execute and return result
@@ -757,7 +793,8 @@ def ${functionName}(user_input: str) -> str:
     # Create agent
     agent = Agent(
         model=${functionName}_model,
-        system_prompt="""${systemPrompt}"""${toolsCode}
+        system_prompt="""${systemPrompt}"""${toolsCode},
+        callback_handler=None
     )
     
     # Execute and return result
@@ -848,7 +885,8 @@ def ${functionName}(user_input: str) -> str:
         agent = Agent(
             model=${functionName}_model,
             system_prompt="""${fullSystemPrompt}""",
-            tools=${toolsArrayCode}
+            tools=${toolsArrayCode},
+            callback_handler=None
         )
         
         # Execute and return result
@@ -870,7 +908,8 @@ def ${functionName}(user_input: str) -> str:
     # Create orchestrator agent
     agent = Agent(
         model=${functionName}_model,
-        system_prompt="""${fullSystemPrompt}"""${toolsCode}
+        system_prompt="""${fullSystemPrompt}"""${toolsCode},
+        callback_handler=None
     )
     
     # Execute and return result
