@@ -163,4 +163,4 @@ The application consists of a React frontend for the visual editor and a FastAPI
 
 ### Other
 - [x] Single turn execution run
-- [ ] Multi turns execturion run
+- [ ] Multi turns execution run
