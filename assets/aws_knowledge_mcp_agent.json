@@ -1,0 +1,99 @@
+{
+  "id": "project_1757857548107",
+  "createdAt": "2025-09-14T13:45:48.107Z",
+  "updatedAt": "2025-09-15T09:58:14.420Z",
+  "version": "1.0.0",
+  "name": "test1",
+  "nodes": [
+    {
+      "id": "agent_1757857529844",
+      "type": "agent",
+      "position": {
+        "x": 439.5,
+        "y": 145.25
+      },
+      "data": {
+        "label": "Agent",
+        "modelProvider": "AWS Bedrock",
+        "modelId": "us.amazon.nova-pro-v1:0",
+        "modelName": "Amazon Nova Pro v1",
+        "systemPrompt": "You are an AWS expert, you are equipped with AWS knowledge tools to get latest AWS knowledge",
+        "temperature": 0.7,
+        "maxTokens": 4000,
+        "streaming": true
+      },
+      "selected": false
+    },
+    {
+      "id": "input_1757857534535",
+      "type": "input",
+      "position": {
+        "x": 31.52464502250308,
+        "y": 197.33159755051236
+      },
+      "data": {
+        "label": "input node"
+      },
+      "selected": false
+    },
+    {
+      "id": "output_1757857535890",
+      "type": "output",
+      "position": {
+        "x": 688.7375563900223,
+        "y": 273.7993391694574
+      },
+      "data": {
+        "label": "output node"
+      },
+      "selected": false
+    },
+    {
+      "id": "mcp-tool_1757930144269",
+      "type": "mcp-tool",
+      "position": {
+        "x": 107.54242653202257,
+        "y": -51.67611204671698
+      },
+      "data": {
+        "label": "MCP Server",
+        "serverName": "mcp_server",
+        "transportType": "streamable_http",
+        "command": "uvx",
+        "args": [
+          "server-name@latest"
+        ],
+        "argsText": "server-name@latest",
+        "url": "https://knowledge-mcp.global.api.aws",
+        "timeout": 30,
+        "description": "MCP server for external tools",
+        "env": {},
+        "envText": ""
+      },
+      "selected": false
+    }
+  ],
+  "edges": [
+    {
+      "source": "input_1757857534535",
+      "sourceHandle": "output",
+      "target": "agent_1757857529844",
+      "targetHandle": "user-input",
+      "id": "xy-edge__input_1757857534535output-agent_1757857529844user-input"
+    },
+    {
+      "source": "agent_1757857529844",
+      "sourceHandle": "output",
+      "target": "output_1757857535890",
+      "targetHandle": "input",
+      "id": "xy-edge__agent_1757857529844output-output_1757857535890input"
+    },
+    {
+      "source": "mcp-tool_1757930144269",
+      "sourceHandle": "mcp-tools",
+      "target": "agent_1757857529844",
+      "targetHandle": "tools",
+      "id": "xy-edge__mcp-tool_1757930144269mcp-tools-agent_1757857529844tools"
+    }
+  ]
+}

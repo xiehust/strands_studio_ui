@@ -47,6 +47,9 @@ npm run backend:dev
 # Run both frontend and backend
 npm run dev:full
 ```
+### Play with sample flow
+Download this sample [Flow](assets/sample_image.png) and import to the UI, and experience it.
+![alt text](assets/sample_image.png)
 
 ### Production Deployment
 
