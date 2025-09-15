@@ -81,7 +81,7 @@ export function OutputNode({ data, selected, id }: NodeProps) {
         type="target"
         position={Position.Left}
         id="input"
-        className="!bg-indigo-500"
+        className="!bg-indigo-500 !w-3 !h-3 !absolute"
         style={{ left: -6 }}
       />
     </div>
