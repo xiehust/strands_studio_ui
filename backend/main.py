@@ -445,7 +445,7 @@ async def execute_code_stream(request: ExecutionRequest):
                     if inspect.isasyncgenfunction(main_func):
                         # The main function is an async generator, stream from it directly
                         logger.info(f"Main function is an async generator, streaming directly - ID: {execution_id}")
-                        async for chunk in main_func():
+                        async for chunk in main_func(user_input_arg=None, input_data_arg=request.input_data):
                             if chunk is not None:
                                 yield chunk
                     elif 'yield' in request.code:
@@ -454,7 +454,7 @@ async def execute_code_stream(request: ExecutionRequest):
                         logger.info(f"Detected yield in code, attempting to stream from main function - ID: {execution_id}")
                         try:
                             # Try to call main as a generator
-                            result = main_func()
+                            result = main_func(user_input_arg=None, input_data_arg=request.input_data)
                             if hasattr(result, '__aiter__'):
                                 # It's an async iterator/generator
                                 async for chunk in result:
@@ -482,7 +482,7 @@ async def execute_code_stream(request: ExecutionRequest):
                             logger.warning(f"Failed to stream from main function, falling back - ID: {execution_id}: {e}")
                             # Fallback to regular execution
                             try:
-                                result = await main_func()
+                                result = await main_func(user_input_arg=None, input_data_arg=request.input_data)
                                 if result is not None:
                                     # Check if the result is an async generator
                                     if inspect.isasyncgen(result):
@@ -523,7 +523,7 @@ async def execute_code_stream(request: ExecutionRequest):
                             # Run the main function in a separate task
                             async def run_main():
                                 try:
-                                    result = await main_func()
+                                    result = await main_func(user_input_arg=None, input_data_arg=request.input_data)
                                     if result is not None:
                                         output_queue.put_nowait(str(result))
                                 except Exception as e:
@@ -552,7 +552,7 @@ async def execute_code_stream(request: ExecutionRequest):
                         else:
                             # Regular async function without streaming
                             logger.info(f"Regular async function, executing once - ID: {execution_id}")
-                            result = await main_func()
+                            result = await main_func(user_input_arg=None, input_data_arg=request.input_data)
                             if result is not None:
                                 # Check if the result is an async generator
                                 if inspect.isasyncgen(result):
@@ -1141,15 +1141,17 @@ async def execute_strands_code(code: str, input_data: Optional[str] = None, open
                 logger.info("Calling main function")
                 import inspect
                 import asyncio
-                
+
                 # Check if main function is async
                 if inspect.iscoroutinefunction(locals_dict['main']):
                     logger.info("Main function is async, awaiting result")
-                    result = await locals_dict['main']()
+                    # Pass user_input and input_data as arguments
+                    result = await locals_dict['main'](user_input_arg=None, input_data_arg=input_data)
                 else:
                     logger.info("Main function is sync, calling directly")
-                    result = locals_dict['main']()
-                
+                    # Pass user_input and input_data as arguments
+                    result = locals_dict['main'](user_input_arg=None, input_data_arg=input_data)
+
                 if result is not None:
                     logger.info(f"Main function returned: {type(result).__name__}")
                     logger.info(f"Main function result: {result}")
