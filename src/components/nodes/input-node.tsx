@@ -40,7 +40,7 @@ export function InputNode({ data, selected, id }: NodeProps) {
 
   return (
     <div className={`
-      bg-white rounded-lg border-2 shadow-sm min-w-[200px] max-w-[300px]
+      bg-white rounded-lg border-2 shadow-sm min-w-[200px] max-w-[300px] relative
       ${selected ? 'border-blue-500 shadow-lg' : `border-gray-200 hover:${colors.border}`}
     `}>
       {/* Node Header */}
@@ -85,7 +85,7 @@ export function InputNode({ data, selected, id }: NodeProps) {
         type="source"
         position={Position.Right}
         id="output"
-        className="!bg-green-500"
+        className="!bg-green-500 !w-3 !h-3 !absolute"
         style={{ right: -6 }}
       />
     </div>

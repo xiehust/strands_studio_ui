@@ -106,7 +106,7 @@ export function CustomToolNode({ data, selected, id }: NodeProps) {
         type="target"
         position={Position.Left}
         id="config"
-        className="!bg-gray-500"
+        className="!bg-gray-500 !w-3 !h-3 !absolute"
         style={{ left: -6 }}
       />
 
@@ -115,7 +115,7 @@ export function CustomToolNode({ data, selected, id }: NodeProps) {
         type="source"
         position={Position.Right}
         id="tool-output"
-        className="!bg-orange-500"
+        className="!bg-orange-500 !w-3 !h-3 !absolute"
         style={{ right: -6 }}
       />
     </div>

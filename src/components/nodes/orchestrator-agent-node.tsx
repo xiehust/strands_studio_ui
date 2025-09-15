@@ -76,21 +76,21 @@ export function OrchestratorAgentNode({ data, selected, id }: NodeProps) {
         type="target"
         position={Position.Top}
         id="user-input"
-        className="!bg-green-500"
-        style={{ top: -6, left: '50%', transform: 'translateX(-50%)' }}
+        className="!bg-green-500 !w-3 !h-3 !absolute"
+        style={{ top: -6, left: '50%' }}
       />
       <Handle
         type="target"
         position={Position.Left}
         id="tools"
-        className="!bg-orange-500"
+        className="!bg-orange-500 !w-3 !h-3 !absolute"
         style={{ left: -6, top: '25%' }}
       />
       <Handle
         type="target"
         position={Position.Left}
         id="orchestrator-input"
-        className="!bg-purple-400"
+        className="!bg-purple-400 !w-3 !h-3 !absolute"
         style={{ left: -6, top: '55%' }}
       />
 
@@ -99,7 +99,7 @@ export function OrchestratorAgentNode({ data, selected, id }: NodeProps) {
         type="source"
         position={Position.Right}
         id="sub-agents"
-        className="!bg-purple-500 !border-purple-300"
+        className="!bg-purple-400  !w-3 !h-3 !absolute"
         style={{ right: -6, top: '50%' }}
       />
 
@@ -108,7 +108,7 @@ export function OrchestratorAgentNode({ data, selected, id }: NodeProps) {
         type="source"
         position={Position.Bottom}
         id="output"
-        className="!bg-indigo-500"
+        className="!bg-indigo-500 !w-3 !h-3 !absolute"
         style={{ bottom: -6 }}
       />
     </div>

@@ -73,20 +73,20 @@ export function ToolNode({ data, selected, id }: NodeProps) {
       </div>
 
       {/* Input Handle */}
-      <Handle
+      {/* <Handle
         type="target"
         position={Position.Left}
         id="config"
         className="!bg-gray-500"
         style={{ left: -6 }}
-      />
+      /> */}
 
       {/* Output Handle */}
       <Handle
         type="source"
         position={Position.Right}
         id="tool-output"
-        className={isBuiltIn ? '!bg-orange-500' : '!bg-purple-500'}
+        className={isBuiltIn ? '!bg-orange-500 !w-3 !h-3 !absolute' : '!bg-purple-500 !w-3 !h-3 !absolute'}
         style={{ right: -6 }}
       />
     </div>
