@@ -71,11 +71,13 @@ This is a **visual agent flow builder** that allows users to create, configure, 
 - **Property Panel**: Configure selected node properties (model, prompts, streaming, etc.)
 - **Code Panel**: Generated Python code with Monaco editor
 - **Execution Panel**: Execute agents with real-time output and execution history
+- **Chat Modal**: Interactive conversation interface with agents using full conversation history
 - **Node Palette**: Drag-and-drop node library
 - **Project Manager**: Save/load projects with localStorage persistence
 
 #### Backend Architecture
 - **Execution Endpoints**: `/api/execute` (regular) and `/api/execute/stream` (streaming)
+- **Conversation Endpoints**: `/api/conversations` for chat-based agent interaction with full conversation history
 - **Storage System**: File-based artifact storage in `backend/storage/` directory
 - **Project Structure**: `storage/{project_id}/{version}/{execution_id}/` with artifacts:
   - `generate.py` - Generated agent code
@@ -202,15 +204,22 @@ export ALB_HOSTNAME=your-alb-hostname.us-west-2.elb.amazonaws.com
 ### Critical Architecture Rules
 1. **MCP Connection Constraints**: Each MCP server node can only connect to one agent node. This prevents resource conflicts and ensures proper context management in generated code.
 
-2. **Streaming Implementation**: 
+2. **Streaming Implementation**:
    - Frontend detects streaming by checking `yield` statements in generated code OR `streaming: true` in agent properties
    - Empty SSE chunks (`data: `) represent newlines and must be converted to `\n` characters
    - MCP clients are only started in context managers when directly connected to the execution agent
 
-3. **Code Generation Context**: 
+3. **Code Generation Context**:
    - MCP clients use proper indentation (4 spaces base, 8 spaces inside context managers)
    - Timeout values from MCP node properties are passed as `startup_timeout` parameter
    - Only connected tools are included in agent initialization
+   - **CRITICAL**: All Agent initializations must include `callback_handler=None` to prevent streaming duplication
+
+4. **Conversation Management**:
+   - Generated code supports both `--user-input` and `--messages` parameters with `--messages` taking priority
+   - Conversation history uses schema: `[{"role":"user","content":[{"text": "..."}]}, {"role":"assistant","content":[{"text": "..."}]}]`
+   - Backend conversation service constructs full message history and passes via `--messages` parameter
+   - Chat modal provides interactive conversation interface with semi-transparent backdrop
 
 ### Development Rules
 1. Always use context7 when I need code generation, setup or configuration steps, or library/API documentation. This means you should automatically use the Context7 MCP tools to resolve library id and get library docs without me having to explicitly ask.

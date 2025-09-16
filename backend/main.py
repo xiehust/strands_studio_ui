@@ -31,6 +31,19 @@ from app.models.storage import (
 )
 from app.services.storage_service import StorageService
 
+# Import conversation components
+from app.models.conversation import (
+    ConversationSession,
+    ChatMessage,
+    CreateConversationRequest,
+    ChatRequest,
+    ChatResponse,
+    ConversationListResponse,
+    ConversationHistoryResponse,
+    MessageListResponse
+)
+from app.services.conversation_service import conversation_service
+
 # Configure logging
 import os
 from logging.handlers import RotatingFileHandler
@@ -445,7 +458,7 @@ async def execute_code_stream(request: ExecutionRequest):
                     if inspect.isasyncgenfunction(main_func):
                         # The main function is an async generator, stream from it directly
                         logger.info(f"Main function is an async generator, streaming directly - ID: {execution_id}")
-                        async for chunk in main_func(user_input_arg=None, input_data_arg=request.input_data):
+                        async for chunk in main_func(user_input_arg=request.input_data):
                             if chunk is not None:
                                 yield chunk
                     elif 'yield' in request.code:
@@ -454,7 +467,7 @@ async def execute_code_stream(request: ExecutionRequest):
                         logger.info(f"Detected yield in code, attempting to stream from main function - ID: {execution_id}")
                         try:
                             # Try to call main as a generator
-                            result = main_func(user_input_arg=None, input_data_arg=request.input_data)
+                            result = main_func(user_input_arg=request.input_data)
                             if hasattr(result, '__aiter__'):
                                 # It's an async iterator/generator
                                 async for chunk in result:
@@ -482,7 +495,7 @@ async def execute_code_stream(request: ExecutionRequest):
                             logger.warning(f"Failed to stream from main function, falling back - ID: {execution_id}: {e}")
                             # Fallback to regular execution
                             try:
-                                result = await main_func(user_input_arg=None, input_data_arg=request.input_data)
+                                result = await main_func(user_input_arg=request.input_data)
                                 if result is not None:
                                     # Check if the result is an async generator
                                     if inspect.isasyncgen(result):
@@ -510,7 +523,7 @@ async def execute_code_stream(request: ExecutionRequest):
                                 if args:
                                     output = args[0]
                                     # Check if this looks like streaming data (not debug messages)
-                                    if output and output != "Starting streaming response...":
+                                    if output:
                                         # Put the output in the queue (non-blocking)
                                         try:
                                             output_queue.put_nowait(output)
@@ -523,7 +536,7 @@ async def execute_code_stream(request: ExecutionRequest):
                             # Run the main function in a separate task
                             async def run_main():
                                 try:
-                                    result = await main_func(user_input_arg=None, input_data_arg=request.input_data)
+                                    result = await main_func(user_input_arg=request.input_data)
                                     if result is not None:
                                         output_queue.put_nowait(str(result))
                                 except Exception as e:
@@ -552,7 +565,7 @@ async def execute_code_stream(request: ExecutionRequest):
                         else:
                             # Regular async function without streaming
                             logger.info(f"Regular async function, executing once - ID: {execution_id}")
-                            result = await main_func(user_input_arg=None, input_data_arg=request.input_data)
+                            result = await main_func(user_input_arg=request.input_data)
                             if result is not None:
                                 # Check if the result is an async generator
                                 if inspect.isasyncgen(result):
@@ -667,7 +680,7 @@ async def save_execution_history(item: ExecutionHistoryItem):
 async def get_execution_history(
     project_id: Optional[str] = None,
     version: Optional[str] = None,
-    limit: Optional[int] = 50
+    limit: Optional[int] = 5
 ):
     """Get execution history from persistent storage"""
     logger.info(f"Retrieving execution history from storage - project_id: {project_id}, version: {version}, limit: {limit}")
@@ -1146,11 +1159,11 @@ async def execute_strands_code(code: str, input_data: Optional[str] = None, open
                 if inspect.iscoroutinefunction(locals_dict['main']):
                     logger.info("Main function is async, awaiting result")
                     # Pass user_input and input_data as arguments
-                    result = await locals_dict['main'](user_input_arg=None, input_data_arg=input_data)
+                    result = await locals_dict['main'](user_input_arg=input_data)
                 else:
                     logger.info("Main function is sync, calling directly")
                     # Pass user_input and input_data as arguments
-                    result = locals_dict['main'](user_input_arg=None, input_data_arg=input_data)
+                    result = locals_dict['main'](user_input_arg=input_data)
 
                 if result is not None:
                     logger.info(f"Main function returned: {type(result).__name__}")
@@ -1307,6 +1320,127 @@ async def get_storage_stats():
         return stats
     except Exception as e:
         logger.error(f"Error in get_storage_stats endpoint: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Conversation Management Endpoints
+
+@app.post("/api/conversations", response_model=ConversationSession)
+async def create_conversation_session(request: CreateConversationRequest):
+    """Create a new conversation session with an agent"""
+    logger.info(f"Creating conversation session for project: {request.project_id}")
+    try:
+        session = await conversation_service.create_session(request)
+        logger.info(f"Created conversation session: {session.session_id}")
+        return session
+    except Exception as e:
+        logger.error(f"Error creating conversation session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/conversations", response_model=ConversationListResponse)
+async def get_conversation_sessions():
+    """Get all conversation sessions"""
+    logger.info("Getting all conversation sessions")
+    try:
+        sessions = await conversation_service.get_sessions()
+        logger.info(f"Found {len(sessions.sessions)} conversation sessions")
+        return sessions
+    except Exception as e:
+        logger.error(f"Error getting conversation sessions: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/conversations/{session_id}", response_model=ConversationHistoryResponse)
+async def get_conversation_history(session_id: str):
+    """Get conversation history for a session"""
+    logger.info(f"Getting conversation history for session: {session_id}")
+    try:
+        history = await conversation_service.get_session_history(session_id)
+        logger.info(f"Found {len(history.messages)} messages in session {session_id}")
+        return history
+    except ValueError as e:
+        logger.warning(f"Session not found: {session_id}")
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error getting conversation history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/conversations/{session_id}")
+async def delete_conversation_session(session_id: str):
+    """Delete a conversation session"""
+    logger.info(f"Deleting conversation session: {session_id}")
+    try:
+        result = await conversation_service.delete_session(session_id)
+        logger.info(f"Deleted conversation session: {session_id}")
+        return result
+    except ValueError as e:
+        logger.warning(f"Session not found for deletion: {session_id}")
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error deleting conversation session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/conversations/{session_id}/messages", response_model=ChatResponse)
+async def send_chat_message(session_id: str, request: ChatRequest):
+    """Send a message to the agent (non-streaming)"""
+    logger.info(f"Sending message to session: {session_id}")
+    try:
+        response = await conversation_service.send_message(
+            session_id=session_id,
+            message=request.message,
+            stream=False
+        )
+        logger.info(f"Sent message to session {session_id}, response ID: {response.message_id}")
+        return response
+    except ValueError as e:
+        logger.warning(f"Session not found for message: {session_id}")
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error sending chat message: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/conversations/{session_id}/messages/stream")
+async def send_chat_message_stream(session_id: str, request: ChatRequest):
+    """Send a message to the agent (streaming)"""
+    logger.info(f"Sending streaming message to session: {session_id}")
+
+    async def generate_response():
+        try:
+            async for chunk in conversation_service.stream_message(session_id, request.message):
+                # Send each chunk as an SSE event
+                yield f"data: {chunk}\n\n"
+        except ValueError as e:
+            logger.warning(f"Session not found for streaming message: {session_id}")
+            yield f"data: Error: {str(e)}\n\n"
+        except Exception as e:
+            logger.error(f"Error in streaming chat message: {e}")
+            yield f"data: Error: {str(e)}\n\n"
+
+    try:
+        return StreamingResponse(
+            generate_response(),
+            media_type="text/plain",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Content-Type": "text/event-stream",
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error setting up streaming response: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/conversations/{session_id}/messages", response_model=MessageListResponse)
+async def get_conversation_messages(session_id: str):
+    """Get messages for a conversation session"""
+    logger.info(f"Getting messages for session: {session_id}")
+    try:
+        messages = await conversation_service.get_session_messages(session_id)
+        logger.info(f"Found {len(messages.messages)} messages in session {session_id}")
+        return messages
+    except ValueError as e:
+        logger.warning(f"Session not found for messages: {session_id}")
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error getting conversation messages: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

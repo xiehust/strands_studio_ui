@@ -8,6 +8,7 @@ A visual drag-and-drop interface for creating, configuring, and executing AI age
 
 - **Visual Flow Editor**: Drag-and-drop interface for building agent workflows
 - **Multi-Agent Support**: Create complex hierarchical agent workflows with orchestrator agents that coordinate sub-agents
+- **Interactive Chat Interface**: Chat directly with your agents using full conversation history, streaming responses, and contextual memory across conversations
 - **MCP Server Integration**: Connect to Model Context Protocol servers for extended tool capabilities
 - **Custom Tool Nodes**: Define your own Python functions as reusable tools with @tool decorator
 - **Multiple Model Providers**: Support for AWS Bedrock and OpenAI-compatible API endpoints
@@ -17,6 +18,9 @@ A visual drag-and-drop interface for creating, configuring, and executing AI age
 - **Execution History**: Track and replay previous agent runs
 
 ## Demos
+### Video
+- Youtube: [Build AI Agent Teams Visually - No Code Required! 🤖 | Open Studio for Strands Agent](https://www.youtube.com/watch?v=lE6y6jM0b1Y)
+- Wechat: [一款专为Strands Agent打造的无代码可视化编排工具](https://mp.weixin.qq.com/s/5KjbVRKAAGrRYQudLqlevg)
 
 ### 1. A single agent with MCP, builtin tool, custom tool
 ![alt text](assets/image-1.png)
@@ -24,7 +28,10 @@ A visual drag-and-drop interface for creating, configuring, and executing AI age
 ### 2. Hierarchy multi agents code generation
 ![alt text](assets/image-code.png)
 
-### 3. Hierarchy multi agents execution
+### 3. Interactive Chat with Agent
+![Interactive Chat Interface](assets/chat-demo.png)
+s
+### 4. Hierarchy multi agents execution
 ![alt text](assets/image.png)
 
 
@@ -47,6 +54,14 @@ npm run backend:dev
 # Run both frontend and backend
 npm run dev:full
 ```
+### Try Interactive Chat Mode
+1. Build any agent flow with input/output nodes
+2. Click "Chat with Agent" in the execution panel
+3. Have a natural conversation with your agent using streaming responses and full conversation history
+
+### Play with sample flow
+Download this sample [Flow](assets/sample_image.png) and import to the UI, and experience it.
+![alt text](assets/sample_image.png)
 
 ### Production Deployment
 
@@ -141,7 +156,7 @@ export ALB_HOSTNAME=your-alb-hostname.us-west-2.elb.amazonaws.com
 
 ## Architecture
 
-The application consists of a React frontend for the visual editor and a FastAPI backend for code execution. Projects are stored locally in the browser, while execution artifacts are managed by the backend's file-based storage system.
+The application consists of a React frontend for the visual editor and a FastAPI backend for code execution and conversation management. Projects are stored locally in the browser, while execution artifacts and conversation sessions are managed by the backend's file-based storage system. The chat interface provides real-time interaction with agents using full conversation history and streaming responses.
 
 ## Roadmap
 ### Nodes
@@ -163,7 +178,7 @@ The application consists of a React frontend for the visual editor and a FastAPI
 
 ### Execution
 - [x] Single turn execution run
-- [ ] Multi turns execution run - to do 
+- [x] Multi turns interactive chat mode
 
 ### Deployment
 - [ ] One-click deploy to Bedrock AgentCore - to do 

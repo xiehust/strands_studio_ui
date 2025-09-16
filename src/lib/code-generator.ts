@@ -190,7 +190,8 @@ ${modelConfig}
 
 ${agentVarName} = Agent(
     model=${agentVarName}_model,
-    system_prompt="""${systemPromptValue}"""${toolsCode}
+    system_prompt="""${systemPromptValue}"""${toolsCode},
+    callback_handler=None
 )`;
 }
 
@@ -320,33 +321,6 @@ function findConnectedMCPTools(
 }
 
 
-function findConnectedUserInputs(
-  agentNode: Node,
-  allNodes: Node[],
-  edges: Edge[]
-): Array<{ node: Node; content: string }> {
-  const connectedInputEdges = edges.filter(
-    edge => edge.target === agentNode.id && edge.targetHandle === 'user-input'
-  );
-  
-  return connectedInputEdges.map(edge => {
-    const inputNode = allNodes.find(node => node.id === edge.source);
-    if (!inputNode) return { node: {} as Node, content: '' };
-    
-    const inputData = inputNode.data || {};
-    const inputType = (inputData.inputType as string) || 'user-prompt';
-    
-    // Include all input types (user-prompt, data, variable)
-    if (inputType === 'user-prompt' || inputType === 'data' || inputType === 'variable') {
-      return {
-        node: inputNode,
-        content: (inputData.content as string) || '',
-      };
-    }
-    
-    return { node: inputNode, content: '' };
-  }).filter(input => input.content !== '');
-}
 
 function findConnectedAgent(
   allNodes: Node[],
@@ -380,7 +354,7 @@ function generateMainExecutionCode(
   const mcpNodes = allNodes.filter(node => node.type === 'mcp-tool');
   
   let mainCode = `# Main execution
-async def main(user_input_arg: str = None, input_data_arg: str = None):`;
+async def main(user_input_arg: str = None, messages_arg: str = None):`;
 
   // Find the agent that should be executed (connected to input)
   const executionAgent = findConnectedAgent(allNodes, edges);
@@ -392,15 +366,14 @@ async def main(user_input_arg: str = None, input_data_arg: str = None):`;
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Execute Strands Agent')
     parser.add_argument('--user-input', type=str, help='User input prompt')
-    parser.add_argument('--input-data', type=str, help='Input data for the agent')
+    parser.add_argument('--messages', type=str, help='JSON string of conversation messages')
 
     args = parser.parse_args()
 
-    # Priority: --user-input flag > --input-data flag
-    user_input_param = args.user_input or args.input_data
-    input_data_param = args.input_data
+    user_input_param = args.user_input
+    messages_param = args.messages
 
-    asyncio.run(main(user_input_param, input_data_param))`;
+    asyncio.run(main(user_input_param, messages_param))`;
   }
 
   if (hasMCPTools) {
@@ -423,11 +396,15 @@ if __name__ == "__main__":
       const pythonCode = (node.data?.pythonCode as string) || '';
       return extractFunctionName(pythonCode) || 'custom_tool';
     });
-    const allGlobals = ['input_data', ...allMcpClientVars, ...customToolGlobals];
+    const allGlobals = [...allMcpClientVars, ...customToolGlobals];
     
+    if (allGlobals.length > 0) {
+      mainCode += `
+    global ${allGlobals.join(', ')}`;
+    }
+
     mainCode += `
-    global ${allGlobals.join(', ')}
-    
+
     # Use MCP clients in context managers (only those connected to execution agent)
     ${executionAgentMcpClientVars.length > 0 
       ? `with ${executionAgentMcpClientVars.join(', ')}:
@@ -527,7 +504,7 @@ ${indentation})`;
     
     mainCode += `
     # Access the global variables
-    global input_data, ${executionAgentName}`;
+    global ${executionAgentName}`;
   }
 
   // Determine indentation based on whether execution agent has MCP tools
@@ -538,46 +515,22 @@ ${indentation})`;
   const label = (executionAgent.data?.label as string) || 'agent1';
   const agentName = sanitizePythonVariableName(label);
   
-  // Check if this agent has connected user inputs
-  const connectedUserInputs = findConnectedUserInputs(executionAgent, allNodes, edges);
-    
-    // Generate user input logic that prioritizes command-line arguments
+  // Generate user input logic
     mainCode += `
-${baseIndent}# User input - prioritize command-line arguments over execution panel data
-${baseIndent}if user_input_arg is not None and user_input_arg.strip():
+${baseIndent}# User input from command-line arguments with priority: --messages > --user-input > default
+${baseIndent}if messages_arg is not None and messages_arg.strip():
+${baseIndent}    # Parse messages JSON and pass full conversation history to agent
+${baseIndent}    try:
+${baseIndent}        messages_list = json.loads(messages_arg)
+${baseIndent}        # Pass the full messages list to the agent
+${baseIndent}        user_input = messages_list
+${baseIndent}    except (json.JSONDecodeError, KeyError, TypeError):
+${baseIndent}        user_input = "Hello, how can you help me?"
+${baseIndent}elif user_input_arg is not None and user_input_arg.strip():
 ${baseIndent}    user_input = user_input_arg.strip()
-${baseIndent}elif input_data_arg is not None and input_data_arg.strip():
-${baseIndent}    user_input = input_data_arg.strip()`;
-    
-    if (connectedUserInputs.length > 0) {
-      mainCode += `
 ${baseIndent}else:
-${baseIndent}    # Fallback to connected input node
-${baseIndent}    user_input = "${connectedUserInputs[0].content || 'Hello, how can you help me?'}"`;
-    } else {
-      // Fall back to finding any unconnected user-prompt input nodes (legacy behavior)
-      const inputNodes = allNodes.filter(node => node.type === 'input');
-      const unconnectedInputs = inputNodes.filter(inputNode => {
-        const isConnected = edges.some(edge => 
-          edge.source === inputNode.id && edge.targetHandle === 'user-input'
-        );
-        const inputType = inputNode.data?.inputType || 'user-prompt';
-        // Consider all input types for user input
-        return !isConnected && (inputType === 'user-prompt' || inputType === 'data' || inputType === 'variable');
-      });
-      
-      if (unconnectedInputs.length > 0) {
-        mainCode += `
-${baseIndent}else:
-${baseIndent}    # Fallback to unconnected input node
-${baseIndent}    user_input = "${unconnectedInputs[0].data?.content || 'Hello, how can you help me?'}"`;
-      } else {
-        mainCode += `
-${baseIndent}else:
-${baseIndent}    # Default fallback
+${baseIndent}    # Default fallback when no input provided
 ${baseIndent}    user_input = "Hello, how can you help me?"`;
-      }
-    }
     
     const executionAgentData = executionAgent.data || {};
     const isStreaming = executionAgentData.streaming || false;
@@ -585,7 +538,6 @@ ${baseIndent}    user_input = "Hello, how can you help me?"`;
     if (isStreaming) {
       mainCode += `
 ${baseIndent}# Execute agent with streaming
-${baseIndent}print("Starting streaming response...")
 ${baseIndent}async for event in ${agentName}.stream_async(user_input):
 ${baseIndent}    if "data" in event:
 ${baseIndent}        print(event['data'],end='',flush=True)
@@ -593,35 +545,33 @@ ${baseIndent}        print(event['data'],end='',flush=True)
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Execute Strands Agent')
     parser.add_argument('--user-input', type=str, help='User input prompt')
-    parser.add_argument('--input-data', type=str, help='Input data for the agent')
+    parser.add_argument('--messages', type=str, help='JSON string of conversation messages')
 
     args = parser.parse_args()
 
-    # Priority: --user-input flag > --input-data flag
-    user_input_param = args.user_input or args.input_data
-    input_data_param = args.input_data
+    user_input_param = args.user_input
+    messages_param = args.messages
 
-    asyncio.run(main(user_input_param, input_data_param))`;
+    asyncio.run(main(user_input_param, messages_param))`;
     } else {
       mainCode += `
 ${baseIndent}# Execute agent (sync execution)
 ${baseIndent}response = ${agentName}(user_input)
-${baseIndent}print("Agent Response:", str(response))
+${baseIndent}print(str(response))
 ${baseIndent}
 ${baseIndent}return str(response)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Execute Strands Agent')
     parser.add_argument('--user-input', type=str, help='User input prompt')
-    parser.add_argument('--input-data', type=str, help='Input data for the agent')
+    parser.add_argument('--messages', type=str, help='JSON string of conversation messages')
 
     args = parser.parse_args()
 
-    # Priority: --user-input flag > --input-data flag
-    user_input_param = args.user_input or args.input_data
-    input_data_param = args.input_data
+    user_input_param = args.user_input
+    messages_param = args.messages
 
-    asyncio.run(main(user_input_param, input_data_param))`;
+    asyncio.run(main(user_input_param, messages_param))`;
     }
 
   // Add closing of the context manager if we have MCP tools
@@ -1003,7 +953,8 @@ ${modelConfig}
 
 ${orchestratorName} = Agent(
     model=${orchestratorName}_model,
-    system_prompt="""${fullSystemPrompt}"""${toolsCode}
+    system_prompt="""${fullSystemPrompt}"""${toolsCode},
+    callback_handler=None
 )`;
   }
 }
