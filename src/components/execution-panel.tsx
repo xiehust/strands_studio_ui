@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Play, Square, Loader, CheckCircle, XCircle, Clock, Terminal, Zap, FolderOpen, FileText, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Play, Square, Loader, CheckCircle, XCircle, Clock, Terminal, Zap, FolderOpen, FileText, AlertTriangle, RefreshCw, MessageSquare } from 'lucide-react';
+import { ChatModal } from './chat-modal';
 import { apiClient, type ExecutionRequest, type ExecutionResult, type ExecutionHistoryItem } from '../lib/api-client';
 import { ValidationError, isExecutionResult } from '../lib/validation';
 
@@ -50,6 +51,7 @@ export function ExecutionPanel({
   const [selectedStoredExecution, setSelectedStoredExecution] = useState<ExecutionHistoryItem | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [storageError, setStorageError] = useState<string | null>(null);
+  const [showChatModal, setShowChatModal] = useState(false);
 
   // Check backend availability on mount
   useEffect(() => {
@@ -223,22 +225,38 @@ export function ExecutionPanel({
   const hasStreamingEnabled = useCallback(() => {
     const hasYield = code.includes('yield event["data"]') || code.includes('yield') || code.includes('stream_async');
     const hasStreamingComment = code.includes('# Execute agent with streaming');
-    
+
     // Also check if any agent nodes have streaming enabled in flowData
-    const hasStreamingAgent = flowData?.nodes?.some(node => 
-      (node.type === 'agent' || node.type === 'orchestrator-agent') && 
+    const hasStreamingAgent = flowData?.nodes?.some(node =>
+      (node.type === 'agent' || node.type === 'orchestrator-agent') &&
       (node.data as any)?.streaming === true
     ) || false;
-    
-    // console.log('Streaming detection:', { 
-    //   hasYield, 
-    //   hasStreamingComment, 
-    //   hasStreamingAgent, 
-    //   flowDataNodesCount: flowData?.nodes?.length || 0 
+
+    // console.log('Streaming detection:', {
+    //   hasYield,
+    //   hasStreamingComment,
+    //   hasStreamingAgent,
+    //   flowDataNodesCount: flowData?.nodes?.length || 0
     // });
-    
+
     return hasYield || hasStreamingComment || hasStreamingAgent;
   }, [code, flowData]);
+
+  // Check if there's a valid agent configuration for chat
+  const hasValidAgent = useCallback(() => {
+    if (!flowData?.nodes) return false;
+
+    // Check if there are agent or orchestrator-agent nodes
+    const hasAgentNodes = flowData.nodes.some(node =>
+      node.type === 'agent' || node.type === 'orchestrator-agent'
+    );
+
+    // Check if there are required input/output nodes
+    const hasInputNode = flowData.nodes.some(node => node.type === 'input');
+    const hasOutputNode = flowData.nodes.some(node => node.type === 'output');
+
+    return hasAgentNodes && hasInputNode && hasOutputNode && code.trim().length > 0;
+  }, [flowData, code]);
 
   const handleExecute = async () => {
     if (!code.trim()) {
@@ -458,6 +476,15 @@ export function ExecutionPanel({
             <span className="text-xs text-red-500 mr-2">Backend Connecting</span>
           )}
           <button
+            onClick={() => setShowChatModal(true)}
+            disabled={!backendAvailable || !hasValidAgent()}
+            className="flex items-center px-3 py-1 text-sm rounded bg-blue-500 text-white hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed"
+            title={!hasValidAgent() ? 'Create a valid agent flow with input/output nodes first' : 'Start a conversation with your agent'}
+          >
+            <MessageSquare className="w-3 h-3 mr-1" />
+            Chat with Agent
+          </button>
+          <button
             onClick={isExecuting ? handleStop : handleExecute}
             disabled={!backendAvailable}
             className={`flex items-center px-3 py-1 text-sm rounded ${
@@ -536,7 +563,7 @@ export function ExecutionPanel({
       {/* Input Data Section */}
       <div className="p-4 border-b border-gray-200 bg-gray-50">
         <label className="block text-sm font-medium text-gray-700 mb-2">
-          Input Data (Optional)
+          User Input
         </label>
         <textarea
           value={inputData}
@@ -730,6 +757,16 @@ export function ExecutionPanel({
           </div>
         </div>
       </div>
+
+      {/* Chat Modal */}
+      <ChatModal
+        isOpen={showChatModal}
+        onClose={() => setShowChatModal(false)}
+        flowData={flowData || { nodes: [], edges: [] }}
+        generatedCode={code}
+        projectId={projectName}
+        projectVersion={projectVersion}
+      />
     </div>
   );
 }

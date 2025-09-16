@@ -150,7 +150,7 @@ class StorageService:
             Artifact content and metadata
         """
         try:
-            logger.info(f"Retrieving artifact: {project_id}/{version}/{execution_id}/{file_type}")
+            # logger.info(f"Retrieving artifact: {project_id}/{version}/{execution_id}/{file_type}")
             
             # Validate file type
             if not validate_file_type(file_type):
@@ -198,7 +198,7 @@ class StorageService:
                     file_path=relative_path
                 )
             
-            logger.info(f"Artifact retrieved successfully: {file_path}")
+            # logger.info(f"Artifact retrieved successfully: {file_path}")
             
             return ArtifactContent(content=content, metadata=metadata)
             
@@ -267,7 +267,7 @@ class StorageService:
             # Sort versions by creation time
             versions.sort(key=lambda v: v.created_at, reverse=True)
 
-            logger.info(f"Found {len(versions)} versions for project {project_id}")
+            # logger.info(f"Found {len(versions)} versions for project {project_id}")
             return versions
 
         except HTTPException:
@@ -289,7 +289,7 @@ class StorageService:
             Execution information
         """
         try:
-            logger.info(f"Getting execution info: {project_id}/{version}/{execution_id}")
+            # logger.info(f"Getting execution info: {project_id}/{version}/{execution_id}")
             
             execution_path = build_storage_path(self.base_dir, project_id, version, execution_id)
             if not execution_path.exists():
@@ -318,7 +318,7 @@ class StorageService:
                 total_size=total_size
             )
             
-            logger.info(f"Found {len(artifacts)} artifacts for execution {execution_id}")
+            # logger.info(f"Found {len(artifacts)} artifacts for execution {execution_id}")
             return execution_info
             
         except HTTPException:
@@ -335,7 +335,7 @@ class StorageService:
             Storage statistics
         """
         try:
-            logger.info("Calculating storage statistics")
+            # logger.info("Calculating storage statistics")
             
             total_projects = 0
             total_versions = 0
@@ -390,7 +390,7 @@ class StorageService:
                 newest_artifact=newest_artifact
             )
             
-            logger.info(f"Storage stats: {total_projects} projects, {total_artifacts} artifacts, {total_size} bytes")
+            # logger.info(f"Storage stats: {total_projects} projects, {total_artifacts} artifacts, {total_size} bytes")
             return stats
             
         except Exception as e:
@@ -411,7 +411,7 @@ class StorageService:
             True if deleted successfully
         """
         try:
-            logger.info(f"Deleting artifact: {project_id}/{version}/{execution_id}/{file_type}")
+            # logger.info(f"Deleting artifact: {project_id}/{version}/{execution_id}/{file_type}")
             
             # Build storage path
             storage_path = build_storage_path(self.base_dir, project_id, version, execution_id)
@@ -433,7 +433,7 @@ class StorageService:
             if metadata_path.exists():
                 metadata_path.unlink()
             
-            logger.info(f"Artifact deleted successfully: {file_path}")
+            # logger.info(f"Artifact deleted successfully: {file_path}")
             return True
             
         except HTTPException:

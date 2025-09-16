@@ -3,19 +3,13 @@ import { ArrowRight, MessageCircle, X } from 'lucide-react';
 
 interface InputNodeData {
   label?: string;
-  inputType?: 'user-prompt' | 'data' | 'variable';
-  content?: string;
-  placeholder?: string;
 }
 
 export function InputNode({ data, selected, id }: NodeProps) {
   const { deleteElements } = useReactFlow();
   const nodeData = data as InputNodeData || {};
   const {
-    label = 'Input',
-    inputType = 'user-prompt',
-    content = '',
-    placeholder = 'Enter your prompt...',
+    label = 'Input'
   } = nodeData;
 
   const handleDelete = (event: React.MouseEvent) => {
@@ -23,20 +17,7 @@ export function InputNode({ data, selected, id }: NodeProps) {
     deleteElements({ nodes: [{ id }] });
   };
 
-  const getTypeColor = (type: string) => {
-    switch (type) {
-      case 'user-prompt':
-        return { bg: 'bg-blue-50', border: 'border-blue-200', icon: 'text-blue-600', text: 'text-blue-800' };
-      case 'data':
-        return { bg: 'bg-purple-50', border: 'border-purple-200', icon: 'text-purple-600', text: 'text-purple-800' };
-      case 'variable':
-        return { bg: 'bg-yellow-50', border: 'border-yellow-200', icon: 'text-yellow-600', text: 'text-yellow-800' };
-      default:
-        return { bg: 'bg-gray-50', border: 'border-gray-200', icon: 'text-gray-600', text: 'text-gray-800' };
-    }
-  };
-
-  const colors = getTypeColor(inputType);
+  const colors = { bg: 'bg-blue-50', border: 'border-blue-200', icon: 'text-blue-600', text: 'text-blue-800' };
 
   return (
     <div className={`
@@ -63,20 +44,10 @@ export function InputNode({ data, selected, id }: NodeProps) {
 
       {/* Node Content */}
       <div className="p-3">
-        <div className="space-y-2">
-          <div className="text-xs text-gray-600">
-            <span className="font-medium">Type:</span> {inputType}
+        <div className="text-center">
+          <div className="text-xs text-gray-500">
+            Connects user input to agents
           </div>
-          
-          {content ? (
-            <div className="text-xs text-gray-700 bg-gray-50 p-2 rounded border max-h-20 overflow-y-auto">
-              {content}
-            </div>
-          ) : (
-            <div className="text-xs text-gray-400 italic">
-              {placeholder}
-            </div>
-          )}
         </div>
       </div>
 

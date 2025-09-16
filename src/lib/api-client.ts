@@ -4,6 +4,15 @@
  */
 
 import { validatePathComponents, validateProjectOnly, validateProjectAndVersion, ValidationError } from './validation';
+import type {
+  ConversationSession,
+  ChatMessage,
+  CreateConversationRequest,
+  ChatRequest,
+  ChatResponse,
+  ConversationListResponse,
+  ConversationHistoryResponse
+} from './conversation-types';
 
 // API base URL configuration using Vite proxy
 const getApiBaseUrl = (): string => {
@@ -460,7 +469,7 @@ class ApiClient {
       const params = new URLSearchParams();
       if (projectId) params.append('project_id', projectId);
       if (version) params.append('version', version);
-      params.append('limit', '50');
+      params.append('limit', '5');
       
       const url = `/api/execution-history${params.toString() ? '?' + params.toString() : ''}`;
       const response = await this.request<ExecutionHistoryResponse>(url);
@@ -518,6 +527,122 @@ class ApiClient {
       console.warn('Backend not available:', error);
       return false;
     }
+  }
+
+  // Conversation Management Methods
+  async createConversationSession(request: CreateConversationRequest): Promise<ConversationSession> {
+    return this.request('/api/conversations', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
+  async getConversationSessions(): Promise<ConversationListResponse> {
+    return this.request('/api/conversations');
+  }
+
+  async getConversationHistory(sessionId: string): Promise<ConversationHistoryResponse> {
+    return this.request(`/api/conversations/${sessionId}`);
+  }
+
+  async deleteConversationSession(sessionId: string): Promise<{ message: string }> {
+    return this.request(`/api/conversations/${sessionId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async sendChatMessage(request: ChatRequest): Promise<ChatResponse> {
+    return this.request(`/api/conversations/${request.session_id}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ message: request.message }),
+    });
+  }
+
+  async sendChatMessageStream(
+    request: ChatRequest,
+    onChunk: (chunk: string) => void,
+    onComplete: (finalOutput: string, messageId: string) => void,
+    onError: (error: string, partialOutput: string) => void
+  ): Promise<void> {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/conversations/${request.session_id}/messages/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ message: request.message }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Streaming chat request failed: ${response.status} ${response.statusText}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('Response body is not readable');
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let accumulatedOutput = '';
+      let errorMessage: string | null = null;
+      let messageId = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        const events = buffer.split('\n\n');
+        buffer = events.pop() || '';
+
+        for (const event of events) {
+          if (!event.trim()) continue;
+
+          let eventData = '';
+          const lines = event.split('\n');
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const chunk = line.substring(6);
+              eventData += (chunk === '' ? '\n' : chunk);
+            } else if (line === 'data:') {
+              eventData += '\n';
+            }
+          }
+
+          if (eventData !== '' || lines.some(line => line === 'data:' || line.startsWith('data: '))) {
+            if (eventData.startsWith('[CHAT_COMPLETE:')) {
+              // Parse message ID from format: [CHAT_COMPLETE:message_id_here]
+              const match = eventData.match(/^\[CHAT_COMPLETE:([^\]]+)\]$/);
+              messageId = match ? match[1] : '';
+              if (errorMessage) {
+                onError(errorMessage, accumulatedOutput);
+              } else {
+                onComplete(accumulatedOutput, messageId);
+              }
+              return;
+            } else if (eventData.startsWith('Error: ')) {
+              errorMessage = eventData.substring(7);
+            } else {
+              accumulatedOutput += eventData;
+              onChunk(eventData);
+            }
+          }
+        }
+      }
+
+      onComplete(accumulatedOutput, messageId);
+    } catch (error) {
+      onError(error instanceof Error ? error.message : 'Unknown streaming error', '');
+    }
+  }
+
+  async getConversationMessages(sessionId: string): Promise<ChatMessage[]> {
+    const response = await this.request<{ messages: ChatMessage[] }>(`/api/conversations/${sessionId}/messages`);
+    return response.messages;
   }
 }
 
