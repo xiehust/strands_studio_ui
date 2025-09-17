@@ -25,6 +25,7 @@ export interface CreateConversationRequest {
     edges: Record<string, unknown>[];
   };
   generated_code: string;
+  openai_api_key?: string;
 }
 
 export interface ChatRequest {

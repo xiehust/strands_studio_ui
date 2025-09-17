@@ -11,6 +11,7 @@ class ConversationSession(BaseModel):
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
     message_count: int = 0
+    openai_api_key: Optional[str] = None
 
 class ChatMessage(BaseModel):
     message_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -25,6 +26,7 @@ class CreateConversationRequest(BaseModel):
     version: str
     flow_data: Dict[str, Any]
     generated_code: str
+    openai_api_key: Optional[str] = None
 
 class ChatRequest(BaseModel):
     message: str

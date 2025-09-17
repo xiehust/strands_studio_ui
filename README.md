@@ -181,6 +181,6 @@ The application consists of a React frontend for the visual editor and a FastAPI
 - [x] Multi turns interactive chat mode
 
 ### Deployment
-- [ ] One-click deploy to Bedrock AgentCore - to do 
-- [ ] One-click deploy to Lambda - to do 
-- [ ] One-click deploy to ECS Fargate - to do 
+- [ ] One-click deploy to Bedrock AgentCore - in-progress 
+- [ ] One-click deploy to Lambda - in-progress 
+- [ ] One-click deploy to ECS Fargate - in-progress  

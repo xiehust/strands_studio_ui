@@ -34,6 +34,7 @@ class ConversationService:
             project_id=request.project_id,
             version=request.version,
             agent_config=request.flow_data,
+            openai_api_key=request.openai_api_key,
         )
 
         # Store session
@@ -122,10 +123,19 @@ class ConversationService:
         agent_file = agent_info['agent_file']
 
         try:
+            # Get session and API key
+            session = self.sessions[session_id]
+
             # Construct full conversation history
             messages_list = self._construct_messages_list(session_id, user_input)
             logger.info(messages_list)
             messages_json = json.dumps(messages_list)
+
+            # Prepare environment with API key
+            env = os.environ.copy()
+            if session.openai_api_key:
+                env["OPENAI_API_KEY"] = session.openai_api_key
+                logger.info("OpenAI API key set in environment for conversation")
 
             # Execute the agent Python script with full conversation history
             result = subprocess.run([
@@ -135,7 +145,8 @@ class ConversationService:
             capture_output=True,
             text=True,
             timeout=60,  # 60 second timeout
-            cwd=agent_file.parent
+            cwd=agent_file.parent,
+            env=env  # Pass environment variables including API key
             )
 
             if result.returncode == 0:
@@ -247,9 +258,18 @@ class ConversationService:
         agent_file = agent_info['agent_file']
 
         try:
+            # Get session and API key
+            session = self.sessions[session_id]
+
             # Construct full conversation history
             messages_list = self._construct_messages_list(session_id, user_input)
             messages_json = json.dumps(messages_list)
+
+            # Prepare environment with API key
+            env = {**os.environ, 'PYTHONUNBUFFERED': '1'}
+            if session.openai_api_key:
+                env["OPENAI_API_KEY"] = session.openai_api_key
+                logger.info("OpenAI API key set in environment for streaming conversation")
 
             # Execute the agent Python script with full conversation history (unbuffered)
             process = await asyncio.create_subprocess_exec(
@@ -258,7 +278,7 @@ class ConversationService:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=agent_file.parent,
-                env={**os.environ, 'PYTHONUNBUFFERED': '1'}  # Also set env var
+                env=env  # Pass environment variables including API key
             )
 
             # Read output in chunks
