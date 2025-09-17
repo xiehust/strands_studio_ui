@@ -133,6 +133,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Optional deployment routes (only include if dependencies are available)
+try:
+    from app.routers.deployment import router as deployment_router
+    app.include_router(deployment_router)
+    logger.info("Deployment routes enabled")
+except ImportError as e:
+    logger.warning(f"Deployment routes disabled - missing dependencies: {e}")
+except Exception as e:
+    logger.warning(f"Deployment routes disabled - error: {e}")
+
 # Data models
 class NodeData(BaseModel):
     id: str
