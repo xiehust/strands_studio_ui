@@ -11,6 +11,10 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 import uuid
 
+# Load environment variables
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
