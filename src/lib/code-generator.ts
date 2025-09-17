@@ -175,8 +175,8 @@ export function generateStrandsAgentCode(
 
 function generateAgentModelOnly(
   agentNode: Node,
-  allNodes: Node[],
-  edges: Edge[],
+  _allNodes: Node[],
+  _edges: Edge[],
   index: number
 ): string {
   const data = agentNode.data || {};
@@ -924,8 +924,8 @@ def ${functionName}(user_input: str) -> str:
 
 function generateOrchestratorModelOnly(
   orchestratorNode: Node,
-  allNodes: Node[],
-  edges: Edge[],
+  _allNodes: Node[],
+  _edges: Edge[],
   index: number
 ): string {
   const data = orchestratorNode.data || {};
