@@ -13,6 +13,7 @@ interface ChatModalProps {
   generatedCode: string;
   projectId: string;
   projectVersion: string;
+  openaiApiKey?: string;
 }
 
 export function ChatModal({
@@ -21,7 +22,8 @@ export function ChatModal({
   flowData,
   generatedCode,
   projectId,
-  projectVersion
+  projectVersion,
+  openaiApiKey
 }: ChatModalProps) {
   const [session, setSession] = useState<ConversationSession | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -72,6 +74,7 @@ export function ChatModal({
         version: projectVersion,
         flow_data: flowData,
         generated_code: generatedCode,
+        openai_api_key: openaiApiKey,
       };
 
       const newSession = await apiClient.createConversationSession(request);

@@ -53,6 +53,23 @@ export function ExecutionPanel({
   const [storageError, setStorageError] = useState<string | null>(null);
   const [showChatModal, setShowChatModal] = useState(false);
 
+  // Extract OpenAI API key from agent nodes
+  const getOpenAIApiKey = (): string | undefined => {
+    const allNodes = flowData?.nodes || [];
+    const agentNodes = allNodes.filter(node =>
+      node.type === 'agent' || node.type === 'orchestrator-agent'
+    );
+
+    // Find first OpenAI API key from any agent node
+    for (const node of agentNodes) {
+      const nodeData = node.data as any;
+      if (nodeData?.modelProvider === 'OpenAI' && nodeData?.apiKey) {
+        return nodeData.apiKey;
+      }
+    }
+    return undefined;
+  };
+
   // Check backend availability on mount
   useEffect(() => {
     checkBackendHealth();
@@ -766,6 +783,7 @@ export function ExecutionPanel({
         generatedCode={code}
         projectId={projectName}
         projectVersion={projectVersion}
+        openaiApiKey={getOpenAIApiKey()}
       />
     </div>
   );

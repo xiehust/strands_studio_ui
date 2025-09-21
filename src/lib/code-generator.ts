@@ -119,19 +119,43 @@ export function generateStrandsAgentCode(
 
     // Generate code for each regular agent (non-connected ones)
     // Always generate individual agents unless they are connected to orchestrators as sub-agents
-    const unconnectedAgents = orchestratorNodes.length > 0 
+    // Skip agents that have MCP tools connected since they will be created in main() with MCP context
+    const unconnectedAgents = orchestratorNodes.length > 0
       ? agentNodes.filter(agent => !isAgentConnectedToOrchestrator(agent, orchestratorNodes, edges))
       : agentNodes;
-      
+
     unconnectedAgents.forEach((agentNode, index) => {
-      const agentCode = generateAgentCode(agentNode, nodes, edges, index);
-      code += agentCode + '\n\n';
+      // Check if this agent has MCP tools connected
+      const agentHasMCPTools = findConnectedMCPTools(agentNode, nodes, edges).length > 0;
+
+      if (!agentHasMCPTools) {
+        // Only generate global agent instance if it doesn't have MCP tools
+        const agentCode = generateAgentCode(agentNode, nodes, edges, index);
+        code += agentCode + '\n\n';
+      } else {
+        // For agents with MCP tools, only generate the model configuration
+        const agentModelCode = generateAgentModelOnly(agentNode, nodes, edges, index);
+        code += agentModelCode + '\n\n';
+      }
     });
 
     // Generate orchestrator agent code
+    // Find the execution agent to avoid duplication
+    const executionAgent = findConnectedAgent(nodes, edges);
+
     orchestratorNodes.forEach((orchestratorNode, index) => {
-      const orchestratorCode = generateOrchestratorCode(orchestratorNode, nodes, edges, index);
-      code += orchestratorCode + '\n\n';
+      // Check if this orchestrator is the execution agent
+      const isExecutionOrchestrator = executionAgent?.id === orchestratorNode.id;
+
+      if (isExecutionOrchestrator) {
+        // For execution orchestrators, only generate model configuration
+        const orchestratorModelCode = generateOrchestratorModelOnly(orchestratorNode, nodes, edges, index);
+        code += orchestratorModelCode + '\n\n';
+      } else {
+        // For non-execution orchestrators, generate full orchestrator instance
+        const orchestratorCode = generateOrchestratorCode(orchestratorNode, nodes, edges, index);
+        code += orchestratorCode + '\n\n';
+      }
     });
 
     // Generate main execution code
@@ -147,6 +171,36 @@ export function generateStrandsAgentCode(
     imports: Array.from(imports),
     errors,
   };
+}
+
+function generateAgentModelOnly(
+  agentNode: Node,
+  _allNodes: Node[],
+  _edges: Edge[],
+  index: number
+): string {
+  const data = agentNode.data || {};
+  const {
+    label = `Agent${index + 1}`,
+    modelProvider = 'AWS Bedrock',
+    modelId = 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+    modelName = 'Claude 3.7 Sonnet',
+    temperature = 0.7,
+    maxTokens = 4000,
+    baseUrl = '',
+  } = data;
+
+  // Use modelId for Bedrock, modelName for others
+  const modelIdentifier = modelProvider === 'AWS Bedrock' ? modelId : modelName;
+
+  // Sanitize agent name to be Python-compatible
+  const agentVarName = sanitizePythonVariableName(label as string);
+
+  // Generate model configuration based on provider
+  const modelConfig = generateModelConfigForCode(agentVarName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string);
+
+  return `# ${label} Configuration
+${modelConfig}`;
 }
 
 function generateAgentCode(
@@ -866,6 +920,34 @@ def ${functionName}(user_input: str) -> str:
     response = agent(user_input)
     return str(response)`;
   }
+}
+
+function generateOrchestratorModelOnly(
+  orchestratorNode: Node,
+  _allNodes: Node[],
+  _edges: Edge[],
+  index: number
+): string {
+  const data = orchestratorNode.data || {};
+  const {
+    label = `OrchestratorAgent${index + 1}`,
+    modelProvider = 'AWS Bedrock',
+    modelId = 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+    modelName = 'Claude 3.7 Sonnet',
+    temperature = 0.7,
+    maxTokens = 4000,
+    baseUrl = '',
+  } = data;
+
+  const modelIdentifier = modelProvider === 'AWS Bedrock' ? modelId : modelName;
+  // Sanitize orchestrator name to be Python-compatible
+  const orchestratorName = sanitizePythonVariableName(label as string);
+
+  // Generate model configuration based on provider
+  const modelConfig = generateModelConfigForCode(orchestratorName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string);
+
+  return `# ${label} Configuration
+${modelConfig}`;
 }
 
 function generateOrchestratorCode(
