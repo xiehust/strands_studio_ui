@@ -1,49 +1,64 @@
 # AgentCore 部署实现
 
-> 🔄 **状态：待实现**
+> ✅ **Phase 1 完成：基础架构已实现**
+> ✅ **Phase 2 完成：核心服务已实现**
+> 🔄 **Phase 3 进行中：测试和验证**
 
-这个目录将包含 AgentCore 平台的部署实现。
+这个目录包含 AWS Bedrock AgentCore 平台的部署实现。
 
-## 📋 待实现功能
+## 📋 已实现功能
 
-### 核心组件
-- [ ] `agentcore_deployment_service.py` - AgentCore 部署服务
-- [ ] `agentcore_client.py` - AgentCore API 客户端
-- [ ] `requirements.txt` - 依赖包列表
-- [ ] `config_template.yaml` - 配置模板
+### Phase 1: 基础架构 ✅
+- [x] `requirements.txt` - AgentCore 依赖包列表
+- [x] `agent_runtime_template.py` - AgentCore Runtime 入口点模板
+- [x] `dockerfile_template` - 容器镜像构建模板
+- [x] `agentcore_config.py` - 部署配置数据类
+- [x] `test_agentcore.py` - 基础测试脚本
+- [x] 数据模型更新 - `AgentCoreDeploymentRequest` 完整实现
 
-### 数据模型（需要完善）
-在 `app/models/deployment.py` 中的 `AgentCoreDeploymentRequest` 需要添加以下字段：
+### Phase 2: 核心服务 ✅
+- [x] `agentcore_deployment_service.py` - AgentCore 部署服务核心逻辑
+- [x] `code_adapter.py` - 智能代码分析和适配器
+- [x] 双部署方法支持 (SDK + Manual)
+- [x] 完整的错误处理和日志记录
+- [x] 与编排层集成完成
+
+### 待实现功能 (Phase 3)
+- [ ] 端到端部署测试
+- [ ] 错误场景测试套件
+- [ ] 性能基准测试
+
+### 已实现的数据模型
+在 `app/models/deployment.py` 中的 `AgentCoreDeploymentRequest` 已完整实现：
 
 ```python
 class AgentCoreDeploymentRequest(BaseDeploymentRequest):
-    deployment_type: Literal["agentcore"] = "agentcore"
+    """Request model for AWS Bedrock AgentCore deployment"""
+    deployment_type: Literal[DeploymentType.AGENT_CORE] = DeploymentType.AGENT_CORE
 
-    # AgentCore 连接配置
-    agentcore_endpoint: str = Field(..., description="AgentCore API 端点")
-    agentcore_token: str = Field(..., description="认证令牌")
+    # AgentCore 基本配置
+    agent_runtime_name: str = Field(..., description="AgentRuntime 名称")
+    region: str = Field("us-east-1", description="AWS 区域")
 
-    # 代理配置
-    agent_name: str = Field(..., description="代理名称")
-    namespace: str = Field("default", description="命名空间")
-    description: Optional[str] = Field(None, description="代理描述")
-
-    # 运行配置
-    replicas: int = Field(1, ge=1, le=10, description="副本数量")
-    resource_limits: Optional[Dict[str, str]] = Field(
-        None,
-        description="资源限制 (如: {'cpu': '500m', 'memory': '512Mi'})"
-    )
-
-    # 环境配置
-    environment_variables: Optional[Dict[str, str]] = Field(
-        None,
-        description="环境变量"
-    )
+    # 部署方法选择
+    deployment_method: Literal["sdk", "manual"] = Field("sdk", description="部署方法")
 
     # 网络配置
-    enable_external_access: bool = Field(False, description="是否启用外部访问")
-    custom_domain: Optional[str] = Field(None, description="自定义域名")
+    network_mode: Literal["PUBLIC", "PRIVATE"] = Field("PUBLIC", description="网络模式")
+
+    # 容器配置（Method B 使用）
+    container_uri: Optional[str] = Field(None, description="ECR 容器镜像 URI")
+
+    # IAM 配置
+    role_arn: Optional[str] = Field(None, description="AgentRuntime IAM 角色 ARN")
+
+    # 环境变量和标签
+    environment_variables: Optional[Dict[str, str]] = Field(None, description="环境变量")
+    tags: Optional[Dict[str, str]] = Field(None, description="资源标签")
+
+    # 高级配置
+    timeout_seconds: int = Field(300, ge=30, le=900, description="超时时间（秒）")
+    startup_timeout: int = Field(60, ge=10, le=300, description="启动超时时间（秒）")
 ```
 
 ## 🔧 技术规范

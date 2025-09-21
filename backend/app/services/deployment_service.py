@@ -18,6 +18,9 @@ from app.models.deployment import (
     DeploymentHealthStatus
 )
 
+# Import deployment services
+from deployment.agentcore.agentcore_deployment_service import AgentCoreDeploymentService
+
 logger = logging.getLogger(__name__)
 
 class DeploymentService:
@@ -196,30 +199,117 @@ class DeploymentService:
         return len(to_delete)
 
     async def deploy_to_agentcore(self, request: AgentCoreDeploymentRequest) -> DeploymentResponse:
-        """Deploy Strands agent to AgentCore (placeholder implementation)"""
+        """Deploy Strands agent to AWS Bedrock AgentCore"""
         deployment_id = str(uuid.uuid4())
 
         # Create initial deployment status
         status = DeploymentStatus(
             deployment_id=deployment_id,
             deployment_type=DeploymentType.AGENT_CORE,
-            status="failed",
-            message="AgentCore deployment not yet implemented",
-            created_at=datetime.now().isoformat(),
-            completed_at=datetime.now().isoformat()
+            status="pending",
+            message="AgentCore deployment initiated",
+            created_at=datetime.now().isoformat()
         )
 
         self.deployments[deployment_id] = status
 
-        logger.warning(f"AgentCore deployment not implemented: {deployment_id}")
+        logger.info(f"Starting AgentCore deployment: {deployment_id}")
 
-        return DeploymentResponse(
-            success=False,
-            deployment_id=deployment_id,
-            message="AgentCore deployment is not yet implemented",
-            deployment_type=DeploymentType.AGENT_CORE,
-            status=status
-        )
+        try:
+            # Import AgentCore deployment service dynamically to avoid startup dependency
+            import sys
+            from pathlib import Path
+
+            # Add deployment module to path
+            deployment_path = Path(__file__).parent.parent.parent / "deployment" / "agentcore"
+            if str(deployment_path) not in sys.path:
+                sys.path.insert(0, str(deployment_path))
+
+            # Import AgentCore deployment service
+            from agentcore_deployment_service import (
+                AgentCoreDeploymentService
+            )
+            from agentcore_config import (
+                AgentCoreDeploymentConfig,
+                DeploymentMethod,
+                NetworkMode
+            )
+
+            # Create deployment config with simplified parameters and smart defaults
+            config = AgentCoreDeploymentConfig(
+                agent_runtime_name=request.agent_name,  # Use agent_name (normalized)
+                region=request.region,
+                deployment_method=DeploymentMethod.SDK,  # Always use SDK method
+                network_mode=NetworkMode.PUBLIC,        # Default to PUBLIC
+                api_keys=request.api_keys,              # Pass through API keys if provided
+                # All other parameters use defaults or are auto-generated
+            )
+
+            # Update status to building
+            status.status = "building"
+            status.message = "Building deployment package"
+            self.deployments[deployment_id] = status
+
+            # Initialize AgentCore deployment service
+            agentcore_service = AgentCoreDeploymentService()
+
+            # Update status to deploying
+            status.status = "deploying"
+            status.message = "Deploying to AWS Bedrock AgentCore"
+            self.deployments[deployment_id] = status
+
+            # Perform deployment
+            result = await agentcore_service.deploy_agent(request.code, config)
+
+            # Update final status
+            if result.success:
+                status.status = "completed"
+                status.message = result.message
+                status.resource_arn = result.agent_runtime_arn
+                status.endpoint_url = result.invoke_endpoint
+                status.deployment_time = result.deployment_time
+                status.deployment_outputs = {
+                    "agent_runtime_arn": result.agent_runtime_arn,
+                    "agent_runtime_name": result.agent_runtime_name,
+                    "invoke_endpoint": result.invoke_endpoint,
+                    "deployment_method": "sdk",  # Always use SDK method in simplified API
+                    "region": request.region,
+                    "network_mode": "PUBLIC"  # Default network mode in simplified API
+                }
+            else:
+                status.status = "failed"
+                status.message = result.message
+
+            status.logs = result.logs
+            status.completed_at = datetime.now().isoformat()
+            self.deployments[deployment_id] = status
+
+            logger.info(f"AgentCore deployment completed: {deployment_id}, success: {result.success}")
+
+            return DeploymentResponse(
+                success=result.success,
+                deployment_id=deployment_id,
+                message=result.message,
+                deployment_type=DeploymentType.AGENT_CORE,
+                status=status
+            )
+
+        except Exception as e:
+            error_msg = f"AgentCore deployment failed: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+
+            status.status = "failed"
+            status.message = error_msg
+            status.completed_at = datetime.now().isoformat()
+            self.deployments[deployment_id] = status
+
+            return DeploymentResponse(
+                success=False,
+                deployment_id=deployment_id,
+                message=error_msg,
+                deployment_type=DeploymentType.AGENT_CORE,
+                status=status
+            )
 
     async def deploy_to_ecs_fargate(self, request: ECSFargateDeploymentRequest) -> DeploymentResponse:
         """Deploy Strands agent to ECS Fargate (placeholder implementation)"""
@@ -250,7 +340,7 @@ class DeploymentService:
     async def get_health_status(self) -> DeploymentHealthStatus:
         """Get deployment service health status"""
         try:
-            available_types = [DeploymentType.LAMBDA]  # Start with Lambda as implemented
+            available_types = [DeploymentType.LAMBDA]  # Lambda is implemented
             tool_availability = {}
 
             # Check SAM CLI for Lambda deployments
@@ -285,16 +375,31 @@ class DeploymentService:
                 tool_availability["aws_cli"] = {
                     "available": True,
                     "version": result.stdout.strip(),
-                    "required_for": ["lambda", "ecs-fargate"]
+                    "required_for": ["lambda", "agentcore", "ecs-fargate"]
                 }
             except (subprocess.CalledProcessError, FileNotFoundError):
                 tool_availability["aws_cli"] = {
                     "available": False,
                     "version": None,
-                    "required_for": ["lambda", "ecs-fargate"]
+                    "required_for": ["lambda", "agentcore", "ecs-fargate"]
                 }
 
-            # Check Docker for ECS Fargate deployments
+            # Check bedrock-agentcore for AgentCore deployments
+            try:
+                import bedrock_agentcore
+                tool_availability["bedrock_agentcore"] = {
+                    "available": True,
+                    "version": getattr(bedrock_agentcore, '__version__', 'unknown'),
+                    "required_for": ["agentcore"]
+                }
+            except ImportError:
+                tool_availability["bedrock_agentcore"] = {
+                    "available": False,
+                    "version": None,
+                    "required_for": ["agentcore"]
+                }
+
+            # Check Docker for ECS Fargate and AgentCore manual deployments
             try:
                 result = subprocess.run(
                     ["docker", "--version"],
@@ -305,13 +410,13 @@ class DeploymentService:
                 tool_availability["docker"] = {
                     "available": True,
                     "version": result.stdout.strip(),
-                    "required_for": ["ecs-fargate"]
+                    "required_for": ["ecs-fargate", "agentcore-manual"]
                 }
             except (subprocess.CalledProcessError, FileNotFoundError):
                 tool_availability["docker"] = {
                     "available": False,
                     "version": None,
-                    "required_for": ["ecs-fargate"]
+                    "required_for": ["ecs-fargate", "agentcore-manual"]
                 }
 
             # Determine overall service status
@@ -320,10 +425,21 @@ class DeploymentService:
                 tool_availability.get("aws_cli", {}).get("available", False)
             )
 
-            if lambda_ready:
+            agentcore_ready = (
+                tool_availability.get("aws_cli", {}).get("available", False) and
+                tool_availability.get("bedrock_agentcore", {}).get("available", False)
+            )
+
+            # Add AgentCore to available types if tools are ready
+            if agentcore_ready:
+                available_types.append(DeploymentType.AGENT_CORE)
+
+            if lambda_ready and agentcore_ready:
                 service_status = "healthy"
+            elif lambda_ready or agentcore_ready:
+                service_status = "partial"
             else:
-                service_status = "partial"  # Some functionality available
+                service_status = "degraded"  # Limited functionality available
 
             return DeploymentHealthStatus(
                 service_status=service_status,

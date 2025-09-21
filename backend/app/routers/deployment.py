@@ -13,17 +13,21 @@ from app.models.deployment import (
     DeploymentStatus,
     DeploymentResponse,
     DeploymentType,
-    DeploymentHealthStatus
+    DeploymentHealthStatus,
+    AgentCoreInvokeRequest,
+    AgentCoreInvokeResponse
 )
 from app.services.deployment_service import DeploymentService
+from app.services.agentcore_invoke_service import AgentCoreInvokeService
 
 logger = logging.getLogger(__name__)
 
 # Create router
 router = APIRouter(prefix="/api/deploy", tags=["deployment"])
 
-# Global deployment service instance
+# Global service instances
 deployment_service = DeploymentService()
+agentcore_invoke_service = AgentCoreInvokeService()
 
 @router.post("/", response_model=DeploymentResponse)
 async def deploy_agent(request: Union[LambdaDeploymentRequest, AgentCoreDeploymentRequest, ECSFargateDeploymentRequest]):
@@ -152,3 +156,38 @@ async def get_deployment_types():
             }
         ]
     }
+
+# AgentCore invoke endpoint
+@router.post("/agentcore/invoke", response_model=AgentCoreInvokeResponse)
+async def invoke_agentcore_agent(request: AgentCoreInvokeRequest):
+    """Invoke a deployed AgentCore agent"""
+    logger.info(f"AgentCore invoke request: {request.agent_runtime_arn}")
+    logger.info(f"Session ID: {request.runtime_session_id}")
+
+    try:
+        # Validate session ID
+        if not agentcore_invoke_service.validate_session_id(request.runtime_session_id):
+            raise HTTPException(
+                status_code=400,
+                detail="Session ID must be at least 33 characters long"
+            )
+
+        result = await agentcore_invoke_service.invoke_agent(request)
+        return result
+    except Exception as e:
+        logger.error(f"AgentCore invoke error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/agentcore/generate-session-id")
+async def generate_agentcore_session_id():
+    """Generate a valid session ID for AgentCore invocation"""
+    try:
+        session_id = agentcore_invoke_service.generate_session_id()
+        return {
+            "session_id": session_id,
+            "length": len(session_id),
+            "valid": agentcore_invoke_service.validate_session_id(session_id)
+        }
+    except Exception as e:
+        logger.error(f"Session ID generation error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
