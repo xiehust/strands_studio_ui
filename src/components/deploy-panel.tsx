@@ -1,0 +1,709 @@
+import { useEffect, useState } from 'react';
+import Editor from '@monaco-editor/react';
+import { type Node, type Edge } from '@xyflow/react';
+import { Rocket, Download, Copy, CheckCircle, Cloud, Server, Plus, X, Eye, EyeOff, AlertCircle, Edit3, Save, RotateCcw } from 'lucide-react';
+import { generateStrandsAgentCode } from '../lib/code-generator';
+
+interface DeployPanelProps {
+  nodes: Node[];
+  edges: Edge[];
+  className?: string;
+}
+
+interface ApiKeyEntry {
+  key: string;
+  value: string;
+  visible: boolean;
+}
+
+interface DeploymentState {
+  deploymentTarget: 'agentcore' | 'lambda';
+  config: {
+    agentName: string;
+    region: string;
+    executeRole?: string;
+    projectId?: string;
+    version?: string;
+  };
+  apiKeys: Record<string, string>;
+  isDeploying: boolean;
+  deploymentResult?: any;
+  error?: string;
+}
+
+export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) {
+  const [activeTab, setActiveTab] = useState<'configuration' | 'code-preview'>('configuration');
+  const [generatedCode, setGeneratedCode] = useState('');
+  const [editableCode, setEditableCode] = useState('');
+  const [isEditing, setIsEditing] = useState(false);
+  const [errors, setErrors] = useState<string[]>([]);
+  const [copied, setCopied] = useState(false);
+  const [apiKeys, setApiKeys] = useState<ApiKeyEntry[]>([]);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [showDeploymentLogs, setShowDeploymentLogs] = useState(false);
+
+
+
+
+  // Save deployment output to localStorage
+  const saveDeploymentOutput = (deploymentOutput: any) => {
+    try {
+      const existingDeployments = JSON.parse(localStorage.getItem('agentcore_deployments') || '[]');
+      const newDeployment = {
+        ...deploymentOutput,
+        saved_at: new Date().toISOString()
+      };
+
+      // Remove existing deployment with same ARN to avoid duplicates
+      const filteredDeployments = existingDeployments.filter(
+        (dep: any) => dep.agent_runtime_arn !== deploymentOutput.agent_runtime_arn
+      );
+
+      filteredDeployments.push(newDeployment);
+      localStorage.setItem('agentcore_deployments', JSON.stringify(filteredDeployments));
+
+      console.log('Saved deployment output to localStorage:', newDeployment);
+    } catch (error) {
+      console.error('Failed to save deployment output:', error);
+    }
+  };
+
+  // Get saved deployments from localStorage
+  const getSavedDeployments = () => {
+    try {
+      return JSON.parse(localStorage.getItem('agentcore_deployments') || '[]');
+    } catch (error) {
+      console.error('Failed to load saved deployments:', error);
+      return [];
+    }
+  };
+
+  const [deploymentState, setDeploymentState] = useState<DeploymentState>({
+    deploymentTarget: 'agentcore',
+    config: {
+      agentName: '',
+      region: 'us-east-1',
+      executeRole: 'AmazonBedrockAgentCoreRuntimeDefaultServiceRole',
+      projectId: '',
+      version: 'v1.0.0',
+    },
+    apiKeys: {},
+    isDeploying: false,
+  });
+
+  useEffect(() => {
+    const result = generateStrandsAgentCode(nodes, edges);
+    const fullCode = result.imports.join('\n') + '\n\n' + result.code;
+    setGeneratedCode(fullCode);
+    setEditableCode(fullCode);
+    setErrors(result.errors);
+    // Reset editing state when code regenerates
+    setIsEditing(false);
+  }, [nodes, edges]);
+
+  const handleDownload = () => {
+    const codeToUse = isEditing ? editableCode : generatedCode;
+    const blob = new Blob([codeToUse], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'strands_agent.py';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleCopyToClipboard = async () => {
+    try {
+      const codeToUse = isEditing ? editableCode : generatedCode;
+      await navigator.clipboard.writeText(codeToUse);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (error) {
+      console.error('Failed to copy to clipboard:', error);
+    }
+  };
+
+  const handleEditCode = () => {
+    setIsEditing(true);
+  };
+
+  const handleSaveEdit = () => {
+    setGeneratedCode(editableCode);
+    setIsEditing(false);
+  };
+
+  const handleCancelEdit = () => {
+    setEditableCode(generatedCode);
+    setIsEditing(false);
+  };
+
+  const handleCodeChange = (value: string | undefined) => {
+    if (value !== undefined) {
+      setEditableCode(value);
+    }
+  };
+
+  const validateAgentName = (name: string): string | null => {
+    if (!name.trim()) return 'Agent name is required';
+    if (name.length < 1 || name.length > 63) return 'Agent name must be 1-63 characters';
+    if (!/^[a-zA-Z0-9_-]+$/.test(name)) return 'Agent name can only contain letters, numbers, hyphens, and underscores';
+    return null;
+  };
+
+  const validateExecuteRole = (role: string): string | null => {
+    if (!role.trim()) return 'Execute role is required for AgentCore deployment';
+    // Allow both role names and full ARNs
+    if (role.includes('arn:aws:iam::') && !role.startsWith('arn:aws:iam::')) {
+      return 'Execute role must be a valid IAM role ARN or role name';
+    }
+    return null;
+  };
+
+  const handleConfigChange = (field: keyof DeploymentState['config'], value: string) => {
+    const newConfig = { ...deploymentState.config, [field]: value };
+    setDeploymentState(prev => ({ ...prev, config: newConfig }));
+
+    // Validate fields
+    if (field === 'agentName') {
+      const error = validateAgentName(value);
+      setFormErrors(prev => ({ ...prev, agentName: error || '' }));
+    } else if (field === 'executeRole') {
+      const error = validateExecuteRole(value);
+      setFormErrors(prev => ({ ...prev, executeRole: error || '' }));
+    }
+  };
+
+  const handleTargetChange = (target: 'agentcore' | 'lambda') => {
+    setDeploymentState(prev => ({ ...prev, deploymentTarget: target }));
+
+    // Clear execute role error when switching away from AgentCore
+    if (target === 'lambda') {
+      setFormErrors(prev => ({ ...prev, executeRole: '' }));
+    }
+  };
+
+  const addApiKey = () => {
+    setApiKeys(prev => [...prev, { key: '', value: '', visible: false }]);
+  };
+
+  const removeApiKey = (index: number) => {
+    setApiKeys(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const updateApiKey = (index: number, field: 'key' | 'value', value: string) => {
+    setApiKeys(prev => prev.map((item, i) =>
+      i === index ? { ...item, [field]: value } : item
+    ));
+  };
+
+  const toggleApiKeyVisibility = (index: number) => {
+    setApiKeys(prev => prev.map((item, i) =>
+      i === index ? { ...item, visible: !item.visible } : item
+    ));
+  };
+
+  const canDeploy = () => {
+    const isAgentCore = deploymentState.deploymentTarget === 'agentcore';
+    return (
+      generatedCode.trim() !== '' &&
+      deploymentState.config.agentName.trim() !== '' &&
+      !formErrors.agentName &&
+      (!isAgentCore || (deploymentState.config.executeRole?.trim() !== '' && !formErrors.executeRole)) &&
+      !deploymentState.isDeploying
+    );
+  };
+
+
+
+  const handleDeploy = async () => {
+    // Update API keys in deployment state
+    const apiKeysObject = apiKeys.reduce((acc, item) => {
+      if (item.key && item.value) {
+        acc[item.key] = item.value;
+      }
+      return acc;
+    }, {} as Record<string, string>);
+
+    setDeploymentState(prev => ({ ...prev, apiKeys: apiKeysObject, isDeploying: true, error: undefined }));
+
+    try {
+      // Prepare deployment request - use edited code if available
+      const codeToUse = isEditing ? editableCode : generatedCode;
+      const deploymentRequest: any = {
+        code: codeToUse,
+        agent_name: deploymentState.config.agentName,
+        region: deploymentState.config.region,
+        project_id: deploymentState.config.projectId || undefined,
+        version: deploymentState.config.version || undefined,
+        api_keys: apiKeysObject,
+        deployment_type: deploymentState.deploymentTarget,
+      };
+
+      // Add execute_role for AgentCore deployments
+      if (deploymentState.deploymentTarget === 'agentcore') {
+        deploymentRequest.execute_role = deploymentState.config.executeRole;
+      }
+
+      console.log('Deploying with config:', deploymentRequest);
+
+      // Call backend API
+      const endpoint = deploymentState.deploymentTarget === 'agentcore'
+        ? '/api/deploy/agentcore'
+        : '/api/deploy/lambda';
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(deploymentRequest),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: 'Deployment failed' }));
+        throw new Error(errorData.detail || `HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+
+      setDeploymentState(prev => ({
+        ...prev,
+        isDeploying: false,
+        deploymentResult: result
+      }));
+
+      // Save deployment outputs to localStorage if deployment was successful
+      if (result.success && result.status?.deployment_outputs) {
+        saveDeploymentOutput(result.status.deployment_outputs);
+      }
+    } catch (error) {
+      setDeploymentState(prev => ({
+        ...prev,
+        isDeploying: false,
+        error: error instanceof Error ? error.message : 'Deployment failed'
+      }));
+    }
+  };
+
+  return (
+    <div className={`bg-white border-l border-gray-200 flex flex-col h-full ${className}`}>
+      {/* Header */}
+      <div className="flex items-center justify-between p-4 border-b border-gray-200">
+        <div className="flex items-center">
+          <Rocket className="w-4 h-4 text-purple-600 mr-2" />
+          <h3 className="text-lg font-semibold text-gray-900">Deploy Agent</h3>
+        </div>
+        <div className="flex space-x-2">
+          {/* Tab Buttons */}
+          <button
+            onClick={() => setActiveTab('configuration')}
+            className={`px-3 py-1 text-sm rounded transition-colors ${
+              activeTab === 'configuration'
+                ? 'bg-purple-100 text-purple-700'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            Config
+          </button>
+          <button
+            onClick={() => setActiveTab('code-preview')}
+            className={`px-3 py-1 text-sm rounded transition-colors ${
+              activeTab === 'code-preview'
+                ? 'bg-purple-100 text-purple-700'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            Code
+          </button>
+        </div>
+      </div>
+
+      {/* Errors */}
+      {errors.length > 0 && (
+        <div className="p-4 bg-red-50 border-b border-red-200">
+          <div className="flex items-center mb-2">
+            <AlertCircle className="w-4 h-4 text-red-500 mr-2" />
+            <span className="text-sm font-medium text-red-800">Code Generation Errors</span>
+          </div>
+          <ul className="text-sm text-red-700">
+            {errors.map((error, index) => (
+              <li key={index} className="mb-1">• {error}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Tab Content */}
+      <div className="flex-1 min-h-0">
+        {activeTab === 'configuration' ? (
+          <div className="p-4 h-full overflow-y-auto">
+            {/* Configuration Content */}
+            <div className="space-y-6">
+              {/* Deployment Target */}
+              <div className="space-y-3">
+                <label className="text-sm font-medium text-gray-900">Deployment Target</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => handleTargetChange('agentcore')}
+                    className={`flex items-center p-3 border rounded-lg transition-colors ${
+                      deploymentState.deploymentTarget === 'agentcore'
+                        ? 'border-purple-500 bg-purple-50 text-purple-700'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <Server className="w-4 h-4 mr-2" />
+                    <span className="text-sm font-medium">AWS AgentCore</span>
+                  </button>
+                  <button
+                    onClick={() => handleTargetChange('lambda')}
+                    className={`flex items-center p-3 border rounded-lg transition-colors ${
+                      deploymentState.deploymentTarget === 'lambda'
+                        ? 'border-orange-500 bg-orange-50 text-orange-700'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <Cloud className="w-4 h-4 mr-2" />
+                    <span className="text-sm font-medium">AWS Lambda</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Configuration Fields */}
+              <div className="space-y-4">
+                <label className="text-sm font-medium text-gray-900">Configuration</label>
+
+                <div className="space-y-3">
+                  <div>
+                    <label htmlFor="agentName" className="text-sm text-gray-700">Agent Name *</label>
+                    <input
+                      id="agentName"
+                      type="text"
+                      value={deploymentState.config.agentName}
+                      onChange={(e) => handleConfigChange('agentName', e.target.value)}
+                      placeholder="my-agent-name"
+                      className={`w-full px-3 py-2 border rounded-md text-sm ${
+                        formErrors.agentName ? 'border-red-500' : 'border-gray-300'
+                      } focus:outline-none focus:ring-2 focus:ring-purple-500`}
+                    />
+                    {formErrors.agentName && (
+                      <p className="text-xs text-red-600 mt-1">{formErrors.agentName}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label htmlFor="region" className="text-sm text-gray-700">Region</label>
+                    <select
+                      id="region"
+                      value={deploymentState.config.region}
+                      onChange={(e) => handleConfigChange('region', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    >
+                      <option value="us-east-1">us-east-1</option>
+                      <option value="us-west-2">us-west-2</option>
+                      <option value="eu-central-1">eu-central-1</option>
+                      <option value="ap-southeast-1">ap-southeast-1</option>
+                    </select>
+                  </div>
+
+                  {/* Execute Role - Only for AgentCore */}
+                  {deploymentState.deploymentTarget === 'agentcore' && (
+                    <div>
+                      <label htmlFor="executeRole" className="text-sm text-gray-700">Execute Role *</label>
+                      <input
+                        id="executeRole"
+                        type="text"
+                        value={deploymentState.config.executeRole || ''}
+                        onChange={(e) => handleConfigChange('executeRole', e.target.value)}
+                        placeholder="AmazonBedrockAgentCoreRuntimeDefaultServiceRole"
+                        className={`w-full px-3 py-2 border rounded-md text-sm ${
+                          formErrors.executeRole ? 'border-red-500' : 'border-gray-300'
+                        } focus:outline-none focus:ring-2 focus:ring-purple-500`}
+                      />
+                      {formErrors.executeRole && (
+                        <p className="text-xs text-red-600 mt-1">{formErrors.executeRole}</p>
+                      )}
+                      <p className="text-xs text-gray-500 mt-1">
+                        IAM role name that AgentCore will use to execute your agent
+                      </p>
+                    </div>
+                  )}
+
+                  <div>
+                    <label htmlFor="projectId" className="text-sm text-gray-700">Project ID (Optional)</label>
+                    <input
+                      id="projectId"
+                      type="text"
+                      value={deploymentState.config.projectId || ''}
+                      onChange={(e) => handleConfigChange('projectId', e.target.value)}
+                      placeholder="my-project-id"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="version" className="text-sm text-gray-700">Version</label>
+                    <input
+                      id="version"
+                      type="text"
+                      value={deploymentState.config.version || ''}
+                      onChange={(e) => handleConfigChange('version', e.target.value)}
+                      placeholder="v1.0.0"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* API Keys */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium text-gray-900">API Keys (Optional)</label>
+                  <button
+                    onClick={addApiKey}
+                    className="flex items-center px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
+                  >
+                    <Plus className="w-3 h-3 mr-1" />
+                    Add Key
+                  </button>
+                </div>
+
+                {apiKeys.map((apiKey, index) => (
+                  <div key={index} className="flex items-center space-x-2">
+                    <input
+                      placeholder="Key name (e.g., ANTHROPIC_API_KEY)"
+                      value={apiKey.key}
+                      onChange={(e) => updateApiKey(index, 'key', e.target.value)}
+                      className="flex-1 px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-purple-500"
+                    />
+                    <div className="relative flex-1">
+                      <input
+                        type={apiKey.visible ? 'text' : 'password'}
+                        placeholder="API key value"
+                        value={apiKey.value}
+                        onChange={(e) => updateApiKey(index, 'value', e.target.value)}
+                        className="w-full px-2 py-1 pr-8 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-purple-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => toggleApiKeyVisibility(index)}
+                        className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                      >
+                        {apiKey.visible ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                      </button>
+                    </div>
+                    <button
+                      onClick={() => removeApiKey(index)}
+                      className="p-1 text-gray-400 hover:text-red-600"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {/* Deploy Actions */}
+              <div className="flex space-x-3 pt-4 border-t border-gray-200">
+                <button
+                  onClick={handleDeploy}
+                  disabled={!canDeploy()}
+                  className="flex-1 px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-sm font-medium"
+                >
+                  {deploymentState.isDeploying ? 'Deploying...' : 'Deploy'}
+                </button>
+
+              </div>
+
+              {/* Deployment Result */}
+              {deploymentState.deploymentResult && (
+                <div className="space-y-3">
+                  <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+                    <div className="text-sm text-green-800">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="font-medium">✅ Deployment successful!</p>
+                        <button
+                          onClick={() => setShowDeploymentLogs(!showDeploymentLogs)}
+                          className="text-xs px-2 py-1 bg-green-100 hover:bg-green-200 rounded border border-green-300 transition-colors"
+                        >
+                          {showDeploymentLogs ? 'Hide Logs' : 'View Logs'}
+                        </button>
+                      </div>
+
+                      {/* AgentCore specific results */}
+                      {deploymentState.deploymentTarget === 'agentcore' && deploymentState.deploymentResult.agent_arn && (
+                        <div className="space-y-1 text-xs">
+                          <p><strong>Agent ARN:</strong> {deploymentState.deploymentResult.agent_arn}</p>
+                          {deploymentState.deploymentResult.agent_endpoint && (
+                            <p><strong>Endpoint:</strong> {deploymentState.deploymentResult.agent_endpoint}</p>
+                          )}
+                          {deploymentState.deploymentResult.ecr_uri && (
+                            <p><strong>ECR URI:</strong> {deploymentState.deploymentResult.ecr_uri}</p>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Lambda specific results */}
+                      {deploymentState.deploymentTarget === 'lambda' && deploymentState.deploymentResult.function_arn && (
+                        <div className="space-y-1 text-xs">
+                          <p><strong>Function ARN:</strong> {deploymentState.deploymentResult.function_arn}</p>
+                          {deploymentState.deploymentResult.function_url && (
+                            <p><strong>Function URL:</strong>
+                              <a href={deploymentState.deploymentResult.function_url} target="_blank" rel="noopener noreferrer" className="ml-1 underline">
+                                {deploymentState.deploymentResult.function_url}
+                              </a>
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Generic URL fallback */}
+                      {deploymentState.deploymentResult.url && !deploymentState.deploymentResult.agent_arn && !deploymentState.deploymentResult.function_arn && (
+                        <p className="text-xs">
+                          <a href={deploymentState.deploymentResult.url} target="_blank" rel="noopener noreferrer" className="underline">
+                            View deployment
+                          </a>
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Deployment Logs */}
+                  {showDeploymentLogs && (
+                    <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="text-sm font-medium text-gray-900">Deployment Logs</h4>
+                        <button
+                          onClick={() => {
+                            const logsText = JSON.stringify(deploymentState.deploymentResult, null, 2);
+                            navigator.clipboard.writeText(logsText).then(() => {
+                              // Could add a toast notification here
+                            });
+                          }}
+                          className="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded border border-gray-300 transition-colors"
+                        >
+                          Copy Logs
+                        </button>
+                      </div>
+                      <div className="bg-black text-green-400 p-3 rounded text-xs font-mono overflow-auto max-h-64">
+                        <pre>{JSON.stringify(deploymentState.deploymentResult, null, 2)}</pre>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Error */}
+              {deploymentState.error && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                  <p className="text-sm text-red-800">❌ {deploymentState.error}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          /* Code Preview */
+          <div className="flex flex-col h-full">
+            {/* Code Preview Header */}
+            <div className="flex items-center justify-between p-4 border-b border-gray-200">
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-gray-900">Generated Code</span>
+                {isEditing && (
+                  <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded">
+                    Editing
+                  </span>
+                )}
+              </div>
+              <div className="flex gap-2">
+                {isEditing ? (
+                  <>
+                    <button
+                      onClick={handleSaveEdit}
+                      className="flex items-center px-3 py-1 text-sm bg-green-500 text-white rounded hover:bg-green-600"
+                    >
+                      <Save className="h-4 w-4 mr-2" />
+                      Save
+                    </button>
+                    <button
+                      onClick={handleCancelEdit}
+                      className="flex items-center px-3 py-1 text-sm bg-gray-500 text-white rounded hover:bg-gray-600"
+                    >
+                      <RotateCcw className="h-4 w-4 mr-2" />
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={handleEditCode}
+                      className="flex items-center px-3 py-1 text-sm bg-orange-500 text-white rounded hover:bg-orange-600"
+                    >
+                      <Edit3 className="h-4 w-4 mr-2" />
+                      Edit
+                    </button>
+                    <button
+                      onClick={handleDownload}
+                      className="flex items-center px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600"
+                    >
+                      <Download className="h-4 w-4 mr-2" />
+                      Download
+                    </button>
+                    <button
+                      onClick={handleCopyToClipboard}
+                      className="flex items-center px-3 py-1 text-sm bg-gray-500 text-white rounded hover:bg-gray-600"
+                    >
+                      {copied ? (
+                        <>
+                          <CheckCircle className="h-4 w-4 mr-2 text-green-400" />
+                          Copied!
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="h-4 w-4 mr-2" />
+                          Copy
+                        </>
+                      )}
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Code Editor */}
+            <div className="flex-1 min-h-0">
+              <Editor
+                height="100%"
+                language="python"
+                theme="vs-light"
+                value={isEditing ? editableCode : generatedCode}
+                onChange={isEditing ? handleCodeChange : undefined}
+                options={{
+                  readOnly: !isEditing,
+                  minimap: { enabled: false },
+                  scrollBeyondLastLine: false,
+                  fontSize: 12,
+                  lineNumbers: 'on',
+                  roundedSelection: false,
+                  automaticLayout: true,
+                  wordWrap: 'on',
+                  tabSize: 2,
+                  insertSpaces: true,
+                }}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Footer Info */}
+      <div className="p-3 bg-gray-50 border-t border-gray-200 text-xs text-gray-600">
+        <div className="flex justify-between">
+          <span>Deploy • {deploymentState.deploymentTarget === 'agentcore' ? 'AWS AgentCore' : 'AWS Lambda'}</span>
+          <span>{generatedCode.split('\n').length} lines</span>
+        </div>
+      </div>
+
+
+    </div>
+  );
+}
