@@ -72,9 +72,12 @@ class ArtifactRequest(BaseModel):
     @validator('file_type')
     def validate_file_type(cls, v):
         """Validate file type"""
-        allowed_types = {'generate.py', 'flow.json', 'result.json', 'metadata.json'}
+        allowed_types = {
+            'generate.py', 'flow.json', 'result.json', 'metadata.json',
+            'deployment_metadata.json', 'deployment_result.json', 'deployment_code.py', 'deployment_logs.txt'
+        }
         if v not in allowed_types:
-            raise ValueError(f"File type must be one of: {', '.join(allowed_types)}")
+            raise ValueError(f"File type must be one of: {', '.join(sorted(allowed_types))}")
         return v
     
     class Config:
@@ -226,9 +229,12 @@ class RetrieveArtifactRequest(BaseModel):
     @validator('file_type')
     def validate_file_type(cls, v):
         """Validate file type"""
-        allowed_types = {'generate.py', 'flow.json', 'result.json', 'metadata.json'}
+        allowed_types = {
+            'generate.py', 'flow.json', 'result.json', 'metadata.json',
+            'deployment_metadata.json', 'deployment_result.json', 'deployment_code.py', 'deployment_logs.txt'
+        }
         if v not in allowed_types:
-            raise ValueError(f"File type must be one of: {', '.join(allowed_types)}")
+            raise ValueError(f"File type must be one of: {', '.join(sorted(allowed_types))}")
         return v
 
 

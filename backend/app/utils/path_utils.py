@@ -129,10 +129,10 @@ def calculate_content_checksum(content: str) -> str:
 def get_file_extension(file_type: str) -> str:
     """
     Get the appropriate file extension for a given file type
-    
+
     Args:
         file_type: The file type identifier
-        
+
     Returns:
         File extension (including the dot)
     """
@@ -140,7 +140,11 @@ def get_file_extension(file_type: str) -> str:
         'generate.py': '.py',
         'flow.json': '.json',
         'result.json': '.json',
-        'metadata.json': '.json'
+        'metadata.json': '.json',
+        'deployment_metadata.json': '.json',
+        'deployment_result.json': '.json',
+        'deployment_code.py': '.py',
+        'deployment_logs.txt': '.txt'
     }
     return extension_map.get(file_type, '.txt')
 
@@ -148,12 +152,15 @@ def get_file_extension(file_type: str) -> str:
 def validate_file_type(file_type: str) -> bool:
     """
     Validate if a file type is allowed
-    
+
     Args:
         file_type: File type to validate
-        
+
     Returns:
         True if file type is allowed, False otherwise
     """
-    allowed_types = {'generate.py', 'flow.json', 'result.json', 'metadata.json'}
+    allowed_types = {
+        'generate.py', 'flow.json', 'result.json', 'metadata.json',
+        'deployment_metadata.json', 'deployment_result.json', 'deployment_code.py', 'deployment_logs.txt'
+    }
     return file_type in allowed_types

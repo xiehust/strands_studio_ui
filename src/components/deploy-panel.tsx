@@ -3,6 +3,7 @@ import Editor from '@monaco-editor/react';
 import { type Node, type Edge } from '@xyflow/react';
 import { Rocket, Download, Copy, CheckCircle, Cloud, Server, Plus, X, Eye, EyeOff, AlertCircle, Edit3, Save, RotateCcw, History, ChevronDown, ChevronUp, Trash2, Calendar } from 'lucide-react';
 import { generateStrandsAgentCode } from '../lib/code-generator';
+import { apiClient, type DeploymentHistoryItem } from '../lib/api-client';
 
 interface DeployPanelProps {
   nodes: Node[];
@@ -60,7 +61,7 @@ export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) 
   const [apiKeys, setApiKeys] = useState<ApiKeyEntry[]>([]);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [showDeploymentLogs, setShowDeploymentLogs] = useState(false);
-  const [deploymentHistory, setDeploymentHistory] = useState<DeploymentHistoryEntry[]>([]);
+  const [deploymentHistory, setDeploymentHistory] = useState<DeploymentHistoryItem[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
 
@@ -172,16 +173,44 @@ export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) 
     }
   };
 
-  // Load deployment history from localStorage
-  const loadDeploymentHistory = () => {
+  // Load deployment history from persistent storage
+  const loadDeploymentHistory = async () => {
     try {
-      const saved = localStorage.getItem('deployment_history');
-      if (saved) {
-        const history = JSON.parse(saved);
-        setDeploymentHistory(history);
-      }
+      const response = await apiClient.getDeploymentHistory(
+        undefined, // project_id - load all projects
+        undefined, // version - load all versions
+        20 // limit to recent 20 deployments
+      );
+      setDeploymentHistory(response.deployments || []);
     } catch (error) {
       console.error('Failed to load deployment history:', error);
+      // Fallback to localStorage for backward compatibility
+      try {
+        const saved = localStorage.getItem('deployment_history');
+        if (saved) {
+          const localHistory = JSON.parse(saved);
+          // Convert old format to new format if needed
+          const convertedHistory = localHistory.map((entry: any) => ({
+            deployment_id: entry.id || `legacy-${entry.timestamp}`,
+            project_id: entry.config?.projectId || 'default-project',
+            version: entry.config?.version || '1.0.0',
+            deployment_target: entry.deploymentTarget || 'agentcore',
+            agent_name: entry.config?.agentName || 'Unknown Agent',
+            region: entry.config?.region || 'us-east-1',
+            execute_role: entry.config?.executeRole,
+            api_keys: entry.apiKeys,
+            code: entry.generatedCode || '',
+            deployment_result: entry.result || {},
+            deployment_logs: entry.logs,
+            success: entry.status === 'success',
+            error_message: entry.status !== 'success' ? 'Legacy deployment' : undefined,
+            created_at: entry.timestamp || new Date().toISOString()
+          }));
+          setDeploymentHistory(convertedHistory);
+        }
+      } catch (localError) {
+        console.error('Failed to load deployment history from localStorage:', localError);
+      }
     }
   };
 
@@ -204,18 +233,26 @@ export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) 
   };
 
   // Delete deployment from history
-  const deleteFromHistory = (id: string) => {
+  const deleteFromHistory = async (deploymentId: string) => {
     try {
-      const existing = JSON.parse(localStorage.getItem('deployment_history') || '[]');
-      const updated = existing.filter((entry: DeploymentHistoryEntry) => entry.id !== id);
-      localStorage.setItem('deployment_history', JSON.stringify(updated));
-      setDeploymentHistory(updated);
+      await apiClient.deleteDeploymentHistoryItem(deploymentId);
+      // Remove from local state
+      setDeploymentHistory(prev => prev.filter(entry => entry.deployment_id !== deploymentId));
       // Close expanded view if deleting the expanded item
-      if (expandedHistoryId === id) {
+      if (expandedHistoryId === deploymentId) {
         setExpandedHistoryId(null);
       }
     } catch (error) {
       console.error('Failed to delete from deployment history:', error);
+      // Fallback to localStorage for backward compatibility
+      try {
+        const existing = JSON.parse(localStorage.getItem('deployment_history') || '[]');
+        const updated = existing.filter((entry: any) => entry.id !== deploymentId);
+        localStorage.setItem('deployment_history', JSON.stringify(updated));
+        setDeploymentHistory(prev => prev.filter(entry => entry.deployment_id !== deploymentId));
+      } catch (localError) {
+        console.error('Failed to delete from localStorage:', localError);
+      }
     }
   };
 
@@ -358,8 +395,8 @@ export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) 
         saveDeploymentOutput(result.status.deployment_outputs);
       }
 
-      // Save to deployment history only if successful
-      if (result.success) {
+      // Save to persistent deployment history (both success and failure)
+      try {
         // Handle logs - they might be an array or string
         let logsText = 'No deployment logs available';
         if (result.status?.logs) {
@@ -376,15 +413,52 @@ export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) 
           }
         }
 
-        saveToHistory({
-          deploymentTarget: deploymentState.deploymentTarget,
-          config: deploymentState.config,
-          apiKeys: apiKeysObject,
-          generatedCode: codeToUse,
-          result: result,
-          logs: logsText,
-          status: 'success'
-        });
+        const deploymentHistoryItem: DeploymentHistoryItem = {
+          deployment_id: `deployment-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+          project_id: deploymentState.config.projectId || 'default-project',
+          version: deploymentState.config.version || '1.0.0',
+          deployment_target: deploymentState.deploymentTarget,
+          agent_name: deploymentState.config.agentName,
+          region: deploymentState.config.region,
+          execute_role: deploymentState.config.executeRole,
+          api_keys: apiKeysObject,
+          code: codeToUse,
+          deployment_result: result,
+          deployment_logs: logsText,
+          success: result.success,
+          error_message: result.success ? undefined : (result.message || 'Deployment failed'),
+          created_at: new Date().toISOString()
+        };
+
+        await apiClient.saveDeploymentHistory(deploymentHistoryItem);
+        console.log('Deployment saved to persistent storage:', deploymentHistoryItem.deployment_id);
+
+        // Also save to localStorage history for backward compatibility
+        if (result.success) {
+          saveToHistory({
+            deploymentTarget: deploymentState.deploymentTarget,
+            config: deploymentState.config,
+            apiKeys: apiKeysObject,
+            generatedCode: codeToUse,
+            result: result,
+            logs: logsText,
+            status: 'success'
+          });
+        }
+      } catch (storageError) {
+        console.error('Failed to save deployment to persistent storage:', storageError);
+        // Fall back to localStorage only
+        if (result.success) {
+          saveToHistory({
+            deploymentTarget: deploymentState.deploymentTarget,
+            config: deploymentState.config,
+            apiKeys: apiKeysObject,
+            generatedCode: codeToUse,
+            result: result,
+            logs: logsText,
+            status: 'success'
+          });
+        }
       }
     } catch (error) {
       setDeploymentState(prev => ({
@@ -392,6 +466,31 @@ export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) 
         isDeploying: false,
         error: error instanceof Error ? error.message : 'Deployment failed'
       }));
+
+      // Also save failed deployments to persistent storage
+      try {
+        const deploymentHistoryItem: DeploymentHistoryItem = {
+          deployment_id: `deployment-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+          project_id: deploymentState.config.projectId || 'default-project',
+          version: deploymentState.config.version || '1.0.0',
+          deployment_target: deploymentState.deploymentTarget,
+          agent_name: deploymentState.config.agentName,
+          region: deploymentState.config.region,
+          execute_role: deploymentState.config.executeRole,
+          api_keys: apiKeysObject,
+          code: codeToUse,
+          deployment_result: {},
+          deployment_logs: `Deployment failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          success: false,
+          error_message: error instanceof Error ? error.message : 'Deployment failed',
+          created_at: new Date().toISOString()
+        };
+
+        await apiClient.saveDeploymentHistory(deploymentHistoryItem);
+        console.log('Failed deployment saved to persistent storage:', deploymentHistoryItem.deployment_id);
+      } catch (storageError) {
+        console.error('Failed to save failed deployment to persistent storage:', storageError);
+      }
     }
   };
 
@@ -637,100 +736,111 @@ export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) 
                   </button>
 
                   {showHistory && (
-                    <div className="mt-3 space-y-2 max-h-64 overflow-y-auto">
-                      {deploymentHistory.length === 0 ? (
-                        <div className="text-center py-8 text-gray-500">
-                          <History className="w-8 h-8 mx-auto mb-2 text-gray-300" />
-                          <p className="text-sm">No deployment history yet</p>
-                          <p className="text-xs">Successful deployments will appear here</p>
+                    <div className="border-t border-gray-200">
+                      <div className="p-3 bg-gray-50 flex items-center justify-between">
+                        <div className="flex items-center space-x-2">
+                          <Rocket className="w-4 h-4 text-gray-600" />
+                          <h4 className="text-sm font-medium text-gray-700">Stored Deployments</h4>
                         </div>
-                      ) : (
-                        deploymentHistory.map((entry) => (
-                        <div
-                          key={entry.id}
-                          className="bg-gray-50 border border-gray-200 rounded-lg overflow-hidden"
+                        <button
+                          onClick={loadDeploymentHistory}
+                          className="text-xs text-blue-600 hover:text-blue-800"
                         >
-                          <div
-                            className="p-3 cursor-pointer hover:bg-gray-100 transition-colors"
-                            onClick={() => toggleHistoryExpansion(entry.id)}
-                          >
-                            <div className="flex items-start justify-between">
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center space-x-2 mb-1">
-                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
-                                    {entry.deploymentTarget}
-                                  </span>
-                                  <span className="text-xs text-gray-500 flex items-center">
-                                    <Calendar className="w-3 h-3 mr-1" />
-                                    {new Date(entry.timestamp).toLocaleString()}
-                                  </span>
-                                </div>
-                                <p className="text-sm font-medium text-gray-900 truncate">
-                                  {entry.config.agentName}
-                                </p>
-                                <p className="text-xs text-gray-500">
-                                  {entry.config.region}
-                                </p>
-                              </div>
-                              <div className="flex items-center space-x-1">
-                                {expandedHistoryId === entry.id ?
-                                  <ChevronUp className="w-4 h-4 text-gray-400" /> :
-                                  <ChevronDown className="w-4 h-4 text-gray-400" />
-                                }
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    deleteFromHistory(entry.id);
-                                  }}
-                                  className="ml-1 p-1 text-gray-400 hover:text-red-600 transition-colors"
-                                  title="Delete deployment record"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              </div>
-                            </div>
+                          Refresh
+                        </button>
+                      </div>
+                      <div className="max-h-40 overflow-auto">
+                        {deploymentHistory.length === 0 ? (
+                          <div className="p-4 text-center text-xs text-gray-500">
+                            No stored deployments available
                           </div>
-
-                          {/* Expanded content with logs */}
-                          {expandedHistoryId === entry.id && (
-                            <div className="border-t border-gray-200 bg-white">
-                              <div className="p-3 space-y-3">
-                                {/* Deployment Details */}
-                                {entry.result?.agent_arn && (
-                                  <div className="text-xs space-y-1">
-                                    <p><strong>Agent ARN:</strong> <span className="font-mono text-gray-600">{entry.result.agent_arn}</span></p>
-                                    {entry.result.agent_endpoint && (
-                                      <p><strong>Endpoint:</strong> <span className="font-mono text-gray-600">{entry.result.agent_endpoint}</span></p>
-                                    )}
-                                    {entry.result.ecr_uri && (
-                                      <p><strong>ECR URI:</strong> <span className="font-mono text-gray-600">{entry.result.ecr_uri}</span></p>
-                                    )}
-                                  </div>
-                                )}
-
-                                {/* Deployment Logs */}
-                                {entry.logs && (
-                                  <div>
-                                    <h4 className="text-xs font-medium text-gray-700 mb-2">Deployment Logs:</h4>
-                                    <div className="bg-gray-900 text-green-400 p-3 rounded text-xs font-mono max-h-32 overflow-y-auto">
-                                      <pre className="whitespace-pre-wrap">{entry.logs}</pre>
-                                    </div>
-                                  </div>
-                                )}
-
-                                {/* Generated Code Preview */}
-                                <div>
-                                  <h4 className="text-xs font-medium text-gray-700 mb-2">Generated Code:</h4>
-                                  <div className="bg-gray-100 p-2 rounded text-xs font-mono max-h-24 overflow-y-auto">
-                                    <pre className="whitespace-pre-wrap text-gray-800">{entry.generatedCode.slice(0, 200)}...</pre>
-                                  </div>
+                        ) : (
+                          deploymentHistory.slice(0, 10).map((entry) => (
+                            <div
+                              key={entry.deployment_id}
+                              className={`p-3 border-b border-gray-100 hover:bg-gray-50 cursor-pointer ${
+                                expandedHistoryId === entry.deployment_id ? 'bg-blue-50' : ''
+                              }`}
+                              onClick={() => toggleHistoryExpansion(entry.deployment_id)}
+                              title={`Deployment ID: ${entry.deployment_id}`}
+                            >
+                              <div className="flex items-center justify-between text-xs">
+                                <div className="flex items-center space-x-2">
+                                  <Rocket className="w-3 h-3 text-gray-500" />
+                                  <span className="text-gray-700">
+                                    {entry.deployment_id.substring(0, 12)}...
+                                  </span>
+                                  <span className={`text-xs px-1 rounded ${
+                                    entry.success ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                                  }`}>
+                                    {entry.success ? '✓' : '✗'}
+                                  </span>
+                                  <span className="text-xs bg-gray-100 px-1 rounded text-gray-600">
+                                    {entry.deployment_target.toUpperCase()}
+                                  </span>
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                  <span className="text-gray-500">
+                                    {new Date(entry.created_at).toLocaleTimeString()}
+                                  </span>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      deleteFromHistory(entry.deployment_id);
+                                    }}
+                                    className="text-gray-400 hover:text-red-600 transition-colors"
+                                    title="Delete deployment"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                  </button>
                                 </div>
                               </div>
+                              <div className="mt-1 text-xs text-gray-600">
+                                Agent: {entry.agent_name} • Region: {entry.region}
+                                {!entry.success && entry.error_message && (
+                                  <span className="text-red-600 ml-2">• Error: {entry.error_message.substring(0, 50)}...</span>
+                                )}
+                              </div>
+
+                              {/* Expanded details - compact format like stored executions */}
+                              {expandedHistoryId === entry.deployment_id && (
+                                <div className="mt-2 pt-2 border-t border-gray-200 space-y-2">
+                                  {/* Deployment Results */}
+                                  {entry.deployment_result?.agent_arn && (
+                                    <div className="text-xs text-gray-600">
+                                      <p><strong>Agent ARN:</strong> <span className="font-mono">{entry.deployment_result.agent_arn}</span></p>
+                                      {entry.deployment_result.agent_endpoint && (
+                                        <p><strong>Endpoint:</strong> <span className="font-mono">{entry.deployment_result.agent_endpoint}</span></p>
+                                      )}
+                                    </div>
+                                  )}
+                                  {entry.deployment_result?.function_arn && (
+                                    <div className="text-xs text-gray-600">
+                                      <p><strong>Function ARN:</strong> <span className="font-mono">{entry.deployment_result.function_arn}</span></p>
+                                      {entry.deployment_result.function_url && (
+                                        <p><strong>URL:</strong>
+                                          <a href={entry.deployment_result.function_url} target="_blank" rel="noopener noreferrer" className="ml-1 text-blue-600 underline">
+                                            {entry.deployment_result.function_url}
+                                          </a>
+                                        </p>
+                                      )}
+                                    </div>
+                                  )}
+                                  {/* Deployment Logs Preview */}
+                                  {entry.deployment_logs && (
+                                    <div className="text-xs">
+                                      <p className="font-medium text-gray-700 mb-1">Logs:</p>
+                                      <div className="bg-gray-100 p-2 rounded font-mono max-h-20 overflow-y-auto">
+                                        {entry.deployment_logs.substring(0, 200)}...
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                             </div>
-                          )}
-                        </div>
-                        ))
-                      )}
+                          ))
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -738,75 +848,104 @@ export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) 
               {/* Deployment Result */}
               {deploymentState.deploymentResult && (
                 <div className="space-y-3">
-                  <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-                    <div className="text-sm text-green-800">
-                      <div className="flex items-center justify-between mb-2">
-                        <p className="font-medium">✅ Deployment successful!</p>
-                        <button
-                          onClick={() => setShowDeploymentLogs(!showDeploymentLogs)}
-                          className="text-xs px-2 py-1 bg-green-100 hover:bg-green-200 rounded border border-green-300 transition-colors"
-                        >
-                          {showDeploymentLogs ? 'Hide Logs' : 'View Logs'}
-                        </button>
-                      </div>
+                  {deploymentState.deploymentResult.success ? (
+                    <>
+                      <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+                        <div className="text-sm text-green-800">
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="font-medium">✅ Deployment successful!</p>
+                            <button
+                              onClick={() => setShowDeploymentLogs(!showDeploymentLogs)}
+                              className="text-xs px-2 py-1 bg-green-100 hover:bg-green-200 rounded border border-green-300 transition-colors"
+                            >
+                              {showDeploymentLogs ? 'Hide Logs' : 'View Logs'}
+                            </button>
+                          </div>
 
-                      {/* AgentCore specific results */}
-                      {deploymentState.deploymentTarget === 'agentcore' && deploymentState.deploymentResult.agent_arn && (
-                        <div className="space-y-1 text-xs">
-                          <p><strong>Agent ARN:</strong> {deploymentState.deploymentResult.agent_arn}</p>
-                          {deploymentState.deploymentResult.agent_endpoint && (
-                            <p><strong>Endpoint:</strong> {deploymentState.deploymentResult.agent_endpoint}</p>
+                          {/* AgentCore specific results */}
+                          {deploymentState.deploymentTarget === 'agentcore' && deploymentState.deploymentResult.agent_arn && (
+                            <div className="space-y-1 text-xs">
+                              <p><strong>Agent ARN:</strong> {deploymentState.deploymentResult.agent_arn}</p>
+                              {deploymentState.deploymentResult.agent_endpoint && (
+                                <p><strong>Endpoint:</strong> {deploymentState.deploymentResult.agent_endpoint}</p>
+                              )}
+                              {deploymentState.deploymentResult.ecr_uri && (
+                                <p><strong>ECR URI:</strong> {deploymentState.deploymentResult.ecr_uri}</p>
+                              )}
+                            </div>
                           )}
-                          {deploymentState.deploymentResult.ecr_uri && (
-                            <p><strong>ECR URI:</strong> {deploymentState.deploymentResult.ecr_uri}</p>
-                          )}
-                        </div>
-                      )}
 
-                      {/* Lambda specific results */}
-                      {deploymentState.deploymentTarget === 'lambda' && deploymentState.deploymentResult.function_arn && (
-                        <div className="space-y-1 text-xs">
-                          <p><strong>Function ARN:</strong> {deploymentState.deploymentResult.function_arn}</p>
-                          {deploymentState.deploymentResult.function_url && (
-                            <p><strong>Function URL:</strong>
-                              <a href={deploymentState.deploymentResult.function_url} target="_blank" rel="noopener noreferrer" className="ml-1 underline">
-                                {deploymentState.deploymentResult.function_url}
+                          {/* Lambda specific results */}
+                          {deploymentState.deploymentTarget === 'lambda' && deploymentState.deploymentResult.function_arn && (
+                            <div className="space-y-1 text-xs">
+                              <p><strong>Function ARN:</strong> {deploymentState.deploymentResult.function_arn}</p>
+                              {deploymentState.deploymentResult.function_url && (
+                                <p><strong>Function URL:</strong>
+                                  <a href={deploymentState.deploymentResult.function_url} target="_blank" rel="noopener noreferrer" className="ml-1 underline">
+                                    {deploymentState.deploymentResult.function_url}
+                                  </a>
+                                </p>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Generic URL fallback */}
+                          {deploymentState.deploymentResult.url && !deploymentState.deploymentResult.agent_arn && !deploymentState.deploymentResult.function_arn && (
+                            <p className="text-xs">
+                              <a href={deploymentState.deploymentResult.url} target="_blank" rel="noopener noreferrer" className="underline">
+                                View deployment
                               </a>
                             </p>
                           )}
                         </div>
-                      )}
-
-                      {/* Generic URL fallback */}
-                      {deploymentState.deploymentResult.url && !deploymentState.deploymentResult.agent_arn && !deploymentState.deploymentResult.function_arn && (
-                        <p className="text-xs">
-                          <a href={deploymentState.deploymentResult.url} target="_blank" rel="noopener noreferrer" className="underline">
-                            View deployment
-                          </a>
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Deployment Logs */}
-                  {showDeploymentLogs && (
-                    <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
-                      <div className="flex items-center justify-between mb-2">
-                        <h4 className="text-sm font-medium text-gray-900">Deployment Logs</h4>
-                        <button
-                          onClick={() => {
-                            const logsText = JSON.stringify(deploymentState.deploymentResult, null, 2);
-                            navigator.clipboard.writeText(logsText).then(() => {
-                              // Could add a toast notification here
-                            });
-                          }}
-                          className="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded border border-gray-300 transition-colors"
-                        >
-                          Copy Logs
-                        </button>
                       </div>
-                      <div className="bg-black text-green-400 p-3 rounded text-xs font-mono overflow-auto max-h-64">
-                        <pre>{JSON.stringify(deploymentState.deploymentResult, null, 2)}</pre>
+
+                      {/* Deployment Logs */}
+                      {showDeploymentLogs && (
+                        <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                          <div className="flex items-center justify-between mb-2">
+                            <h4 className="text-sm font-medium text-gray-900">Deployment Logs</h4>
+                            <button
+                              onClick={() => {
+                                const logsText = JSON.stringify(deploymentState.deploymentResult, null, 2);
+                                navigator.clipboard.writeText(logsText).then(() => {
+                                  // Could add a toast notification here
+                                });
+                              }}
+                              className="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded border border-gray-300 transition-colors"
+                            >
+                              Copy Logs
+                            </button>
+                          </div>
+                          <div className="bg-black text-green-400 p-3 rounded text-xs font-mono overflow-auto max-h-64">
+                            <pre>{JSON.stringify(deploymentState.deploymentResult, null, 2)}</pre>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                      <div className="text-sm text-red-800">
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="font-medium">❌ Deployment failed!</p>
+                          <button
+                            onClick={() => setShowDeploymentLogs(!showDeploymentLogs)}
+                            className="text-xs px-2 py-1 bg-red-100 hover:bg-red-200 rounded border border-red-300 transition-colors"
+                          >
+                            {showDeploymentLogs ? 'Hide Details' : 'View Details'}
+                          </button>
+                        </div>
+
+                        {deploymentState.deploymentResult.message && (
+                          <p className="text-xs mb-2">{deploymentState.deploymentResult.message}</p>
+                        )}
+
+                        {/* Failure Details */}
+                        {showDeploymentLogs && (
+                          <div className="mt-3 p-3 bg-red-900 text-red-100 rounded text-xs font-mono overflow-auto max-h-64">
+                            <pre>{JSON.stringify(deploymentState.deploymentResult, null, 2)}</pre>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}

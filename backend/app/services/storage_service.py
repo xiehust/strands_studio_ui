@@ -575,3 +575,241 @@ class StorageService:
         except Exception as e:
             logger.warning(f"Failed to get version info for {project_id}/{version}: {e}")
             return None
+
+    def build_deployment_storage_path(self, deployment_target: str, project_id: str, version: str, deployment_id: str) -> Path:
+        """
+        Build a safe storage path for deployment artifacts
+
+        Args:
+            deployment_target: Deployment target ('agentcore' or 'lambda')
+            project_id: Project identifier
+            version: Project version
+            deployment_id: Deployment identifier
+
+        Returns:
+            Safe deployment storage path
+        """
+        from ..utils.path_utils import sanitize_path_component
+
+        safe_target = sanitize_path_component(deployment_target)
+        safe_project = sanitize_path_component(project_id)
+        safe_version = sanitize_path_component(version)
+        safe_deployment = sanitize_path_component(deployment_id)
+
+        return self.base_dir / "deploy_history" / safe_target / safe_project / safe_version / safe_deployment
+
+    async def save_deployment_artifact(self,
+                                     deployment_target: str,
+                                     project_id: str,
+                                     version: str,
+                                     deployment_id: str,
+                                     file_type: str,
+                                     content: str) -> ArtifactResponse:
+        """
+        Save a deployment artifact to storage
+
+        Args:
+            deployment_target: Deployment target ('agentcore' or 'lambda')
+            project_id: Project identifier
+            version: Project version
+            deployment_id: Deployment identifier
+            file_type: Type of file to save
+            content: File content
+
+        Returns:
+            Response with operation result and metadata
+        """
+        try:
+            # Validate file type
+            if not validate_file_type(file_type):
+                raise HTTPException(status_code=400, detail=f"Invalid file type: {file_type}")
+
+            # Build deployment storage path
+            storage_path = self.build_deployment_storage_path(
+                deployment_target, project_id, version, deployment_id
+            )
+
+            # Ensure directory exists
+            ensure_directory_exists(storage_path)
+
+            # Create file path
+            file_name = file_type
+            if not file_name.endswith(get_file_extension(file_type)):
+                file_name += get_file_extension(file_type)
+
+            file_path = storage_path / file_name
+
+            # Ensure the path is safe
+            if not is_safe_path(file_path, self.base_dir):
+                raise HTTPException(status_code=400, detail="Invalid file path")
+
+            # Calculate checksum
+            checksum = calculate_content_checksum(content)
+
+            # Write file
+            async with aiofiles.open(file_path, 'w', encoding='utf-8') as f:
+                await f.write(content)
+
+            # Get file stats
+            file_stats = file_path.stat()
+
+            # Create metadata
+            metadata = StorageMetadata(
+                project_id=project_id,
+                version=version,
+                execution_id=deployment_id,  # Using deployment_id as execution_id for consistency
+                file_type=file_type,
+                file_size=file_stats.st_size,
+                file_path=str(file_path),
+                checksum=checksum
+            )
+
+            logger.info(f"Deployment artifact saved: {deployment_target}/{project_id}/{version}/{deployment_id}/{file_type}")
+
+            return ArtifactResponse(
+                success=True,
+                message="Deployment artifact saved successfully",
+                metadata=metadata,
+                file_path=str(file_path)
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error saving deployment artifact: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to save deployment artifact: {str(e)}")
+
+    async def retrieve_deployment_artifact(self,
+                                         deployment_target: str,
+                                         project_id: str,
+                                         version: str,
+                                         deployment_id: str,
+                                         file_type: str) -> Optional[ArtifactContent]:
+        """
+        Retrieve a deployment artifact from storage
+
+        Args:
+            deployment_target: Deployment target ('agentcore' or 'lambda')
+            project_id: Project identifier
+            version: Project version
+            deployment_id: Deployment identifier
+            file_type: Type of file to retrieve
+
+        Returns:
+            Artifact content and metadata, or None if not found
+        """
+        try:
+            # Validate file type
+            if not validate_file_type(file_type):
+                raise HTTPException(status_code=400, detail=f"Invalid file type: {file_type}")
+
+            # Build deployment storage path
+            storage_path = self.build_deployment_storage_path(
+                deployment_target, project_id, version, deployment_id
+            )
+
+            # Create file path
+            file_name = file_type
+            if not file_name.endswith(get_file_extension(file_type)):
+                file_name += get_file_extension(file_type)
+
+            file_path = storage_path / file_name
+
+            # Check if file exists
+            if not file_path.exists():
+                return None
+
+            # Ensure the path is safe
+            if not is_safe_path(file_path, self.base_dir):
+                raise HTTPException(status_code=400, detail="Invalid file path")
+
+            # Read file content
+            async with aiofiles.open(file_path, 'r', encoding='utf-8') as f:
+                content = await f.read()
+
+            # Get file stats
+            file_stats = file_path.stat()
+
+            # Create metadata
+            metadata = StorageMetadata(
+                project_id=project_id,
+                version=version,
+                execution_id=deployment_id,
+                timestamp=datetime.fromtimestamp(file_stats.st_mtime),
+                file_type=file_type,
+                file_size=file_stats.st_size,
+                file_path=str(file_path),
+                checksum=calculate_content_checksum(content)
+            )
+
+            return ArtifactContent(
+                content=content,
+                metadata=metadata
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error retrieving deployment artifact: {e}")
+            return None
+
+    async def delete_deployment_artifact(self,
+                                       deployment_target: str,
+                                       project_id: str,
+                                       version: str,
+                                       deployment_id: str,
+                                       file_type: str) -> bool:
+        """
+        Delete a deployment artifact from storage
+
+        Args:
+            deployment_target: Deployment target ('agentcore' or 'lambda')
+            project_id: Project identifier
+            version: Project version
+            deployment_id: Deployment identifier
+            file_type: Type of file to delete
+
+        Returns:
+            True if deleted successfully, False if not found
+        """
+        try:
+            # Build deployment storage path
+            storage_path = self.build_deployment_storage_path(
+                deployment_target, project_id, version, deployment_id
+            )
+
+            # Create file path
+            file_name = file_type
+            if not file_name.endswith(get_file_extension(file_type)):
+                file_name += get_file_extension(file_type)
+
+            file_path = storage_path / file_name
+
+            # Check if file exists
+            if not file_path.exists():
+                return False
+
+            # Ensure the path is safe
+            if not is_safe_path(file_path, self.base_dir):
+                raise HTTPException(status_code=400, detail="Invalid file path")
+
+            # Delete file
+            file_path.unlink()
+
+            # Try to remove empty directories
+            try:
+                parent = file_path.parent
+                while parent != self.base_dir and parent.is_dir() and not any(parent.iterdir()):
+                    parent.rmdir()
+                    parent = parent.parent
+            except:
+                pass  # Ignore errors when cleaning up directories
+
+            logger.info(f"Deployment artifact deleted: {deployment_target}/{project_id}/{version}/{deployment_id}/{file_type}")
+            return True
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error deleting deployment artifact: {e}")
+            return False

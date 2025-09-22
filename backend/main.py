@@ -196,6 +196,22 @@ class ExecutionHistoryItem(BaseModel):
     input_data: Optional[str] = None
     created_at: str
 
+class DeploymentHistoryItem(BaseModel):
+    deployment_id: str
+    project_id: Optional[str] = None
+    version: Optional[str] = None
+    deployment_target: str  # 'agentcore' or 'lambda'
+    agent_name: str
+    region: str
+    execute_role: Optional[str] = None
+    api_keys: Optional[Dict[str, str]] = None
+    code: str
+    deployment_result: Dict[str, Any]
+    deployment_logs: Optional[str] = None
+    success: bool
+    error_message: Optional[str] = None
+    created_at: str
+
 # In-memory storage (replace with database in production)
 projects_storage: Dict[str, ProjectData] = {}
 execution_results: Dict[str, ExecutionResult] = {}
@@ -854,6 +870,369 @@ async def delete_execution_history_item(execution_id: str):
     except Exception as e:
         logger.error(f"Error deleting execution history item - ID: {execution_id}, Error: {e}")
         raise HTTPException(status_code=500, detail="Error deleting execution history item")
+
+# Deployment History Endpoints
+@app.post("/api/deployment-history")
+async def save_deployment_history(item: DeploymentHistoryItem):
+    """Save deployment result to persistent storage"""
+    logger.info(f"Saving deployment to persistent storage - ID: {item.deployment_id}")
+
+    # Set created_at if not provided
+    if not item.created_at:
+        item.created_at = datetime.now().isoformat()
+
+    try:
+        project_id = item.project_id or "default-project"
+        version = item.version or "1.0.0"
+
+        # Save deployment metadata
+        await storage_service.save_deployment_artifact(
+            deployment_target=item.deployment_target,
+            project_id=project_id,
+            version=version,
+            deployment_id=item.deployment_id,
+            file_type="deployment_metadata.json",
+            content=json.dumps({
+                "deployment_id": item.deployment_id,
+                "deployment_target": item.deployment_target,
+                "agent_name": item.agent_name,
+                "region": item.region,
+                "execute_role": item.execute_role,
+                "api_keys": item.api_keys,
+                "success": item.success,
+                "error_message": item.error_message,
+                "created_at": item.created_at
+            }, indent=2)
+        )
+
+        # Save deployment result
+        await storage_service.save_deployment_artifact(
+            deployment_target=item.deployment_target,
+            project_id=project_id,
+            version=version,
+            deployment_id=item.deployment_id,
+            file_type="deployment_result.json",
+            content=json.dumps(item.deployment_result, indent=2)
+        )
+
+        # Save deployment code
+        await storage_service.save_deployment_artifact(
+            deployment_target=item.deployment_target,
+            project_id=project_id,
+            version=version,
+            deployment_id=item.deployment_id,
+            file_type="deployment_code.py",
+            content=item.code
+        )
+
+        # Save deployment logs if available
+        if item.deployment_logs:
+            await storage_service.save_deployment_artifact(
+                deployment_target=item.deployment_target,
+                project_id=project_id,
+                version=version,
+                deployment_id=item.deployment_id,
+                file_type="deployment_logs.txt",
+                content=item.deployment_logs
+            )
+
+    except Exception as e:
+        logger.error(f"Error saving deployment to persistent storage - ID: {item.deployment_id}, Error: {e}")
+        raise HTTPException(status_code=500, detail="Error saving deployment to persistent storage")
+
+    logger.info(f"Deployment saved to persistent storage - ID: {item.deployment_id}")
+    return {"message": "Deployment saved to persistent storage", "deployment_id": item.deployment_id}
+
+@app.get("/api/deployment-history")
+async def get_deployment_history(
+    project_id: Optional[str] = None,
+    version: Optional[str] = None,
+    limit: Optional[int] = 10
+):
+    """Get deployment history from persistent storage"""
+    logger.info(f"Retrieving deployment history from storage - Project: {project_id}, Version: {version}")
+
+    try:
+        deployments = []
+        deploy_history_path = storage_service.base_dir / "deploy_history"
+
+        if not deploy_history_path.exists():
+            logger.info("No deployment history directory found")
+            return {"deployments": []}
+
+        # Scan deployment history directories
+        for target_dir in deploy_history_path.iterdir():
+            if not target_dir.is_dir():
+                continue
+
+            deployment_target = target_dir.name
+
+            for proj_dir in target_dir.iterdir():
+                if not proj_dir.is_dir():
+                    continue
+
+                # Filter by project if specified
+                if project_id and proj_dir.name != project_id:
+                    continue
+
+                for ver_dir in proj_dir.iterdir():
+                    if not ver_dir.is_dir():
+                        continue
+
+                    # Filter by version if specified
+                    if version and ver_dir.name != version:
+                        continue
+
+                    for deploy_dir in ver_dir.iterdir():
+                        if not deploy_dir.is_dir():
+                            continue
+
+                        try:
+                            deployment_id = deploy_dir.name
+
+                            # Get deployment metadata
+                            metadata_response = await storage_service.retrieve_deployment_artifact(
+                                deployment_target=deployment_target,
+                                project_id=proj_dir.name,
+                                version=ver_dir.name,
+                                deployment_id=deployment_id,
+                                file_type="deployment_metadata.json"
+                            )
+
+                            if metadata_response:
+                                metadata = json.loads(metadata_response.content)
+
+                                # Get deployment result
+                                result_response = await storage_service.retrieve_deployment_artifact(
+                                    deployment_target=deployment_target,
+                                    project_id=proj_dir.name,
+                                    version=ver_dir.name,
+                                    deployment_id=deployment_id,
+                                    file_type="deployment_result.json"
+                                )
+
+                                # Get deployment code
+                                code_response = await storage_service.retrieve_deployment_artifact(
+                                    deployment_target=deployment_target,
+                                    project_id=proj_dir.name,
+                                    version=ver_dir.name,
+                                    deployment_id=deployment_id,
+                                    file_type="deployment_code.py"
+                                )
+
+                                # Get deployment logs (optional)
+                                logs_response = await storage_service.retrieve_deployment_artifact(
+                                    deployment_target=deployment_target,
+                                    project_id=proj_dir.name,
+                                    version=ver_dir.name,
+                                    deployment_id=deployment_id,
+                                    file_type="deployment_logs.txt"
+                                )
+                                deployment_logs = logs_response.content if logs_response else None
+
+                                deployment_item = DeploymentHistoryItem(
+                                    deployment_id=metadata["deployment_id"],
+                                    project_id=proj_dir.name,
+                                    version=ver_dir.name,
+                                    deployment_target=metadata["deployment_target"],
+                                    agent_name=metadata["agent_name"],
+                                    region=metadata["region"],
+                                    execute_role=metadata.get("execute_role"),
+                                    api_keys=metadata.get("api_keys"),
+                                    code=code_response.content if code_response else "",
+                                    deployment_result=json.loads(result_response.content) if result_response else {},
+                                    deployment_logs=deployment_logs,
+                                    success=metadata["success"],
+                                    error_message=metadata.get("error_message"),
+                                    created_at=metadata["created_at"]
+                                )
+                                deployments.append(deployment_item)
+
+                        except Exception as e:
+                            # Skip this deployment if it has issues
+                            logger.debug(f"Skipping deployment {deploy_dir.name}: {e}")
+                            continue
+
+        # Sort by created_at (newest first) and limit results
+        deployments.sort(key=lambda x: x.created_at, reverse=True)
+        if limit:
+            deployments = deployments[:limit]
+
+        logger.info(f"Retrieved {len(deployments)} deployment history items")
+        return {"deployments": deployments}
+
+    except Exception as e:
+        logger.error(f"Error retrieving deployment history: {e}")
+        return {"deployments": []}
+
+@app.get("/api/deployment-history/{deployment_id}")
+async def get_deployment_history_item(deployment_id: str):
+    """Get a specific deployment from persistent storage"""
+    logger.info(f"Retrieving deployment history item from storage - ID: {deployment_id}")
+
+    try:
+        # Search through deployment history directories
+        deploy_history_path = storage_service.base_dir / "deploy_history"
+
+        if not deploy_history_path.exists():
+            logger.warning(f"Deployment history item not found in storage - ID: {deployment_id}")
+            raise HTTPException(status_code=404, detail="Deployment history item not found")
+
+        # Scan all deployment directories to find the deployment
+        for target_dir in deploy_history_path.iterdir():
+            if not target_dir.is_dir():
+                continue
+
+            deployment_target = target_dir.name
+
+            for proj_dir in target_dir.iterdir():
+                if not proj_dir.is_dir():
+                    continue
+
+                for ver_dir in proj_dir.iterdir():
+                    if not ver_dir.is_dir():
+                        continue
+
+                    for deploy_dir in ver_dir.iterdir():
+                        if not deploy_dir.is_dir():
+                            continue
+
+                        if deploy_dir.name == deployment_id:
+                            try:
+                                # Get deployment metadata
+                                metadata_response = await storage_service.retrieve_deployment_artifact(
+                                    deployment_target=deployment_target,
+                                    project_id=proj_dir.name,
+                                    version=ver_dir.name,
+                                    deployment_id=deployment_id,
+                                    file_type="deployment_metadata.json"
+                                )
+
+                                if metadata_response:
+                                    metadata = json.loads(metadata_response.content)
+
+                                    # Get other deployment data
+                                    result_response = await storage_service.retrieve_deployment_artifact(
+                                        deployment_target=deployment_target,
+                                        project_id=proj_dir.name,
+                                        version=ver_dir.name,
+                                        deployment_id=deployment_id,
+                                        file_type="deployment_result.json"
+                                    )
+                                    code_response = await storage_service.retrieve_deployment_artifact(
+                                        deployment_target=deployment_target,
+                                        project_id=proj_dir.name,
+                                        version=ver_dir.name,
+                                        deployment_id=deployment_id,
+                                        file_type="deployment_code.py"
+                                    )
+
+                                    logs_response = await storage_service.retrieve_deployment_artifact(
+                                        deployment_target=deployment_target,
+                                        project_id=proj_dir.name,
+                                        version=ver_dir.name,
+                                        deployment_id=deployment_id,
+                                        file_type="deployment_logs.txt"
+                                    )
+                                    deployment_logs = logs_response.content if logs_response else None
+
+                                    deployment_item = DeploymentHistoryItem(
+                                        deployment_id=metadata["deployment_id"],
+                                        project_id=proj_dir.name,
+                                        version=ver_dir.name,
+                                        deployment_target=metadata["deployment_target"],
+                                        agent_name=metadata["agent_name"],
+                                        region=metadata["region"],
+                                        execute_role=metadata.get("execute_role"),
+                                        api_keys=metadata.get("api_keys"),
+                                        code=code_response.content if code_response else "",
+                                        deployment_result=json.loads(result_response.content) if result_response else {},
+                                        deployment_logs=deployment_logs,
+                                        success=metadata["success"],
+                                        error_message=metadata.get("error_message"),
+                                        created_at=metadata["created_at"]
+                                    )
+
+                                    logger.info(f"Deployment history item found - ID: {deployment_id}")
+                                    return deployment_item
+                            except Exception as e:
+                                # This deployment has issues, continue searching
+                                logger.debug(f"Error reading deployment {deployment_id}: {e}")
+                                continue
+
+        # If not found in any project/version
+        logger.warning(f"Deployment history item not found in storage - ID: {deployment_id}")
+        raise HTTPException(status_code=404, detail="Deployment history item not found")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving deployment history item - ID: {deployment_id}, Error: {e}")
+        raise HTTPException(status_code=500, detail="Error retrieving deployment history item")
+
+@app.delete("/api/deployment-history/{deployment_id}")
+async def delete_deployment_history_item(deployment_id: str):
+    """Delete a deployment from persistent storage"""
+    logger.info(f"Deleting deployment history item from storage - ID: {deployment_id}")
+
+    try:
+        # Search through deployment history directories to find and delete the deployment
+        deploy_history_path = storage_service.base_dir / "deploy_history"
+
+        if not deploy_history_path.exists():
+            logger.warning(f"Deployment history item not found for deletion - ID: {deployment_id}")
+            raise HTTPException(status_code=404, detail="Deployment history item not found")
+
+        # Scan all deployment directories to find the deployment
+        for target_dir in deploy_history_path.iterdir():
+            if not target_dir.is_dir():
+                continue
+
+            deployment_target = target_dir.name
+
+            for proj_dir in target_dir.iterdir():
+                if not proj_dir.is_dir():
+                    continue
+
+                for ver_dir in proj_dir.iterdir():
+                    if not ver_dir.is_dir():
+                        continue
+
+                    for deploy_dir in ver_dir.iterdir():
+                        if not deploy_dir.is_dir():
+                            continue
+
+                        if deploy_dir.name == deployment_id:
+                            # Found the deployment, delete its artifacts
+                            try:
+                                # Delete all deployment artifact types
+                                for file_type in ["deployment_metadata.json", "deployment_result.json", "deployment_code.py", "deployment_logs.txt"]:
+                                    try:
+                                        await storage_service.delete_deployment_artifact(
+                                            deployment_target=deployment_target,
+                                            project_id=proj_dir.name,
+                                            version=ver_dir.name,
+                                            deployment_id=deployment_id,
+                                            file_type=file_type
+                                        )
+                                    except Exception as e:
+                                        logger.warning(f"Could not delete {file_type} for deployment {deployment_id}: {e}")
+
+                                logger.info(f"Deleted deployment history item from storage - ID: {deployment_id}")
+                                return {"message": "Deployment history item deleted successfully"}
+                            except Exception as e:
+                                logger.error(f"Error deleting deployment artifacts - ID: {deployment_id}, Error: {e}")
+                                raise HTTPException(status_code=500, detail="Error deleting deployment artifacts")
+
+        # If not found in any project/version
+        logger.warning(f"Deployment history item not found for deletion - ID: {deployment_id}")
+        raise HTTPException(status_code=404, detail="Deployment history item not found")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting deployment history item - ID: {deployment_id}, Error: {e}")
+        raise HTTPException(status_code=500, detail="Error deleting deployment history item")
 
 # WebSocket for real-time updates
 @app.websocket("/ws")
