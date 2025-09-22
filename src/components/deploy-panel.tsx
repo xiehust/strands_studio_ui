@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import Editor from '@monaco-editor/react';
 import { type Node, type Edge } from '@xyflow/react';
-import { Rocket, Download, Copy, CheckCircle, Cloud, Server, Plus, X, Eye, EyeOff, AlertCircle, Edit3, Save, RotateCcw } from 'lucide-react';
+import { Rocket, Download, Copy, CheckCircle, Cloud, Server, Plus, X, Eye, EyeOff, AlertCircle, Edit3, Save, RotateCcw, History, ChevronDown, ChevronUp, Trash2, Calendar } from 'lucide-react';
 import { generateStrandsAgentCode } from '../lib/code-generator';
 
 interface DeployPanelProps {
@@ -31,6 +31,25 @@ interface DeploymentState {
   error?: string;
 }
 
+interface DeploymentHistoryEntry {
+  id: string;
+  timestamp: string;
+  deploymentTarget: 'agentcore' | 'lambda';
+  config: {
+    agentName: string;
+    region: string;
+    executeRole?: string;
+    projectId?: string;
+    version?: string;
+  };
+  apiKeys: Record<string, string>;
+  generatedCode: string;
+  result?: any;
+  logs?: string;
+  error?: string;
+  status: 'success' | 'error' | 'pending';
+}
+
 export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) {
   const [activeTab, setActiveTab] = useState<'configuration' | 'code-preview'>('configuration');
   const [generatedCode, setGeneratedCode] = useState('');
@@ -41,6 +60,9 @@ export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) 
   const [apiKeys, setApiKeys] = useState<ApiKeyEntry[]>([]);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [showDeploymentLogs, setShowDeploymentLogs] = useState(false);
+  const [deploymentHistory, setDeploymentHistory] = useState<DeploymentHistoryEntry[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
 
 
 
@@ -101,6 +123,11 @@ export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) 
     setIsEditing(false);
   }, [nodes, edges]);
 
+  // Load deployment history on component mount
+  useEffect(() => {
+    loadDeploymentHistory();
+  }, []);
+
   const handleDownload = () => {
     const codeToUse = isEditing ? editableCode : generatedCode;
     const blob = new Blob([codeToUse], { type: 'text/plain' });
@@ -143,6 +170,58 @@ export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) 
     if (value !== undefined) {
       setEditableCode(value);
     }
+  };
+
+  // Load deployment history from localStorage
+  const loadDeploymentHistory = () => {
+    try {
+      const saved = localStorage.getItem('deployment_history');
+      if (saved) {
+        const history = JSON.parse(saved);
+        setDeploymentHistory(history);
+      }
+    } catch (error) {
+      console.error('Failed to load deployment history:', error);
+    }
+  };
+
+  // Save deployment to history
+  const saveToHistory = (entry: Omit<DeploymentHistoryEntry, 'id' | 'timestamp'>) => {
+    const historyEntry: DeploymentHistoryEntry = {
+      ...entry,
+      id: Date.now().toString(),
+      timestamp: new Date().toISOString(),
+    };
+
+    try {
+      const existing = JSON.parse(localStorage.getItem('deployment_history') || '[]');
+      const updated = [historyEntry, ...existing].slice(0, 50); // Keep last 50 deployments
+      localStorage.setItem('deployment_history', JSON.stringify(updated));
+      setDeploymentHistory(updated);
+    } catch (error) {
+      console.error('Failed to save deployment history:', error);
+    }
+  };
+
+  // Delete deployment from history
+  const deleteFromHistory = (id: string) => {
+    try {
+      const existing = JSON.parse(localStorage.getItem('deployment_history') || '[]');
+      const updated = existing.filter((entry: DeploymentHistoryEntry) => entry.id !== id);
+      localStorage.setItem('deployment_history', JSON.stringify(updated));
+      setDeploymentHistory(updated);
+      // Close expanded view if deleting the expanded item
+      if (expandedHistoryId === id) {
+        setExpandedHistoryId(null);
+      }
+    } catch (error) {
+      console.error('Failed to delete from deployment history:', error);
+    }
+  };
+
+  // Toggle history entry expansion
+  const toggleHistoryExpansion = (id: string) => {
+    setExpandedHistoryId(expandedHistoryId === id ? null : id);
   };
 
   const validateAgentName = (name: string): string | null => {
@@ -277,6 +356,35 @@ export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) 
       // Save deployment outputs to localStorage if deployment was successful
       if (result.success && result.status?.deployment_outputs) {
         saveDeploymentOutput(result.status.deployment_outputs);
+      }
+
+      // Save to deployment history only if successful
+      if (result.success) {
+        // Handle logs - they might be an array or string
+        let logsText = 'No deployment logs available';
+        if (result.status?.logs) {
+          if (Array.isArray(result.status.logs)) {
+            logsText = result.status.logs.join('\n');
+          } else {
+            logsText = result.status.logs;
+          }
+        } else if (result.logs) {
+          if (Array.isArray(result.logs)) {
+            logsText = result.logs.join('\n');
+          } else {
+            logsText = result.logs;
+          }
+        }
+
+        saveToHistory({
+          deploymentTarget: deploymentState.deploymentTarget,
+          config: deploymentState.config,
+          apiKeys: apiKeysObject,
+          generatedCode: codeToUse,
+          result: result,
+          logs: logsText,
+          status: 'success'
+        });
       }
     } catch (error) {
       setDeploymentState(prev => ({
@@ -514,6 +622,118 @@ export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) 
                 </button>
 
               </div>
+
+              {/* Deployment History */}
+              <div className="pt-4 border-t border-gray-200">
+                  <button
+                    onClick={() => setShowHistory(!showHistory)}
+                    className="flex items-center justify-between w-full text-left text-sm font-medium text-gray-700 hover:text-gray-900 transition-colors"
+                  >
+                    <div className="flex items-center">
+                      <History className="w-4 h-4 mr-2" />
+                      Deploy History ({deploymentHistory.length})
+                    </div>
+                    {showHistory ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  </button>
+
+                  {showHistory && (
+                    <div className="mt-3 space-y-2 max-h-64 overflow-y-auto">
+                      {deploymentHistory.length === 0 ? (
+                        <div className="text-center py-8 text-gray-500">
+                          <History className="w-8 h-8 mx-auto mb-2 text-gray-300" />
+                          <p className="text-sm">No deployment history yet</p>
+                          <p className="text-xs">Successful deployments will appear here</p>
+                        </div>
+                      ) : (
+                        deploymentHistory.map((entry) => (
+                        <div
+                          key={entry.id}
+                          className="bg-gray-50 border border-gray-200 rounded-lg overflow-hidden"
+                        >
+                          <div
+                            className="p-3 cursor-pointer hover:bg-gray-100 transition-colors"
+                            onClick={() => toggleHistoryExpansion(entry.id)}
+                          >
+                            <div className="flex items-start justify-between">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center space-x-2 mb-1">
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
+                                    {entry.deploymentTarget}
+                                  </span>
+                                  <span className="text-xs text-gray-500 flex items-center">
+                                    <Calendar className="w-3 h-3 mr-1" />
+                                    {new Date(entry.timestamp).toLocaleString()}
+                                  </span>
+                                </div>
+                                <p className="text-sm font-medium text-gray-900 truncate">
+                                  {entry.config.agentName}
+                                </p>
+                                <p className="text-xs text-gray-500">
+                                  {entry.config.region}
+                                </p>
+                              </div>
+                              <div className="flex items-center space-x-1">
+                                {expandedHistoryId === entry.id ?
+                                  <ChevronUp className="w-4 h-4 text-gray-400" /> :
+                                  <ChevronDown className="w-4 h-4 text-gray-400" />
+                                }
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    deleteFromHistory(entry.id);
+                                  }}
+                                  className="ml-1 p-1 text-gray-400 hover:text-red-600 transition-colors"
+                                  title="Delete deployment record"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Expanded content with logs */}
+                          {expandedHistoryId === entry.id && (
+                            <div className="border-t border-gray-200 bg-white">
+                              <div className="p-3 space-y-3">
+                                {/* Deployment Details */}
+                                {entry.result?.agent_arn && (
+                                  <div className="text-xs space-y-1">
+                                    <p><strong>Agent ARN:</strong> <span className="font-mono text-gray-600">{entry.result.agent_arn}</span></p>
+                                    {entry.result.agent_endpoint && (
+                                      <p><strong>Endpoint:</strong> <span className="font-mono text-gray-600">{entry.result.agent_endpoint}</span></p>
+                                    )}
+                                    {entry.result.ecr_uri && (
+                                      <p><strong>ECR URI:</strong> <span className="font-mono text-gray-600">{entry.result.ecr_uri}</span></p>
+                                    )}
+                                  </div>
+                                )}
+
+                                {/* Deployment Logs */}
+                                {entry.logs && (
+                                  <div>
+                                    <h4 className="text-xs font-medium text-gray-700 mb-2">Deployment Logs:</h4>
+                                    <div className="bg-gray-900 text-green-400 p-3 rounded text-xs font-mono max-h-32 overflow-y-auto">
+                                      <pre className="whitespace-pre-wrap">{entry.logs}</pre>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Generated Code Preview */}
+                                <div>
+                                  <h4 className="text-xs font-medium text-gray-700 mb-2">Generated Code:</h4>
+                                  <div className="bg-gray-100 p-2 rounded text-xs font-mono max-h-24 overflow-y-auto">
+                                    <pre className="whitespace-pre-wrap text-gray-800">{entry.generatedCode.slice(0, 200)}...</pre>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
 
               {/* Deployment Result */}
               {deploymentState.deploymentResult && (
