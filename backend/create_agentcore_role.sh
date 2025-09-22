@@ -74,7 +74,14 @@ get_account_id() {
 
 # 检查Role是否存在
 check_role_exists() {
-    aws iam get-role --role-name "$ROLE_NAME" &> /dev/null
+    # 首先尝试不带路径的查询（兼容旧版本）
+    if aws iam get-role --role-name "$ROLE_NAME" &> /dev/null; then
+        return 0
+    fi
+
+    # 然后尝试带service-role路径的查询
+    local role_arn="arn:aws:iam::$(get_account_id):role/service-role/$ROLE_NAME"
+    aws iam get-role --role-name "$ROLE_NAME" --path-prefix "/service-role/" &> /dev/null
     return $?
 }
 
@@ -157,7 +164,7 @@ generate_policy_document() {
         # Workload Identity资源
         if [ -n "$workload_resources" ]; then workload_resources="$workload_resources,"; fi
         workload_resources="$workload_resources\"arn:aws:bedrock-agentcore:$region:$account_id:workload-identity-directory/default\""
-        workload_resources="$workload_resources,\"arn:aws:bedrock-agentcore:$region:$account_id:workload-identity-directory/default/workload-identity/hosted_agent_01-*\""
+        workload_resources="$workload_resources,\"arn:aws:bedrock-agentcore:$region:$account_id:workload-identity-directory/default/workload-identity/*\""
         
         # Bedrock资源
         if [ -n "$bedrock_resources" ]; then bedrock_resources="$bedrock_resources,"; fi
@@ -269,6 +276,7 @@ create_role() {
     
     aws iam create-role \
         --role-name "$ROLE_NAME" \
+        --path "/service-role/" \
         --assume-role-policy-document "$trust_policy" \
         --description "Default service role for Amazon Bedrock AgentCore Runtime - Auto-created" \
         --max-session-duration 3600 > /dev/null
@@ -310,9 +318,11 @@ create_and_attach_policy() {
 # 预检查并创建Role
 precheck_and_create() {
     local account_id
-    
+
     log_info "开始AgentCore IAM Role预检查..."
-    
+    log_debug "使用Role名称: $ROLE_NAME"
+    log_debug "使用Policy名称: $POLICY_NAME"
+
     # 获取账户ID
     account_id=$(get_account_id)
     log_info "检测到AWS账户ID: $account_id"
@@ -407,6 +417,12 @@ AgentCore IAM Role 管理脚本
     check   - 检查Role和Policy状态
     delete  - 删除Role和Policy
 
+选项:
+    --role-name NAME        - 自定义Role名称
+    --policy-name NAME      - 自定义Policy名称
+    --verbose               - 启用详细输出
+    -h, --help              - 显示帮助信息
+
 环境变量:
     AGENTCORE_ROLE_NAME     - 自定义Role名称（默认: $DEFAULT_ROLE_NAME）
     AGENTCORE_POLICY_NAME   - 自定义Policy名称（默认: $DEFAULT_POLICY_NAME）
@@ -416,18 +432,48 @@ AgentCore IAM Role 管理脚本
     ${SUPPORTED_REGIONS[*]}
 
 示例:
-    $0 create                    # 创建Role和Policy
-    $0 check                     # 检查状态
-    $0 delete                    # 删除Role和Policy
-    
-    AGENTCORE_VERBOSE=true $0 create  # 详细输出模式
+    $0 create                                    # 创建默认Role和Policy
+    $0 create --role-name MyRole --policy-name MyPolicy  # 创建自定义Role和Policy
+    $0 check                                     # 检查状态
+    $0 delete --role-name MyRole                 # 删除指定Role
+    $0 create --verbose                          # 详细输出模式
+
+注意: 创建的Role ARN格式为 arn:aws:iam::ACCOUNT_ID:role/service-role/ROLE_NAME
 EOF
 }
 
 # 主函数
 main() {
     local action="${1:-create}"
-    
+    shift
+
+    # 解析命令行参数
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --role-name)
+                ROLE_NAME="$2"
+                shift 2
+                ;;
+            --policy-name)
+                POLICY_NAME="$2"
+                shift 2
+                ;;
+            --verbose)
+                VERBOSE=true
+                shift
+                ;;
+            -h|--help)
+                show_help
+                exit 0
+                ;;
+            *)
+                log_error "未知参数: $1"
+                show_help
+                exit 1
+                ;;
+        esac
+    done
+
     case "$action" in
         "create")
             check_aws_cli
