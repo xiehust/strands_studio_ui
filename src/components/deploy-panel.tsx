@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import Editor from '@monaco-editor/react';
 import { type Node, type Edge } from '@xyflow/react';
-import { Rocket, Download, Copy, CheckCircle, Cloud, Server, Plus, X, Eye, EyeOff, AlertCircle, Edit3, Save, RotateCcw, History, ChevronDown, ChevronUp, Trash2, Calendar } from 'lucide-react';
+import { Rocket, Download, Copy, CheckCircle, Cloud, Server, Plus, X, Eye, EyeOff, AlertCircle, Edit3, Save, RotateCcw, History, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
 import { generateStrandsAgentCode } from '../lib/code-generator';
 import { apiClient, type DeploymentHistoryItem } from '../lib/api-client';
 
@@ -64,6 +64,7 @@ export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) 
   const [deploymentHistory, setDeploymentHistory] = useState<DeploymentHistoryItem[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
+  const [isConverted, setIsConverted] = useState(false);
 
 
 
@@ -91,15 +92,6 @@ export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) 
     }
   };
 
-  // Get saved deployments from localStorage
-  const getSavedDeployments = () => {
-    try {
-      return JSON.parse(localStorage.getItem('agentcore_deployments') || '[]');
-    } catch (error) {
-      console.error('Failed to load saved deployments:', error);
-      return [];
-    }
-  };
 
   const [deploymentState, setDeploymentState] = useState<DeploymentState>({
     deploymentTarget: 'agentcore',
@@ -122,12 +114,24 @@ export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) 
     setErrors(result.errors);
     // Reset editing state when code regenerates
     setIsEditing(false);
+    // Don't reset isConverted when flow changes - conversion state should persist
+    // Only set to true if the generated code already has @app.entrypoint (rare case)
+    if (fullCode.includes('@app.entrypoint')) {
+      setIsConverted(true);
+    }
   }, [nodes, edges]);
 
   // Load deployment history on component mount
   useEffect(() => {
     loadDeploymentHistory();
   }, []);
+
+  // Check conversion status when editableCode changes (for editing mode)
+  useEffect(() => {
+    if (isEditing) {
+      setIsConverted(editableCode.includes('@app.entrypoint'));
+    }
+  }, [editableCode, isEditing]);
 
   const handleDownload = () => {
     const codeToUse = isEditing ? editableCode : generatedCode;
@@ -327,8 +331,89 @@ export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) 
       deploymentState.config.agentName.trim() !== '' &&
       !formErrors.agentName &&
       (!isAgentCore || (deploymentState.config.executeRole?.trim() !== '' && !formErrors.executeRole)) &&
-      !deploymentState.isDeploying
+      !deploymentState.isDeploying &&
+      isConverted  // Only allow deployment when code has been converted
     );
+  };
+
+  const convertCode = () => {
+    const codeToConvert = isEditing ? editableCode : generatedCode;
+
+    // Check if already converted
+    if (codeToConvert.includes('@app.entrypoint')) {
+      return;
+    }
+
+    // Check if it's streaming code
+    const isStreamingCode = codeToConvert.includes('stream_async');
+
+    let convertedCode = codeToConvert;
+
+    // Add BedrockAgentCoreApp imports at the top if not already present
+    const bedrockImports = `from bedrock_agentcore.runtime import BedrockAgentCoreApp
+app = BedrockAgentCoreApp()
+
+`;
+
+    if (!convertedCode.includes('BedrockAgentCoreApp')) {
+      convertedCode = bedrockImports + convertedCode;
+    }
+
+    // Find the if __name__ == "__main__": section
+    const mainPattern = /if __name__ == "__main__":\s*\n([\s\S]*?)(?=\n\S|\n*$)/;
+    const mainMatch = convertedCode.match(mainPattern);
+
+    if (mainMatch) {
+      const mainIndex = convertedCode.indexOf(mainMatch[0]);
+
+      // Prepare the entrypoint function
+      let entrypointFunction = '';
+      if (isStreamingCode) {
+        entrypointFunction = `@app.entrypoint
+async def entry(payload):
+    user_input_param = payload.get('user_input')
+    messages_param = payload.get('messages')
+    async for event in main(user_input_param, messages_param):
+        yield event
+
+`;
+      } else {
+        entrypointFunction = `@app.entrypoint
+async def entry(payload):
+    user_input_param = payload.get('user_input')
+    messages_param = payload.get('messages')
+    return await main(user_input_param, messages_param)
+
+`;
+      }
+
+      // Replace the main section
+      const newMainSection = `if __name__ == "__main__":
+    app.run()`;
+
+      // Insert entrypoint before main and replace main section
+      convertedCode = convertedCode.substring(0, mainIndex) +
+                     entrypointFunction +
+                     newMainSection;
+
+      // For streaming code, also modify the stream_async yield pattern
+      if (isStreamingCode) {
+        const streamPattern = /(\s+async for event in agent\.stream_async\([^)]+\):\s*\n\s+if "data" in event:\s*\n\s+print\(event\['data'\][^)]*\))/g;
+        convertedCode = convertedCode.replace(streamPattern, (match) => {
+          return match + '\n            yield event';
+        });
+      }
+    }
+
+    // Update the appropriate code state
+    if (isEditing) {
+      setEditableCode(convertedCode);
+    } else {
+      setGeneratedCode(convertedCode);
+      setEditableCode(convertedCode);
+    }
+
+    setIsConverted(true);
   };
 
 
@@ -344,9 +429,11 @@ export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) 
 
     setDeploymentState(prev => ({ ...prev, apiKeys: apiKeysObject, isDeploying: true, error: undefined }));
 
+    // Prepare deployment request - use edited code if available
+    const codeToUse = isEditing ? editableCode : generatedCode;
+    let logsText = 'No deployment logs available';
+
     try {
-      // Prepare deployment request - use edited code if available
-      const codeToUse = isEditing ? editableCode : generatedCode;
       const deploymentRequest: any = {
         code: codeToUse,
         agent_name: deploymentState.config.agentName,
@@ -398,7 +485,6 @@ export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) 
       // Save to persistent deployment history (both success and failure)
       try {
         // Handle logs - they might be an array or string
-        let logsText = 'No deployment logs available';
         if (result.status?.logs) {
           if (Array.isArray(result.status.logs)) {
             logsText = result.status.logs.join('\n');
@@ -711,15 +797,24 @@ export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) 
               </div>
 
               {/* Deploy Actions */}
-              <div className="flex space-x-3 pt-4 border-t border-gray-200">
+              <div className="space-y-3 pt-4 border-t border-gray-200">
+                {/* Convert Code Button */}
+                <button
+                  onClick={convertCode}
+                  disabled={isConverted}
+                  className="w-full px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-sm font-medium"
+                >
+                  {isConverted ? 'Convert Completed' : 'Convert Code'}
+                </button>
+
+                {/* Deploy Button */}
                 <button
                   onClick={handleDeploy}
                   disabled={!canDeploy()}
-                  className="flex-1 px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-sm font-medium"
+                  className="w-full px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-sm font-medium"
                 >
                   {deploymentState.isDeploying ? 'Deploying...' : 'Deploy'}
                 </button>
-
               </div>
 
               {/* Deployment History */}
@@ -830,8 +925,8 @@ export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) 
                                   {entry.deployment_logs && (
                                     <div className="text-xs">
                                       <p className="font-medium text-gray-700 mb-1">Logs:</p>
-                                      <div className="bg-gray-100 p-2 rounded font-mono max-h-20 overflow-y-auto">
-                                        {entry.deployment_logs.substring(0, 200)}...
+                                      <div className="bg-gray-100 p-2 rounded font-mono max-h-32 overflow-y-auto">
+                                        <pre className="whitespace-pre-wrap text-xs">{entry.deployment_logs}</pre>
                                       </div>
                                     </div>
                                   )}

@@ -217,7 +217,7 @@ projects_storage: Dict[str, ProjectData] = {}
 execution_results: Dict[str, ExecutionResult] = {}
 
 # Initialize storage service
-storage_service = StorageService("storage")
+storage_service = StorageService("storage/artifacts")
 
 # WebSocket connections for real-time updates
 active_connections: List[WebSocket] = []
@@ -954,7 +954,7 @@ async def get_deployment_history(
 
     try:
         deployments = []
-        deploy_history_path = storage_service.base_dir / "deploy_history"
+        deploy_history_path = Path("storage").resolve() / "deploy_history"
 
         if not deploy_history_path.exists():
             logger.info("No deployment history directory found")
@@ -1072,7 +1072,7 @@ async def get_deployment_history_item(deployment_id: str):
 
     try:
         # Search through deployment history directories
-        deploy_history_path = storage_service.base_dir / "deploy_history"
+        deploy_history_path = Path("storage").resolve() / "deploy_history"
 
         if not deploy_history_path.exists():
             logger.warning(f"Deployment history item not found in storage - ID: {deployment_id}")
@@ -1177,7 +1177,7 @@ async def delete_deployment_history_item(deployment_id: str):
 
     try:
         # Search through deployment history directories to find and delete the deployment
-        deploy_history_path = storage_service.base_dir / "deploy_history"
+        deploy_history_path = Path("storage").resolve() / "deploy_history"
 
         if not deploy_history_path.exists():
             logger.warning(f"Deployment history item not found for deletion - ID: {deployment_id}")

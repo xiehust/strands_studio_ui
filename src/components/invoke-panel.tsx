@@ -18,7 +18,7 @@ interface InvokePanelProps {
 export function InvokePanel({ className = '' }: InvokePanelProps) {
   const [deploymentHistory, setDeploymentHistory] = useState<DeploymentHistory[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<DeploymentHistory | null>(null);
-  const [payload, setPayload] = useState('{"message": "Hello, Agent!"}');
+  const [payload, setPayload] = useState('{"user_input": "Hello, Agent!"}');
   const [sessionId, setSessionId] = useState('');
   const [invokeResult, setInvokeResult] = useState<any>(null);
   const [isInvoking, setIsInvoking] = useState(false);
@@ -231,7 +231,7 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
             onChange={(e) => setPayload(e.target.value)}
             rows={6}
             className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm font-mono"
-            placeholder='{"message": "Hello, Agent!"}'
+            placeholder='{"user_input": "Hello, Agent!"}'
           />
         </div>
 

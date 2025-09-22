@@ -131,7 +131,7 @@ class AgentCoreInvokeRequest(BaseModel):
 class AgentCoreInvokeResponse(BaseModel):
     """Response model for AgentCore agent invocation"""
     success: bool = Field(..., description="Whether the invocation was successful")
-    response_data: Optional[Dict[str, Any]] = Field(None, description="Agent response data")
+    response_data: Union[str,Optional[Dict[str, Any]]] = Field(None, description="Agent response data")
     error: Optional[str] = Field(None, description="Error message if invocation failed")
     execution_time: Optional[float] = Field(None, description="Execution time in seconds")
 

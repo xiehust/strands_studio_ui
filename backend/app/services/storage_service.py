@@ -596,7 +596,9 @@ class StorageService:
         safe_version = sanitize_path_component(version)
         safe_deployment = sanitize_path_component(deployment_id)
 
-        return self.base_dir / "deploy_history" / safe_target / safe_project / safe_version / safe_deployment
+        # Keep deployments in storage/deploy_history (separate from artifacts)
+        deployment_base = Path("storage").resolve()
+        return deployment_base / "deploy_history" / safe_target / safe_project / safe_version / safe_deployment
 
     async def save_deployment_artifact(self,
                                      deployment_target: str,
@@ -639,8 +641,9 @@ class StorageService:
 
             file_path = storage_path / file_name
 
-            # Ensure the path is safe
-            if not is_safe_path(file_path, self.base_dir):
+            # Ensure the path is safe - for deployment artifacts, check against storage root
+            deployment_base = Path("storage").resolve()
+            if not is_safe_path(file_path, deployment_base):
                 raise HTTPException(status_code=400, detail="Invalid file path")
 
             # Calculate checksum
@@ -719,8 +722,9 @@ class StorageService:
             if not file_path.exists():
                 return None
 
-            # Ensure the path is safe
-            if not is_safe_path(file_path, self.base_dir):
+            # Ensure the path is safe - for deployment artifacts, check against storage root
+            deployment_base = Path("storage").resolve()
+            if not is_safe_path(file_path, deployment_base):
                 raise HTTPException(status_code=400, detail="Invalid file path")
 
             # Read file content
@@ -789,8 +793,9 @@ class StorageService:
             if not file_path.exists():
                 return False
 
-            # Ensure the path is safe
-            if not is_safe_path(file_path, self.base_dir):
+            # Ensure the path is safe - for deployment artifacts, check against storage root
+            deployment_base = Path("storage").resolve()
+            if not is_safe_path(file_path, deployment_base):
                 raise HTTPException(status_code=400, detail="Invalid file path")
 
             # Delete file
