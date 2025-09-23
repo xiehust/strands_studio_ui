@@ -246,10 +246,10 @@ export function PropertyPanel({
         </label>
         <input
           type="number"
-          value={data.maxTokens || 4000}
+          value={data.maxTokens || 8000}
           onChange={(e) => handleInputChange('maxTokens', parseInt(e.target.value))}
           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
-          min="100"
+          min="1"
           max="100000"
         />
       </div>
@@ -763,12 +763,138 @@ export function PropertyPanel({
     </div>
   );
 
+  const renderSwarmProperties = (data: any) => (
+    <div className="space-y-4">
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-2">
+          Swarm Name
+        </label>
+        <input
+          type="text"
+          value={data.label || ''}
+          onChange={(e) => handleInputChange('label', e.target.value)}
+          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-emerald-500 focus:border-emerald-500"
+          placeholder="Swarm Name"
+        />
+      </div>
+
+      <div className="border-t pt-4">
+        <h4 className="text-sm font-semibold text-emerald-800 mb-3">Execution Settings</h4>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Max Handoffs
+          </label>
+          <input
+            type="number"
+            value={data.maxHandoffs || 20}
+            onChange={(e) => handleInputChange('maxHandoffs', parseInt(e.target.value))}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-emerald-500 focus:border-emerald-500"
+            min="1"
+            max="100"
+          />
+          <p className="text-xs text-gray-500 mt-1">
+            Maximum number of agent handoffs allowed during execution
+          </p>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Max Iterations
+          </label>
+          <input
+            type="number"
+            value={data.maxIterations || 20}
+            onChange={(e) => handleInputChange('maxIterations', parseInt(e.target.value))}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-emerald-500 focus:border-emerald-500"
+            min="1"
+            max="100"
+          />
+          <p className="text-xs text-gray-500 mt-1">
+            Maximum total iterations across all agents
+          </p>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Execution Timeout (seconds)
+          </label>
+          <input
+            type="number"
+            value={data.executionTimeout || 900}
+            onChange={(e) => handleInputChange('executionTimeout', parseInt(e.target.value))}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-emerald-500 focus:border-emerald-500"
+            min="10"
+            max="3600"
+          />
+          <p className="text-xs text-gray-500 mt-1">
+            Total execution timeout in seconds (default: 900 = 15 minutes)
+          </p>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Node Timeout (seconds)
+          </label>
+          <input
+            type="number"
+            value={data.nodeTimeout || 300}
+            onChange={(e) => handleInputChange('nodeTimeout', parseInt(e.target.value))}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-emerald-500 focus:border-emerald-500"
+            min="5"
+            max="1800"
+          />
+          <p className="text-xs text-gray-500 mt-1">
+            Individual agent timeout in seconds (default: 300 = 5 minutes)
+          </p>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Repetitive Handoff Detection Window
+          </label>
+          <input
+            type="number"
+            value={data.repetitiveHandoffDetectionWindow || 0}
+            onChange={(e) => handleInputChange('repetitiveHandoffDetectionWindow', parseInt(e.target.value))}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-emerald-500 focus:border-emerald-500"
+            min="0"
+            max="20"
+          />
+          <p className="text-xs text-gray-500 mt-1">
+            Number of recent nodes to check for ping-pong behavior (0 = disabled)
+          </p>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Min Unique Agents for Detection
+          </label>
+          <input
+            type="number"
+            value={data.repetitiveHandoffMinUniqueAgents || 0}
+            onChange={(e) => handleInputChange('repetitiveHandoffMinUniqueAgents', parseInt(e.target.value))}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-emerald-500 focus:border-emerald-500"
+            min="0"
+            max="10"
+          />
+          <p className="text-xs text-gray-500 mt-1">
+            Minimum unique nodes required in recent sequence (0 = disabled)
+          </p>
+        </div>
+      </div>
+
+    </div>
+  );
+
   const renderProperties = () => {
     switch (selectedNode.type) {
       case 'agent':
         return renderAgentProperties(selectedNode.data);
       case 'orchestrator-agent':
         return renderOrchestratorAgentProperties(selectedNode.data);
+      case 'swarm':
+        return renderSwarmProperties(selectedNode.data);
       case 'tool':
         return renderToolProperties(selectedNode.data);
       case 'mcp-tool':

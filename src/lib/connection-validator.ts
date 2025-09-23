@@ -112,7 +112,7 @@ const connectionRules: ConnectionRule[] = [
   },
   
   // HIERARCHICAL ORCHESTRATOR CONNECTIONS
-  
+
   // Orchestrator agents can connect to other orchestrator agents (hierarchical structure)
   {
     sourceType: 'orchestrator-agent',
@@ -121,7 +121,36 @@ const connectionRules: ConnectionRule[] = [
     targetHandle: 'orchestrator-input',
     description: 'Orchestrator agent can coordinate other orchestrator agents hierarchically',
   },
-  
+
+  // SWARM NODE CONNECTIONS
+
+  // Input nodes can connect to swarm nodes
+  {
+    sourceType: 'input',
+    sourceHandle: 'output',
+    targetType: 'swarm',
+    targetHandle: 'user-input',
+    description: 'Input can provide user input to swarm',
+  },
+
+  // Swarm nodes can connect to agent nodes (agents become part of the swarm)
+  {
+    sourceType: 'swarm',
+    sourceHandle: 'sub-agents',
+    targetType: 'agent',
+    targetHandle: 'orchestrator-input',
+    description: 'Swarm can include agents as swarm members',
+  },
+
+  // Swarm nodes can connect to output nodes
+  {
+    sourceType: 'swarm',
+    sourceHandle: 'output',
+    targetType: 'output',
+    targetHandle: 'input',
+    description: 'Swarm output can connect to output nodes',
+  },
+
 ];
 
 /**
@@ -238,7 +267,7 @@ export function isValidConnection(
   }
 
   // Special validation for input nodes based on input type
-  if (sourceNode.type === 'input' && (targetNode.type === 'agent' || targetNode.type === 'orchestrator-agent')) {
+  if (sourceNode.type === 'input' && (targetNode.type === 'agent' || targetNode.type === 'orchestrator-agent' || targetNode.type === 'swarm')) {
     const inputType = sourceNode.data?.inputType || 'user-prompt';
     const targetHandle = connection.targetHandle;
     
@@ -285,6 +314,16 @@ export function isValidConnection(
   // Prevent self-connections
   if (connection.source === connection.target) {
     return { valid: false, message: 'Nodes cannot connect to themselves' };
+  }
+
+  // Explicit validation: Tools and MCP tools cannot connect to swarm nodes
+  // This enforces the architectural principle that swarms coordinate agents but don't have tools themselves
+  if (targetNode.type === 'swarm' &&
+      (sourceNode.type === 'tool' || sourceNode.type === 'custom-tool' || sourceNode.type === 'mcp-tool')) {
+    return {
+      valid: false,
+      message: 'Tools cannot connect to swarm nodes. Connect tools to individual agent nodes within the swarm instead.'
+    };
   }
   
   // Prevent circular dependencies in orchestrator hierarchies

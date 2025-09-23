@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Play, RefreshCw, Trash2, X } from 'lucide-react';
 
 interface DeploymentHistory {

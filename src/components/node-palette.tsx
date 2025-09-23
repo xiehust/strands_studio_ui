@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bot, Wrench, ArrowRight, ArrowLeft, Code, Server, Crown } from 'lucide-react';
+import { Bot, Wrench, ArrowRight, ArrowLeft, Code, Server, Crown, Users } from 'lucide-react';
 
 interface NodeTypeItem {
   type: string;
@@ -22,6 +22,13 @@ const nodeTypes: NodeTypeItem[] = [
     label: 'Orchestrator Agent',
     icon: Crown,
     description: 'Orchestrates multiple agents as tools for complex workflows',
+    category: 'Advanced',
+  },
+  {
+    type: 'swarm',
+    label: 'Swarm Node',
+    icon: Users,
+    description: 'Multi-agent swarm with handoff capabilities and coordination',
     category: 'Advanced',
   },
   {

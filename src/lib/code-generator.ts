@@ -28,6 +28,12 @@ export function generateStrandsAgentCode(
     imports.add('from mcp.client.streamable_http import streamablehttp_client');
     imports.add('from mcp.client.sse import sse_client');
   }
+
+  // Check if swarm nodes are used
+  const hasSwarmNodes = nodes.some(node => node.type === 'swarm');
+  if (hasSwarmNodes) {
+    imports.add('from strands.multiagent import Swarm');
+  }
   
   const errors: string[] = [];
   let code = '';
@@ -36,6 +42,7 @@ export function generateStrandsAgentCode(
     // Find all node types
     const agentNodes = nodes.filter(node => node.type === 'agent');
     const orchestratorNodes = nodes.filter(node => node.type === 'orchestrator-agent');
+    const swarmNodes = nodes.filter(node => node.type === 'swarm');
     const inputNodes = nodes.filter(node => node.type === 'input');
     const outputNodes = nodes.filter(node => node.type === 'output');
     
@@ -47,8 +54,8 @@ export function generateStrandsAgentCode(
     }
     
     // Validate mandatory nodes
-    if (agentNodes.length === 0 && orchestratorNodes.length === 0) {
-      errors.push('No agent nodes found. At least one agent or orchestrator agent is required.');
+    if (agentNodes.length === 0 && orchestratorNodes.length === 0 && swarmNodes.length === 0) {
+      errors.push('No agent nodes found. At least one agent, orchestrator agent, or swarm is required.');
     }
     
     if (inputNodes.length === 0) {
@@ -61,21 +68,31 @@ export function generateStrandsAgentCode(
     
     // Validate connections for mandatory nodes
     if (inputNodes.length > 0) {
-      const connectedInputs = inputNodes.filter(inputNode => 
+      const connectedInputs = inputNodes.filter(inputNode =>
         edges.some(edge => edge.source === inputNode.id)
       );
       if (connectedInputs.length === 0) {
-        errors.push('Input nodes must be connected to agents. Please connect your input node to an agent.');
+        errors.push('Input nodes must be connected to agents, orchestrator agents, or swarms. Please connect your input node to an agent, orchestrator agent, or swarm.');
       }
     }
-    
+
     if (outputNodes.length > 0) {
-      const connectedOutputs = outputNodes.filter(outputNode => 
+      const connectedOutputs = outputNodes.filter(outputNode =>
         edges.some(edge => edge.target === outputNode.id)
       );
       if (connectedOutputs.length === 0) {
-        errors.push('Output nodes must be connected to agents. Please connect an agent to your output node.');
+        errors.push('Output nodes must be connected to agents, orchestrator agents, or swarms. Please connect an agent, orchestrator agent, or swarm to your output node.');
       }
+    }
+
+    // Validate swarm connections
+    if (swarmNodes.length > 0) {
+      swarmNodes.forEach(swarmNode => {
+        const connectedAgents = findConnectedSwarmAgents(swarmNode, agentNodes, edges);
+        if (connectedAgents.length === 0) {
+          errors.push(`Swarm "${swarmNode.data?.label || 'Unnamed'}" must be connected to at least one agent. Please connect agent nodes to this swarm.`);
+        }
+      });
     }
     
     // Return early if mandatory nodes are missing or not connected
@@ -118,11 +135,13 @@ export function generateStrandsAgentCode(
     }
 
     // Generate code for each regular agent (non-connected ones)
-    // Always generate individual agents unless they are connected to orchestrators as sub-agents
+    // Always generate individual agents unless they are connected to orchestrators or swarms as sub-agents
     // Skip agents that have MCP tools connected since they will be created in main() with MCP context
-    const unconnectedAgents = orchestratorNodes.length > 0
-      ? agentNodes.filter(agent => !isAgentConnectedToOrchestrator(agent, orchestratorNodes, edges))
-      : agentNodes;
+    const unconnectedAgents = agentNodes.filter(agent =>
+      !isAgentConnectedToOrchestrator(agent, orchestratorNodes, edges) &&
+      !isAgentConnectedToSwarm(agent, swarmNodes, edges)
+    );
+
 
     unconnectedAgents.forEach((agentNode, index) => {
       // Check if this agent has MCP tools connected
@@ -158,8 +177,32 @@ export function generateStrandsAgentCode(
       }
     });
 
+    // Generate code for agents connected to swarms (must be done before swarm instantiation)
+    if (swarmNodes.length > 0) {
+      // Find all agents connected to swarms
+      const swarmConnectedAgents = agentNodes.filter(agent =>
+        isAgentConnectedToSwarm(agent, swarmNodes, edges)
+      );
+
+      swarmConnectedAgents.forEach((agentNode, index) => {
+        // For swarm-connected agents, ALWAYS generate full Agent instances with name property
+        // The swarm needs actual Agent objects with names for coordination
+        // MCP tools will be handled at the swarm execution level
+        const agentCode = generateSwarmAgentCode(agentNode, nodes, edges, index);
+        code += agentCode + '\n\n';
+      });
+    }
+
+    // Generate swarm code if swarm nodes exist
+    if (swarmNodes.length > 0) {
+      swarmNodes.forEach((swarmNode, index) => {
+        const swarmCode = generateSwarmCode(swarmNode, agentNodes, nodes, edges, index);
+        code += swarmCode + '\n\n';
+      });
+    }
+
     // Generate main execution code
-    const allExecutableAgents = [...agentNodes, ...orchestratorNodes];
+    const allExecutableAgents = [...agentNodes, ...orchestratorNodes, ...swarmNodes];
     code += generateMainExecutionCode(allExecutableAgents, nodes, edges, hasMCPTools);
 
   } catch (error) {
@@ -243,6 +286,53 @@ function generateAgentCode(
 ${modelConfig}
 
 ${agentVarName} = Agent(
+    model=${agentVarName}_model,
+    system_prompt="""${systemPromptValue}"""${toolsCode},
+    callback_handler=None
+)`;
+}
+
+function generateSwarmAgentCode(
+  agentNode: Node,
+  allNodes: Node[],
+  edges: Edge[],
+  index: number
+): string {
+  const data = agentNode.data || {};
+  const {
+    label = `Agent${index + 1}`,
+    modelProvider = 'AWS Bedrock',
+    modelId = 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+    modelName = 'Claude 3.7 Sonnet',
+    systemPrompt = 'You are a helpful AI assistant.',
+    temperature = 0.7,
+    maxTokens = 4000,
+    baseUrl = '',
+  } = data;
+
+  // Use modelId for Bedrock, modelName for others
+  const modelIdentifier = modelProvider === 'AWS Bedrock' ? modelId : modelName;
+
+  // Sanitize agent name to be Python-compatible
+  const agentVarName = sanitizePythonVariableName(label as string);
+
+  // Find connected tools
+  const connectedTools = findConnectedTools(agentNode, allNodes, edges);
+  const toolsCode = connectedTools.length > 0
+    ? `,\n    tools=[${connectedTools.map(tool => tool.code).join(', ')}]`
+    : '';
+
+  // System prompt comes from agent property panel only (no input connections)
+  const systemPromptValue = systemPrompt;
+
+  // Generate model configuration based on provider
+  const modelConfig = generateModelConfigForCode(agentVarName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string);
+
+  return `# ${label} Configuration
+${modelConfig}
+
+${agentVarName} = Agent(
+    name="${label}",
     model=${agentVarName}_model,
     system_prompt="""${systemPromptValue}"""${toolsCode},
     callback_handler=None
@@ -382,21 +472,21 @@ function findConnectedAgent(
 ): Node | null {
   // Find input nodes
   const inputNodes = allNodes.filter(node => node.type === 'input');
-  
-  // Find agents connected to input nodes
+
+  // Find agents/swarms connected to input nodes
   for (const inputNode of inputNodes) {
     const connectedEdges = edges.filter(edge => edge.source === inputNode.id);
     for (const edge of connectedEdges) {
       const targetNode = allNodes.find(node => node.id === edge.target);
-      if (targetNode && (targetNode.type === 'agent' || targetNode.type === 'orchestrator-agent')) {
+      if (targetNode && (targetNode.type === 'agent' || targetNode.type === 'orchestrator-agent' || targetNode.type === 'swarm')) {
         return targetNode;
       }
     }
   }
-  
-  // Fallback: return first agent if no connections found
-  const allAgents = allNodes.filter(node => node.type === 'agent' || node.type === 'orchestrator-agent');
-  return allAgents.length > 0 ? allAgents[0] : null;
+
+  // Fallback: return first agent/orchestrator/swarm if no connections found
+  const allExecutables = allNodes.filter(node => node.type === 'agent' || node.type === 'orchestrator-agent' || node.type === 'swarm');
+  return allExecutables.length > 0 ? allExecutables[0] : null;
 }
 
 function generateMainExecutionCode(
@@ -412,6 +502,11 @@ async def main(user_input_arg: str = None, messages_arg: str = None):`;
 
   // Find the agent that should be executed (connected to input)
   const executionAgent = findConnectedAgent(allNodes, edges);
+
+  // Initialize variables for MCP and swarm integration (before they're used)
+  let swarmAgentMCPConnections: Array<{agent: Node, mcpTools: Node[]}> = [];
+  let executionAgentMcpClientVars: string[] = [];
+
   if (!executionAgent) {
     return mainCode + `
     print("No agent found to execute")
@@ -431,9 +526,21 @@ if __name__ == "__main__":
   }
 
   if (hasMCPTools) {
-    // Only MCP tools directly connected to execution agent are used
-    const executionAgentMCPTools = findConnectedMCPTools(executionAgent, allNodes, edges);
-    const executionAgentMcpClientVars = executionAgentMCPTools.map(node => {
+    // For swarms, use pre-calculated MCP connections to agents within the swarm
+    // For regular agents, check MCP tools directly connected to execution agent
+    let executionAgentMCPTools: Node[] = [];
+
+    if (executionAgent.type === 'swarm') {
+      // Use pre-calculated swarm agent MCP connections
+      swarmAgentMCPConnections.forEach(({mcpTools}) => {
+        executionAgentMCPTools.push(...mcpTools);
+      });
+    } else {
+      // Regular agent - check direct MCP connections
+      executionAgentMCPTools = findConnectedMCPTools(executionAgent, allNodes, edges);
+    }
+
+    executionAgentMcpClientVars = executionAgentMCPTools.map(node => {
       const serverName = (node.data?.serverName as string) || 'mcp_server';
       return `${serverName.toLowerCase().replace(/[^a-z0-9]/g, '_')}_client_${node.id.slice(-4)}`;
     });
@@ -450,7 +557,14 @@ if __name__ == "__main__":
       const pythonCode = (node.data?.pythonCode as string) || '';
       return extractFunctionName(pythonCode) || 'custom_tool';
     });
-    const allGlobals = [...allMcpClientVars, ...customToolGlobals];
+
+    // For swarms, add agent names to globals if they have MCP connections
+    const swarmAgentGlobals = swarmAgentMCPConnections.map(({agent}) => {
+      const agentLabel = (agent.data?.label as string) || 'agent';
+      return sanitizePythonVariableName(agentLabel);
+    });
+
+    const allGlobals = [...allMcpClientVars, ...customToolGlobals, ...swarmAgentGlobals];
     
     if (allGlobals.length > 0) {
       mainCode += `
@@ -483,10 +597,17 @@ if __name__ == "__main__":
     // Sanitize agent name to be Python-compatible  
     const agentName = sanitizePythonVariableName(label as string);
     
-    // Check if this is an orchestrator agent
+    // Check the type of execution agent
     const isOrchestrator = executionAgent.type === 'orchestrator-agent';
-    
-    if (isOrchestrator) {
+    const isSwarm = executionAgent.type === 'swarm';
+
+    if (isSwarm) {
+      // For swarm nodes, no need to create an agent - the swarm is already created globally
+      // Swarms are instantiated with their connected agents during swarm code generation
+      const indentation = executionAgentMcpClientVars.length > 0 ? '        ' : '    ';
+      mainCode += `
+${indentation}# Swarm ${agentName} is already configured with its agents`;
+    } else if (isOrchestrator) {
       // For orchestrator agents, create with sub-agents and sub-orchestrators and tools
       const subAgentEdges = edges.filter(
         edge => edge.source === executionAgent.id && edge.sourceHandle === 'sub-agents'
@@ -562,14 +683,54 @@ ${indentation})`;
   }
 
   // Determine indentation based on whether execution agent has MCP tools
-  const executionAgentHasMCPTools = hasMCPTools && findConnectedMCPTools(executionAgent, allNodes, edges).length > 0;
+  // For swarms, check if any agents within the swarm have MCP tools
+  let executionAgentHasMCPTools = false;
+  if (executionAgent.type === 'swarm') {
+    // Check if any agents within the swarm have MCP tools
+    executionAgentHasMCPTools = hasMCPTools && swarmAgentMCPConnections.length > 0;
+  } else {
+    // Regular agent - check direct MCP connections
+    executionAgentHasMCPTools = hasMCPTools && findConnectedMCPTools(executionAgent, allNodes, edges).length > 0;
+  }
   const baseIndent = executionAgentHasMCPTools ? '        ' : '    ';
   
   // Generate execution for the connected agent
   const label = (executionAgent.data?.label as string) || 'agent1';
   const agentName = sanitizePythonVariableName(label);
-  
+
+  // For swarms, detect MCP connections to agents within the swarm
+  if (executionAgent.type === 'swarm') {
+    const swarmConnectedAgents = allNodes.filter(node =>
+      node.type === 'agent' && isAgentConnectedToSwarm(node, [executionAgent], edges)
+    );
+
+    swarmConnectedAgents.forEach(agent => {
+      const agentMCPTools = findConnectedMCPTools(agent, allNodes, edges);
+      if (agentMCPTools.length > 0) {
+        swarmAgentMCPConnections.push({agent, mcpTools: agentMCPTools});
+      }
+    });
+  }
   // Generate user input logic
+  if (executionAgent.type === 'swarm'){
+    //swarm __call__ can only support str | list[ContentBlock]. 
+    // https://strandsagents.com/latest/documentation/docs/api-reference/multiagent/#strands.multiagent.swarm.Swarm
+    mainCode += `
+${baseIndent}# User input from command-line arguments with priority: --messages > --user-input > default
+${baseIndent}if messages_arg is not None and messages_arg.strip():
+${baseIndent}    # Parse messages JSON and pass full conversation history to agent
+${baseIndent}    try:
+${baseIndent}        messages_list = json.loads(messages_arg)
+${baseIndent}        # Pass the full messages list to the agent
+${baseIndent}        user_input = messages_list[-1]['content']
+${baseIndent}    except (json.JSONDecodeError, KeyError, TypeError):
+${baseIndent}        user_input = "Hello, how can you help me?"
+${baseIndent}elif user_input_arg is not None and user_input_arg.strip():
+${baseIndent}    user_input = user_input_arg.strip()
+${baseIndent}else:
+${baseIndent}    # Default fallback when no input provided
+${baseIndent}    user_input = "Hello, how can you help me?"`;
+  }else{
     mainCode += `
 ${baseIndent}# User input from command-line arguments with priority: --messages > --user-input > default
 ${baseIndent}if messages_arg is not None and messages_arg.strip():
@@ -585,11 +746,84 @@ ${baseIndent}    user_input = user_input_arg.strip()
 ${baseIndent}else:
 ${baseIndent}    # Default fallback when no input provided
 ${baseIndent}    user_input = "Hello, how can you help me?"`;
-    
+        
+  }
     const executionAgentData = executionAgent.data || {};
     const isStreaming = executionAgentData.streaming || false;
-    
-    if (isStreaming) {
+
+    if (executionAgent.type === 'swarm') {
+      // Swarm execution (always synchronous)
+
+      // Check if we need MCP context for swarm agents
+      const swarmHasMCPTools = swarmAgentMCPConnections.length > 0;
+
+      if (swarmHasMCPTools) {
+        // Collect all unique MCP client variables needed for the swarm
+        const swarmMcpClientVars = new Set<string>();
+        swarmAgentMCPConnections.forEach(({mcpTools}) => {
+          mcpTools.forEach(mcpTool => {
+            const serverName = (mcpTool.data?.serverName as string) || 'mcp_server';
+            const clientVar = `${serverName.toLowerCase().replace(/[^a-z0-9]/g, '_')}_client_${mcpTool.id.slice(-4)}`;
+            swarmMcpClientVars.add(clientVar);
+          });
+        });
+
+        mainCode += `
+${baseIndent}# Use MCP clients in context managers for swarm agents
+${baseIndent}with ${Array.from(swarmMcpClientVars).join(', ')}:`;
+
+        // Add MCP tool assignment for each agent that has MCP connections
+        swarmAgentMCPConnections.forEach(({agent, mcpTools}) => {
+          const agentVarName = sanitizePythonVariableName((agent.data?.label as string) || 'agent');
+
+          // Collect all MCP tools for this agent
+          const mcpToolVars: string[] = [];
+          mcpTools.forEach(mcpTool => {
+            const serverName = (mcpTool.data?.serverName as string) || 'mcp_server';
+            const clientVar = `${serverName.toLowerCase().replace(/[^a-z0-9]/g, '_')}_client_${mcpTool.id.slice(-4)}`;
+            const toolVar = `tools_${mcpTool.id.slice(-4)}`;
+            mcpToolVars.push(toolVar);
+            mainCode += `
+${baseIndent}    # Initialize tools from MCP client ${serverName}
+${baseIndent}    ${toolVar} = ${clientVar}.list_tools_sync()`;
+          });
+
+          // Combine existing tools with MCP tools for this agent
+          mainCode += `
+${baseIndent}    # Combine existing tools with MCP tools for agent ${agent.data?.label || 'agent'}`;
+          mcpToolVars.forEach(toolVar => {
+            mainCode += `
+${baseIndent}    ${agentVarName}.tool_registry.process_tools(${toolVar})`;
+          });
+        });
+
+        mainCode += `
+${baseIndent}    # Execute swarm (sync execution)
+${baseIndent}    result = ${agentName}(user_input)`;
+      } else {
+        mainCode += `
+${baseIndent}# Execute swarm (sync execution)
+${baseIndent}result = ${agentName}(user_input)`;
+      }
+
+      mainCode += `
+${baseIndent}print(f"Status: {result.status}")
+${baseIndent}node_results = [ f"{node.node_id}:{result.results[node.node_id].result}" for node in result.node_history]
+${baseIndent}print(f"Node history:\\n{'\\n'.join(node_results)}")
+${baseIndent}return '\\n'.join(node_results)
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Execute Strands Swarm')
+    parser.add_argument('--user-input', type=str, help='User input prompt')
+    parser.add_argument('--messages', type=str, help='JSON string of conversation messages')
+
+    args = parser.parse_args()
+
+    user_input_param = args.user_input
+    messages_param = args.messages
+
+    asyncio.run(main(user_input_param, messages_param))`;
+    } else if (isStreaming) {
       mainCode += `
 ${baseIndent}# Execute agent with streaming
 ${baseIndent}async for event in ${agentName}.stream_async(user_input):
@@ -708,10 +942,26 @@ function isAgentConnectedToOrchestrator(
   orchestratorNodes: Node[],
   edges: Edge[]
 ): boolean {
-  return edges.some(edge => 
-    edge.target === agentNode.id && 
+  return edges.some(edge =>
+    edge.target === agentNode.id &&
     edge.targetHandle === 'orchestrator-input' &&
     orchestratorNodes.some(orch => orch.id === edge.source)
+  );
+}
+
+/**
+ * Checks if an agent node is connected to any swarm node
+ */
+function isAgentConnectedToSwarm(
+  agentNode: Node,
+  swarmNodes: Node[],
+  edges: Edge[]
+): boolean {
+  // Look for edges FROM swarm nodes TO this agent (swarm -> agent connection)
+  return edges.some(edge =>
+    edge.target === agentNode.id &&
+    edge.sourceHandle === 'sub-agents' &&
+    swarmNodes.some(swarm => swarm.id === edge.source)
   );
 }
 
@@ -1095,16 +1345,16 @@ function generateModelConfigForTool(
     const clientArgsStr = `\n            client_args={\n                ${clientArgs.join(',\n                ')}\n            },`;
     
     return `${varName}_model = OpenAIModel(${clientArgsStr}
-            model_id=\"${modelIdentifier}\",
+            model_id="${modelIdentifier}",
             params={
-                \"max_tokens\": ${maxTokens},
-                \"temperature\": ${temperature},
+                "max_tokens": ${maxTokens},
+                "temperature": ${temperature},
             }
         )`;
   } else {
     // Default to Bedrock
     return `${varName}_model = BedrockModel(
-            model_id=\"${modelIdentifier}\",
+            model_id="${modelIdentifier}",
             temperature=${temperature},
             max_tokens=${maxTokens}
         )`;
@@ -1119,7 +1369,7 @@ export function generateCustomToolCode(
   const codeString = pythonCode as string;
 
   const hasCustomCode = codeString && codeString.trim();
-  
+
   if (hasCustomCode) {
     // User provided complete function - just wrap it with @tool decorator
     return `@tool\n${codeString.trim()}`;
@@ -1132,4 +1382,88 @@ def custom_tool(input_text: str) -> str:
     result = f"Processed: {input_text}"
     return result`;
   }
+}
+
+/**
+ * Finds all agent nodes connected to a swarm node
+ */
+function findConnectedSwarmAgents(
+  swarmNode: Node,
+  agentNodes: Node[],
+  edges: Edge[]
+): Node[] {
+  const connectedAgentIds = new Set<string>();
+
+  const swarmAgentEdges = edges.filter(
+    edge => edge.source === swarmNode.id && edge.sourceHandle === 'sub-agents'
+  );
+
+  swarmAgentEdges.forEach(edge => {
+    const targetAgent = agentNodes.find(agent => agent.id === edge.target);
+    if (targetAgent) {
+      connectedAgentIds.add(targetAgent.id);
+    }
+  });
+
+  return agentNodes.filter(agent => connectedAgentIds.has(agent.id));
+}
+
+/**
+ * Generates swarm instantiation code
+ */
+function generateSwarmCode(
+  swarmNode: Node,
+  agentNodes: Node[],
+  _allNodes: Node[],
+  edges: Edge[],
+  index: number
+): string {
+  const data = swarmNode.data || {};
+  const {
+    label = `Swarm${index + 1}`,
+    maxHandoffs = 20,
+    maxIterations = 20,
+    executionTimeout = 900,
+    nodeTimeout = 300,
+    repetitiveHandoffDetectionWindow = 0,
+    repetitiveHandoffMinUniqueAgents = 0,
+    entryPointAgentId = null,
+  } = data;
+
+  // Find connected agents
+  const connectedAgents = findConnectedSwarmAgents(swarmNode, agentNodes, edges);
+
+  if (connectedAgents.length === 0) {
+    return `# ERROR: ${label} has no connected agents`;
+  }
+
+  // Sanitize swarm name to be Python-compatible
+  const swarmVarName = sanitizePythonVariableName(label as string);
+
+  // Get agent variable names
+  const agentVarNames = connectedAgents.map(agent => {
+    const agentLabel = (agent.data?.label as string) || 'agent';
+    return sanitizePythonVariableName(agentLabel);
+  });
+
+  // Determine entry point
+  let entryPointCode = '';
+  if (entryPointAgentId) {
+    const entryPointAgent = connectedAgents.find(agent => agent.id === entryPointAgentId);
+    if (entryPointAgent) {
+      const entryPointVarName = sanitizePythonVariableName((entryPointAgent.data?.label as string) || 'agent');
+      entryPointCode = `,\n    entry_point=${entryPointVarName}`;
+    }
+  }
+
+  return `# ${label} Configuration
+${swarmVarName} = Swarm(
+    [${agentVarNames.join(', ')}]${entryPointCode},
+    max_handoffs=${maxHandoffs},
+    max_iterations=${maxIterations},
+    execution_timeout=${executionTimeout}.0,
+    node_timeout=${nodeTimeout}.0,
+    repetitive_handoff_detection_window=${repetitiveHandoffDetectionWindow},
+    repetitive_handoff_min_unique_agents=${repetitiveHandoffMinUniqueAgents}
+)`;
 }
