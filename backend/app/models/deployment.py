@@ -18,6 +18,7 @@ class BaseDeploymentRequest(BaseModel):
     project_id: Optional[str] = Field(None, description="Project identifier")
     version: Optional[str] = Field(None, description="Project version")
     api_keys: Optional[Dict[str, str]] = Field(None, description="API keys for the agent")
+    deployment_id: Optional[str] = Field(None, description="Optional deployment ID from frontend")
 
 # Lambda-specific models
 class LambdaDeploymentRequest(BaseDeploymentRequest):
@@ -33,9 +34,9 @@ class LambdaDeploymentRequest(BaseDeploymentRequest):
     region: str = Field("us-east-1", description="AWS region")
     stack_name: Optional[str] = Field(None, description="CloudFormation stack name")
 
-    # Lambda-specific features
-    enable_api_gateway: bool = Field(True, description="Create API Gateway trigger")
-    enable_function_url: bool = Field(False, description="Enable Lambda function URL")
+    # Lambda-specific features (Fixed: Only Function URL is supported)
+    enable_api_gateway: bool = Field(False, description="Create API Gateway trigger")
+    enable_function_url: bool = Field(True, description="Enable Lambda function URL")
     vpc_config: Optional[Dict[str, Any]] = Field(None, description="VPC configuration")
     environment_variables: Optional[Dict[str, str]] = Field(None, description="Environment variables")
 
@@ -135,6 +136,23 @@ class AgentCoreInvokeResponse(BaseModel):
     response_data: Union[str,Optional[Dict[str, Any]]] = Field(None, description="Agent response data")
     error: Optional[str] = Field(None, description="Error message if invocation failed")
     execution_time: Optional[float] = Field(None, description="Execution time in seconds")
+
+# Lambda invoke models
+class LambdaInvokeRequest(BaseModel):
+    """Request model for invoking Lambda function"""
+    function_arn: str = Field(..., description="Lambda function ARN")
+    payload: Dict[str, Any] = Field(..., description="Input payload for the Lambda function")
+    region: str = Field("us-east-1", description="AWS region")
+    invocation_type: str = Field("RequestResponse", description="Invocation type (RequestResponse, Event)")
+
+class LambdaInvokeResponse(BaseModel):
+    """Response model for Lambda function invocation"""
+    success: bool = Field(..., description="Whether the invocation was successful")
+    response_data: Union[str, Dict[str, Any]] = Field(None, description="Lambda response data")
+    error: Optional[str] = Field(None, description="Error message if invocation failed")
+    execution_time: Optional[float] = Field(None, description="Execution time in seconds")
+    status_code: Optional[int] = Field(None, description="HTTP status code from Lambda")
+    execution_context: Optional[Dict[str, Any]] = Field(None, description="Lambda execution context")
 
 # Health check model
 class DeploymentHealthStatus(BaseModel):

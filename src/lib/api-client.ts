@@ -72,7 +72,19 @@ export interface DeploymentHistoryItem {
   execute_role?: string;
   api_keys?: Record<string, string>;
   code: string;
-  deployment_result: Record<string, any>;
+  deployment_result: {
+    function_arn?: string;
+    api_endpoint?: string;
+    invoke_endpoint?: string;
+    streaming_invoke_endpoint?: string;
+    streaming_capable?: boolean;
+    deployment_type?: string;
+    python_function_arn?: string;
+    nodejs_function_arn?: string;
+    sync_function_url?: string;
+    stream_function_url?: string;
+    [key: string]: any;
+  };
   deployment_logs?: string;
   success: boolean;
   error_message?: string;

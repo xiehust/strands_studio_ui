@@ -1,0 +1,128 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Strands Agent with single Lambda function - Python (BUFFERED mode only)
+
+Parameters:
+  FunctionName:
+    Type: String
+    Default: StrandsAgentFunction
+    Description: Name for the Lambda function (will be suffixed with -sync)
+
+  MemorySize:
+    Type: Number
+    Default: 512
+    MinValue: 128
+    MaxValue: 10240
+    Description: Memory allocated to the Lambda function (MB)
+
+  Timeout:
+    Type: Number
+    Default: 300
+    MinValue: 3
+    MaxValue: 900
+    Description: Timeout for the Lambda function (seconds)
+
+  Architecture:
+    Type: String
+    Default: x86_64
+    AllowedValues:
+      - x86_64
+      - arm64
+    Description: Processor architecture
+
+  AllowedOrigins:
+    Type: CommaDelimitedList
+    Default: "http://localhost:5173,https://localhost:5173"
+    Description: Comma-delimited list of allowed CORS origins (replace with your frontend domains)
+
+Globals:
+  Function:
+    Timeout: !Ref Timeout
+    MemorySize: !Ref MemorySize
+    Architectures:
+      - !Ref Architecture
+    Environment:
+      Variables:
+        BYPASS_TOOL_CONSENT: "true"
+
+Resources:
+  # ---------------------------
+  # Python Lambda Function (Non-Streaming / BUFFERED)
+  # ---------------------------
+  PythonSyncFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${FunctionName}-sync"
+      CodeUri: python_function/
+      Handler: agent_handler_python.handler
+      Runtime: python3.12
+      Description: "Strands Agent - Python non-streaming (BUFFERED mode only)"
+      Environment:
+        Variables:
+          BYPASS_TOOL_CONSENT: "true"
+          STREAMING_CAPABLE: "false"
+          FUNCTION_TYPE: "sync"
+      # Add minimal IAM permissions
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        # Add Bedrock permissions for AI model access
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+                - bedrock:ListFoundationModels
+                - bedrock:GetFoundationModel
+              Resource: "*"
+
+  # ---------------------------
+  # Function URL for Python (BUFFERED)
+  # ---------------------------
+  PythonSyncFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !GetAtt PythonSyncFunction.Arn
+      AuthType: AWS_IAM
+      InvokeMode: BUFFERED  # Non-streaming, 6MB limit
+      Cors:
+        AllowOrigins: !Ref AllowedOrigins
+        AllowMethods:
+          - POST
+        AllowHeaders:
+          - Content-Type
+          - Authorization
+          - Accept
+          - X-Amz-Date
+          - X-Amz-Security-Token
+        MaxAge: 3600
+
+  # ---------------------------
+  # No public permissions needed for AWS_IAM auth
+  # Callers must have lambda:InvokeFunctionUrl permission
+  # ---------------------------
+
+Outputs:
+  PythonSyncFunction:
+    Description: "Python Sync Lambda Function ARN"
+    Value: !GetAtt PythonSyncFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-PythonSyncFunction"
+
+  SyncFunctionUrl:
+    Description: "Non-streaming endpoint (Python BUFFERED Function URL)"
+    Value: !GetAtt PythonSyncFunctionUrl.FunctionUrl
+    Export:
+      Name: !Sub "${AWS::StackName}-SyncFunctionUrl"
+
+  StreamingCapable:
+    Description: "Whether this deployment supports streaming"
+    Value: "false"
+    Export:
+      Name: !Sub "${AWS::StackName}-StreamingCapable"
+
+  DeploymentType:
+    Description: "Deployment type with single sync function"
+    Value: "sync_only"
+    Export:
+      Name: !Sub "${AWS::StackName}-DeploymentType"

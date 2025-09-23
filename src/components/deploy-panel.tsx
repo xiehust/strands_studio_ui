@@ -4,6 +4,7 @@ import { type Node, type Edge } from '@xyflow/react';
 import { Rocket, Download, Copy, CheckCircle, Cloud, Server, Plus, X, Eye, EyeOff, AlertCircle, Edit3, Save, RotateCcw, History, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
 import { generateStrandsAgentCode } from '../lib/code-generator';
 import { apiClient, type DeploymentHistoryItem } from '../lib/api-client';
+import { LambdaDeployPanel } from './lambda-deploy-panel';
 
 interface DeployPanelProps {
   nodes: Node[];
@@ -52,6 +53,7 @@ interface DeploymentHistoryEntry {
 }
 
 export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) {
+  const [deploymentTarget, setDeploymentTarget] = useState<'agentcore' | 'lambda'>('agentcore');
   const [activeTab, setActiveTab] = useState<'configuration' | 'code-preview'>('configuration');
   const [generatedCode, setGeneratedCode] = useState('');
   const [editableCode, setEditableCode] = useState('');
@@ -308,6 +310,7 @@ export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) 
   };
 
   const handleTargetChange = (target: 'agentcore' | 'lambda') => {
+    setDeploymentTarget(target);
     setDeploymentState(prev => ({ ...prev, deploymentTarget: target }));
 
     // Clear execute role error when switching away from AgentCore
@@ -668,6 +671,73 @@ async def entry(payload):
         </div>
       </div>
 
+      {/* Deployment Target Selection */}
+      <div className="p-4 border-b border-gray-200">
+        <div className="space-y-3">
+          <label className="text-sm font-medium text-gray-900">Deployment Target</label>
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              onClick={() => handleTargetChange('agentcore')}
+              className={`flex items-center p-3 border rounded-lg transition-colors ${
+                deploymentTarget === 'agentcore'
+                  ? 'border-purple-500 bg-purple-50 text-purple-700'
+                  : 'border-gray-200 hover:border-gray-300'
+              }`}
+            >
+              <Server className="w-4 h-4 mr-2" />
+              <span className="text-sm font-medium">AWS AgentCore</span>
+            </button>
+            <button
+              onClick={() => handleTargetChange('lambda')}
+              className={`flex items-center p-3 border rounded-lg transition-colors ${
+                deploymentTarget === 'lambda'
+                  ? 'border-orange-500 bg-orange-50 text-orange-700'
+                  : 'border-gray-200 hover:border-gray-300'
+              }`}
+            >
+              <Cloud className="w-4 h-4 mr-2" />
+              <span className="text-sm font-medium">AWS Lambda</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Conditional Panel Content */}
+      {deploymentTarget === 'lambda' ? (
+        <LambdaDeployPanel nodes={nodes} edges={edges} />
+      ) : (
+        <>
+          {/* AgentCore Panel Header */}
+          <div className="flex items-center justify-between p-4 border-b border-gray-200">
+            <div className="flex items-center">
+              <Rocket className="w-4 h-4 text-purple-600 mr-2" />
+              <h3 className="text-lg font-semibold text-gray-900">Deploy to AgentCore</h3>
+            </div>
+            <div className="flex space-x-2">
+              {/* Tab Buttons */}
+              <button
+                onClick={() => setActiveTab('configuration')}
+                className={`px-3 py-1 text-sm rounded transition-colors ${
+                  activeTab === 'configuration'
+                    ? 'bg-purple-100 text-purple-700'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                Config
+              </button>
+              <button
+                onClick={() => setActiveTab('code-preview')}
+                className={`px-3 py-1 text-sm rounded transition-colors ${
+                  activeTab === 'code-preview'
+                    ? 'bg-purple-100 text-purple-700'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                Code
+              </button>
+            </div>
+          </div>
+
       {/* Errors */}
       {errors.length > 0 && (
         <div className="p-4 bg-red-50 border-b border-red-200">
@@ -689,35 +759,6 @@ async def entry(payload):
           <div className="p-4 h-full overflow-y-auto">
             {/* Configuration Content */}
             <div className="space-y-6">
-              {/* Deployment Target */}
-              <div className="space-y-3">
-                <label className="text-sm font-medium text-gray-900">Deployment Target</label>
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    onClick={() => handleTargetChange('agentcore')}
-                    className={`flex items-center p-3 border rounded-lg transition-colors ${
-                      deploymentState.deploymentTarget === 'agentcore'
-                        ? 'border-purple-500 bg-purple-50 text-purple-700'
-                        : 'border-gray-200 hover:border-gray-300'
-                    }`}
-                  >
-                    <Server className="w-4 h-4 mr-2" />
-                    <span className="text-sm font-medium">AWS AgentCore</span>
-                  </button>
-                  <button
-                    onClick={() => handleTargetChange('lambda')}
-                    className={`flex items-center p-3 border rounded-lg transition-colors ${
-                      deploymentState.deploymentTarget === 'lambda'
-                        ? 'border-orange-500 bg-orange-50 text-orange-700'
-                        : 'border-gray-200 hover:border-gray-300'
-                    }`}
-                  >
-                    <Cloud className="w-4 h-4 mr-2" />
-                    <span className="text-sm font-medium">AWS Lambda</span>
-                  </button>
-                </div>
-              </div>
-
               {/* Configuration Fields */}
               <div className="space-y-4">
                 <label className="text-sm font-medium text-gray-900">Configuration</label>
@@ -1206,15 +1247,15 @@ async def entry(payload):
         )}
       </div>
 
-      {/* Footer Info */}
-      <div className="p-3 bg-gray-50 border-t border-gray-200 text-xs text-gray-600">
-        <div className="flex justify-between">
-          <span>Deploy • {deploymentState.deploymentTarget === 'agentcore' ? 'AWS AgentCore' : 'AWS Lambda'}</span>
-          <span>{generatedCode.split('\n').length} lines</span>
-        </div>
-      </div>
-
-
+          {/* Footer Info */}
+          <div className="p-3 bg-gray-50 border-t border-gray-200 text-xs text-gray-600">
+            <div className="flex justify-between">
+              <span>Deploy • AWS AgentCore</span>
+              <span>{generatedCode.split('\n').length} lines</span>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

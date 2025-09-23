@@ -41,15 +41,18 @@ export function LambdaDeployPanel({ nodes, edges, className = '' }: LambdaDeploy
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [showDeploymentLogs, setShowDeploymentLogs] = useState(false);
   const [deploymentHistory, setDeploymentHistory] = useState<DeploymentHistoryItem[]>([]);
-  const [showHistory, setShowHistory] = useState(false);
+  const [showHistory, setShowHistory] = useState(true);
   const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
   const [deploymentSteps, setDeploymentSteps] = useState<Array<{
     step: string;
     status: 'pending' | 'running' | 'completed' | 'error';
     message?: string;
   }>>([]);
-  const [, setWebsocket] = useState<WebSocket | null>(null);
+  const [websocket, setWebsocket] = useState<WebSocket | null>(null);
   const [currentDeploymentId, setCurrentDeploymentId] = useState<string | null>(null);
+
+  // Use websocket to avoid unused variable warning
+  console.log('WebSocket state:', websocket ? 'connected' : 'disconnected');
 
   const [deploymentState, setDeploymentState] = useState<LambdaDeploymentState>({
     config: {
@@ -61,8 +64,8 @@ export function LambdaDeployPanel({ nodes, edges, className = '' }: LambdaDeploy
       region: 'us-east-1',
       projectId: '',
       version: 'v1.0.0',
-      enableApiGateway: true,
-      enableFunctionUrl: false,
+      enableApiGateway: false,  // Fixed: No API Gateway
+      enableFunctionUrl: true,  // Fixed: Always use Function URL
     },
     isDeploying: false,
   });
@@ -263,15 +266,23 @@ export function LambdaDeployPanel({ nodes, edges, className = '' }: LambdaDeploy
   // Load deployment history from persistent storage
   const loadDeploymentHistory = async () => {
     try {
+      console.log('🔄 Loading Lambda deployment history...');
       const response = await apiClient.getDeploymentHistory(
         undefined, // project_id - load all projects
         undefined, // version - load all versions
         20 // limit to recent 20 deployments
       );
+      console.log('📊 Raw deployment history response:', response);
+
       // Filter for Lambda deployments only
       const lambdaDeployments = response.deployments?.filter(
-        deployment => deployment.deployment_target === 'lambda'
+        deployment => {
+          console.log(`🔍 Checking deployment: ${deployment.deployment_id}, target: ${deployment.deployment_target}`);
+          return deployment.deployment_target === 'lambda';
+        }
       ) || [];
+
+      console.log('✅ Filtered Lambda deployments:', lambdaDeployments);
       setDeploymentHistory(lambdaDeployments);
     } catch (error) {
       console.error('Failed to load deployment history:', error);
@@ -627,32 +638,6 @@ export function LambdaDeployPanel({ nodes, edges, className = '' }: LambdaDeploy
                     </div>
                   </div>
 
-                  {/* Triggers */}
-                  <div className="space-y-2">
-                    <label className="text-sm text-gray-700">Function Triggers</label>
-                    <p className="text-xs text-gray-500 mb-2">Choose how to expose your Lambda function</p>
-                    <div className="space-y-2">
-                      <label className="flex items-center text-sm">
-                        <input
-                          type="checkbox"
-                          checked={deploymentState.config.enableApiGateway}
-                          onChange={(e) => handleConfigChange('enableApiGateway', e.target.checked)}
-                          className="mr-2"
-                        />
-                        API Gateway (REST API with advanced features)
-                      </label>
-                      <label className="flex items-center text-sm">
-                        <input
-                          type="checkbox"
-                          checked={deploymentState.config.enableFunctionUrl}
-                          onChange={(e) => handleConfigChange('enableFunctionUrl', e.target.checked)}
-                          className="mr-2"
-                        />
-                        Function URL (Direct HTTPS endpoint, simpler)
-                      </label>
-                    </div>
-                    <p className="text-xs text-gray-500">Note: API Gateway provides features like rate limiting, API keys, and custom domains</p>
-                  </div>
                 </div>
               </div>
 
@@ -798,7 +783,7 @@ export function LambdaDeployPanel({ nodes, edges, className = '' }: LambdaDeploy
                                       </div>
                                       <button
                                         onClick={() => copyToClipboard(
-                                          entry.deployment_result.function_arn,
+                                          entry.deployment_result.function_arn || '',
                                           `history_arn_${entry.deployment_id}`,
                                           'Function ARN copied!'
                                         )}
@@ -815,29 +800,62 @@ export function LambdaDeployPanel({ nodes, edges, className = '' }: LambdaDeploy
                                         )}
                                       </button>
                                     </div>
-                                    {entry.deployment_result.api_endpoint && (
+                                    {entry.deployment_result.invoke_endpoint && (
                                       <div className="flex items-center justify-between bg-gray-50 p-2 rounded">
                                         <div className="flex-1 mr-2">
-                                          <p className="font-medium text-gray-700">API Endpoint:</p>
+                                          <p className="font-medium text-gray-700">Function URL (Non-streaming):</p>
                                           <a
-                                            href={entry.deployment_result.api_endpoint}
+                                            href={entry.deployment_result.invoke_endpoint}
                                             target="_blank"
                                             rel="noopener noreferrer"
-                                            className="font-mono text-orange-600 underline break-all text-xs hover:text-orange-800"
+                                            className="font-mono text-blue-600 underline break-all text-xs hover:text-blue-800"
                                           >
-                                            {entry.deployment_result.api_endpoint}
+                                            {entry.deployment_result.invoke_endpoint}
                                           </a>
                                         </div>
                                         <button
                                           onClick={() => copyToClipboard(
-                                            entry.deployment_result.api_endpoint,
-                                            `history_endpoint_${entry.deployment_id}`,
-                                            'API Endpoint copied!'
+                                            entry.deployment_result.invoke_endpoint || '',
+                                            `history_nonstream_${entry.deployment_id}`,
+                                            'Non-streaming URL copied!'
                                           )}
                                           className="flex items-center px-2 py-1 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded text-xs transition-colors"
-                                          title="Copy API Endpoint"
+                                          title="Copy Non-streaming Function URL"
                                         >
-                                          {copiedItem === `history_endpoint_${entry.deployment_id}` ? (
+                                          {copiedItem === `history_nonstream_${entry.deployment_id}` ? (
+                                            <>
+                                              <CheckCircle className="w-3 h-3 mr-1" />
+                                              Copied!
+                                            </>
+                                          ) : (
+                                            <Copy className="w-3 h-3" />
+                                          )}
+                                        </button>
+                                      </div>
+                                    )}
+                                    {entry.deployment_result.streaming_invoke_endpoint && (
+                                      <div className="flex items-center justify-between bg-gray-50 p-2 rounded">
+                                        <div className="flex-1 mr-2">
+                                          <p className="font-medium text-gray-700">Function URL (Streaming):</p>
+                                          <a
+                                            href={entry.deployment_result.streaming_invoke_endpoint}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="font-mono text-purple-600 underline break-all text-xs hover:text-purple-800"
+                                          >
+                                            {entry.deployment_result.streaming_invoke_endpoint}
+                                          </a>
+                                        </div>
+                                        <button
+                                          onClick={() => copyToClipboard(
+                                            entry.deployment_result.streaming_invoke_endpoint || '',
+                                            `history_stream_${entry.deployment_id}`,
+                                            'Streaming URL copied!'
+                                          )}
+                                          className="flex items-center px-2 py-1 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded text-xs transition-colors"
+                                          title="Copy Streaming Function URL"
+                                        >
+                                          {copiedItem === `history_stream_${entry.deployment_id}` ? (
                                             <>
                                               <CheckCircle className="w-3 h-3 mr-1" />
                                               Copied!
@@ -877,7 +895,11 @@ export function LambdaDeployPanel({ nodes, edges, className = '' }: LambdaDeploy
                       <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
                         <div className="text-sm text-green-800">
                           <div className="flex items-center justify-between mb-2">
-                            <p className="font-medium">✅ Lambda deployment successful!</p>
+                            <p className="font-medium">✅ Lambda deployment successful! <span className="bg-orange-100 text-orange-800 px-2 py-1 rounded font-bold text-sm">({
+                              deploymentState.deploymentResult.status?.deployment_outputs?.streaming_capable
+                                ? 'Sync + Stream'
+                                : 'Sync Only'
+                            })</span></p>
                             <button
                               onClick={() => setShowDeploymentLogs(!showDeploymentLogs)}
                               className="text-xs px-2 py-1 bg-green-100 hover:bg-green-200 rounded border border-green-300 transition-colors"
@@ -886,70 +908,160 @@ export function LambdaDeployPanel({ nodes, edges, className = '' }: LambdaDeploy
                             </button>
                           </div>
 
-                          {/* Lambda specific results */}
+                          {/* Smart Deployment Results */}
                           {deploymentState.deploymentResult.status?.deployment_outputs && (
-                            <div className="space-y-2 text-xs">
-                              {deploymentState.deploymentResult.status.deployment_outputs.function_arn && (
-                                <div className="flex items-center justify-between bg-green-100 p-2 rounded">
-                                  <div className="flex-1 mr-2">
-                                    <p className="font-medium text-green-800">Function ARN:</p>
-                                    <p className="font-mono text-green-700 break-all text-xs">
-                                      {deploymentState.deploymentResult.status.deployment_outputs.function_arn}
-                                    </p>
+                            <div className="space-y-3 text-xs">
+                              {/* Python BUFFERED Function Section */}
+                              {(deploymentState.deploymentResult.status.deployment_outputs.python_function_arn ||
+                               deploymentState.deploymentResult.status.deployment_outputs.sync_function_url) && (
+                                <div className="space-y-2">
+                                  <div className="flex items-center space-x-2">
+                                    <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                                    <h4 className="font-medium text-green-800">Sync Function</h4>
                                   </div>
-                                  <button
-                                    onClick={() => copyToClipboard(
-                                      deploymentState.deploymentResult.status.deployment_outputs.function_arn,
-                                      'function_arn',
-                                      'Function ARN copied!'
-                                    )}
-                                    className="flex items-center px-2 py-1 bg-green-200 hover:bg-green-300 text-green-800 rounded text-xs transition-colors"
-                                    title="Copy Function ARN"
-                                  >
-                                    {copiedItem === 'function_arn' ? (
-                                      <>
-                                        <CheckCircle className="w-3 h-3 mr-1" />
-                                        Copied!
-                                      </>
-                                    ) : (
-                                      <Copy className="w-3 h-3" />
-                                    )}
-                                  </button>
+
+                                  {deploymentState.deploymentResult.status.deployment_outputs.python_function_arn && (
+                                    <div className="flex items-center justify-between bg-green-50 p-3 rounded border border-green-200">
+                                      <div className="flex-1 mr-2">
+                                        <p className="font-medium text-green-800">Function ARN:</p>
+                                        <p className="font-mono text-green-700 break-all text-xs">
+                                          {deploymentState.deploymentResult.status.deployment_outputs.python_function_arn}
+                                        </p>
+                                      </div>
+                                      <button
+                                        onClick={() => copyToClipboard(
+                                          deploymentState.deploymentResult.status.deployment_outputs.python_function_arn,
+                                          'python_function_arn',
+                                          'Sync Function ARN copied!'
+                                        )}
+                                        className="flex items-center px-2 py-1 bg-green-100 hover:bg-green-200 text-green-800 rounded text-xs transition-colors"
+                                        title="Copy Sync Function ARN"
+                                      >
+                                        {copiedItem === 'python_function_arn' ? (
+                                          <>
+                                            <CheckCircle className="w-3 h-3 mr-1" />
+                                            Copied!
+                                          </>
+                                        ) : (
+                                          <Copy className="w-3 h-3" />
+                                        )}
+                                      </button>
+                                    </div>
+                                  )}
+
+                                  {deploymentState.deploymentResult.status.deployment_outputs.sync_function_url && (
+                                    <div className="flex items-center justify-between bg-green-50 p-3 rounded border border-green-200">
+                                      <div className="flex-1 mr-2">
+                                        <p className="font-medium text-green-800">Function URL:</p>
+                                        <a
+                                          href={deploymentState.deploymentResult.status.deployment_outputs.sync_function_url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="font-mono text-green-700 underline break-all text-xs hover:text-green-900"
+                                        >
+                                          {deploymentState.deploymentResult.status.deployment_outputs.sync_function_url}
+                                        </a>
+                                        <p className="text-xs text-green-600 mt-1">6MB limit, JSON responses</p>
+                                      </div>
+                                      <button
+                                        onClick={() => copyToClipboard(
+                                          deploymentState.deploymentResult.status.deployment_outputs.sync_function_url,
+                                          'sync_function_url',
+                                          'Sync Function URL copied!'
+                                        )}
+                                        className="flex items-center px-2 py-1 bg-green-100 hover:bg-green-200 text-green-800 rounded text-xs transition-colors"
+                                        title="Copy Sync Function URL"
+                                      >
+                                        {copiedItem === 'sync_function_url' ? (
+                                          <>
+                                            <CheckCircle className="w-3 h-3 mr-1" />
+                                            Copied!
+                                          </>
+                                        ) : (
+                                          <Copy className="w-3 h-3" />
+                                        )}
+                                      </button>
+                                    </div>
+                                  )}
                                 </div>
                               )}
-                              {deploymentState.deploymentResult.status.deployment_outputs.api_endpoint && (
-                                <div className="flex items-center justify-between bg-green-100 p-2 rounded">
-                                  <div className="flex-1 mr-2">
-                                    <p className="font-medium text-green-800">API Endpoint:</p>
-                                    <a
-                                      href={deploymentState.deploymentResult.status.deployment_outputs.api_endpoint}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="font-mono text-green-700 underline break-all text-xs hover:text-green-900"
-                                    >
-                                      {deploymentState.deploymentResult.status.deployment_outputs.api_endpoint}
-                                    </a>
+
+                              {/* Python RESPONSE_STREAM Function Section - Only show if streaming capable */}
+                              {deploymentState.deploymentResult.status.deployment_outputs.streaming_capable &&
+                               (deploymentState.deploymentResult.status.deployment_outputs.python_stream_function_arn ||
+                                deploymentState.deploymentResult.status.deployment_outputs.stream_function_url) && (
+                                <div className="space-y-2">
+                                  <div className="flex items-center space-x-2">
+                                    <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
+                                    <h4 className="font-medium text-purple-800">Stream Function</h4>
                                   </div>
-                                  <button
-                                    onClick={() => copyToClipboard(
-                                      deploymentState.deploymentResult.status.deployment_outputs.api_endpoint,
-                                      'api_endpoint',
-                                      'API Endpoint copied!'
-                                    )}
-                                    className="flex items-center px-2 py-1 bg-green-200 hover:bg-green-300 text-green-800 rounded text-xs transition-colors"
-                                    title="Copy API Endpoint"
-                                  >
-                                    {copiedItem === 'api_endpoint' ? (
-                                      <>
-                                        <CheckCircle className="w-3 h-3 mr-1" />
-                                        Copied!
-                                      </>
-                                    ) : (
-                                      <Copy className="w-3 h-3" />
-                                    )}
-                                  </button>
+
+                                  {deploymentState.deploymentResult.status.deployment_outputs.python_stream_function_arn && (
+                                    <div className="flex items-center justify-between bg-purple-50 p-3 rounded border border-purple-200">
+                                      <div className="flex-1 mr-2">
+                                        <p className="font-medium text-purple-800">Function ARN:</p>
+                                        <p className="font-mono text-purple-700 break-all text-xs">
+                                          {deploymentState.deploymentResult.status.deployment_outputs.python_stream_function_arn}
+                                        </p>
+                                      </div>
+                                      <button
+                                        onClick={() => copyToClipboard(
+                                          deploymentState.deploymentResult.status.deployment_outputs.python_stream_function_arn,
+                                          'python_stream_function_arn',
+                                          'Stream Function ARN copied!'
+                                        )}
+                                        className="flex items-center px-2 py-1 bg-purple-100 hover:bg-purple-200 text-purple-800 rounded text-xs transition-colors"
+                                        title="Copy Stream Function ARN"
+                                      >
+                                        {copiedItem === 'python_stream_function_arn' ? (
+                                          <>
+                                            <CheckCircle className="w-3 h-3 mr-1" />
+                                            Copied!
+                                          </>
+                                        ) : (
+                                          <Copy className="w-3 h-3" />
+                                        )}
+                                      </button>
+                                    </div>
+                                  )}
+
+                                  {deploymentState.deploymentResult.status.deployment_outputs.stream_function_url && (
+                                    <div className="flex items-center justify-between bg-purple-50 p-3 rounded border border-purple-200">
+                                      <div className="flex-1 mr-2">
+                                        <p className="font-medium text-purple-800">Function URL:</p>
+                                        <a
+                                          href={deploymentState.deploymentResult.status.deployment_outputs.stream_function_url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="font-mono text-purple-700 underline break-all text-xs hover:text-purple-900"
+                                        >
+                                          {deploymentState.deploymentResult.status.deployment_outputs.stream_function_url}
+                                        </a>
+                                        <p className="text-xs text-purple-600 mt-1">200MB limit, SSE streaming responses</p>
+                                      </div>
+                                      <button
+                                        onClick={() => copyToClipboard(
+                                          deploymentState.deploymentResult.status.deployment_outputs.stream_function_url,
+                                          'stream_function_url',
+                                          'Stream Function URL copied!'
+                                        )}
+                                        className="flex items-center px-2 py-1 bg-purple-100 hover:bg-purple-200 text-purple-800 rounded text-xs transition-colors"
+                                        title="Copy Stream Function URL"
+                                      >
+                                        {copiedItem === 'stream_function_url' ? (
+                                          <>
+                                            <CheckCircle className="w-3 h-3 mr-1" />
+                                            Copied!
+                                          </>
+                                        ) : (
+                                          <Copy className="w-3 h-3" />
+                                        )}
+                                      </button>
+                                    </div>
+                                  )}
                                 </div>
                               )}
+
                             </div>
                           )}
                         </div>
