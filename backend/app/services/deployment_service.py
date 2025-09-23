@@ -42,7 +42,7 @@ class DeploymentService:
 
     async def deploy_to_lambda(self, request: LambdaDeploymentRequest) -> DeploymentResponse:
         """Deploy Strands agent to AWS Lambda"""
-        deployment_id = str(uuid.uuid4())
+        deployment_id = request.deployment_id if request.deployment_id else str(uuid.uuid4())
 
         # Create initial deployment status
         status = DeploymentStatus(
@@ -56,6 +56,22 @@ class DeploymentService:
         self.deployments[deployment_id] = status
 
         logger.info(f"Starting Lambda deployment: {deployment_id}")
+
+        # Notify WebSocket clients about deployment start
+        try:
+            # Import the notify function
+            import sys
+            from pathlib import Path
+
+            # Add main module to path to access the notify function
+            main_path = Path(__file__).parent.parent.parent
+            if str(main_path) not in sys.path:
+                sys.path.insert(0, str(main_path))
+
+            from main import notify_deployment_progress
+            await notify_deployment_progress(deployment_id, "Preparing deployment package", "running")
+        except Exception as e:
+            logger.warning(f"Failed to send WebSocket notification: {e}")
 
         try:
             # Import Lambda deployment service dynamically to avoid startup dependency
@@ -81,7 +97,9 @@ class DeploymentService:
                 architecture=request.architecture,
                 region=request.region,
                 stack_name=request.stack_name,
-                api_keys=request.api_keys
+                api_keys=request.api_keys,
+                project_id=request.project_id,
+                version=request.version
             )
 
             # Update status to building
@@ -98,7 +116,7 @@ class DeploymentService:
             self.deployments[deployment_id] = status
 
             # Perform deployment
-            result = await lambda_service.deploy_agent(request.code, config)
+            result = await lambda_service.deploy_agent(request.code, config, deployment_id)
 
             # Update final status
             if result.success:
@@ -122,6 +140,44 @@ class DeploymentService:
             status.logs = result.logs
             status.completed_at = datetime.now().isoformat()
             self.deployments[deployment_id] = status
+
+            # Save to persistent deployment history for Lambda deployments
+            try:
+                import httpx
+
+                # Create deployment history item data
+                history_item_data = {
+                    "deployment_id": deployment_id,
+                    "project_id": request.project_id or request.function_name,  # Use function_name as fallback project_id
+                    "version": request.version or 'v1.0.0',
+                    "deployment_target": 'lambda',
+                    "agent_name": request.function_name,
+                    "region": request.region,
+                    "execute_role": None,  # Lambda doesn't use execute_role
+                    "api_keys": request.api_keys or {},
+                    "code": request.code,
+                    "deployment_result": status.deployment_outputs or {},
+                    "deployment_logs": '\n'.join(result.logs) if result.logs else '',
+                    "success": result.success,
+                    "error_message": None if result.success else result.message,
+                    "created_at": status.created_at
+                }
+
+                # Call the deployment history API endpoint directly
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(
+                        "http://localhost:8000/api/deployment-history",
+                        json=history_item_data,
+                        timeout=10.0
+                    )
+
+                    if response.status_code == 200:
+                        logger.info(f"Lambda deployment saved to persistent storage: {deployment_id}")
+                    else:
+                        logger.error(f"Failed to save deployment history: HTTP {response.status_code}")
+
+            except Exception as e:
+                logger.error(f"Failed to save Lambda deployment to persistent storage: {e}")
 
             logger.info(f"Lambda deployment completed: {deployment_id}, success: {result.success}")
 

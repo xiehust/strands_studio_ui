@@ -1253,17 +1253,36 @@ async def websocket_endpoint(websocket: WebSocket):
 async def notify_execution_complete(execution_id: str, result: ExecutionResult):
     """Notify all WebSocket connections about execution completion"""
     logger.info(f"Notifying WebSocket connections about execution completion - ID: {execution_id}")
-    
+
     message = {
         "type": "execution_complete",
         "execution_id": execution_id,
         "result": result.dict()
     }
-    
+
+    await broadcast_websocket_message(message)
+
+async def notify_deployment_progress(deployment_id: str, step: str, status: str, message: str = None):
+    """Notify all WebSocket connections about deployment progress"""
+    logger.info(f"Notifying WebSocket connections about deployment progress - ID: {deployment_id}, Step: {step}, Status: {status}")
+
+    progress_message = {
+        "type": "deployment_progress",
+        "deployment_id": deployment_id,
+        "step": step,
+        "status": status,  # 'pending', 'running', 'completed', 'error'
+        "message": message,
+        "timestamp": datetime.now().isoformat()
+    }
+
+    await broadcast_websocket_message(progress_message)
+
+async def broadcast_websocket_message(message: dict):
+    """Broadcast message to all active WebSocket connections"""
     # Remove disconnected connections
     disconnected = []
     sent_count = 0
-    
+
     for connection in active_connections:
         try:
             await connection.send_text(json.dumps(message))
@@ -1271,11 +1290,13 @@ async def notify_execution_complete(execution_id: str, result: ExecutionResult):
         except Exception as e:
             logger.warning(f"Failed to send WebSocket message: {e}")
             disconnected.append(connection)
-    
-    logger.info(f"WebSocket notification sent to {sent_count} connections - ID: {execution_id}")
-    
+
+    # Remove disconnected connections
     for conn in disconnected:
-        active_connections.remove(conn)
+        if conn in active_connections:
+            active_connections.remove(conn)
+
+    logger.info(f"WebSocket notification sent to {sent_count} connections")
 
 async def _convert_execution_info_to_history_item(execution_info: ExecutionInfo) -> Optional[ExecutionHistoryItem]:
     """Convert ExecutionInfo to ExecutionHistoryItem by loading result.json"""

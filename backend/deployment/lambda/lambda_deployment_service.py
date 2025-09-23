@@ -26,6 +26,8 @@ class LambdaDeploymentConfig:
     region: str = "us-east-1"
     stack_name: Optional[str] = None
     api_keys: Optional[Dict[str, str]] = None
+    project_id: Optional[str] = None
+    version: Optional[str] = None
 
 @dataclass
 class DeploymentResult:
@@ -57,7 +59,8 @@ class LambdaDeploymentService:
     async def deploy_agent(
         self,
         generated_code: str,
-        config: LambdaDeploymentConfig
+        config: LambdaDeploymentConfig,
+        deployment_id: str = None
     ) -> DeploymentResult:
         """
         Deploy a Strands agent to AWS Lambda.
@@ -75,45 +78,102 @@ class LambdaDeploymentService:
         logger.info(f"Starting Lambda deployment for function: {config.function_name}")
 
         try:
-            # Validate prerequisites
-            self._validate_prerequisites()
-            deployment_logs.append("Prerequisites validated")
+            # Helper function to send WebSocket notifications
+            async def notify_progress(step: str, status: str, message: str = None):
+                if deployment_id:
+                    try:
+                        # Import notification function dynamically
+                        import sys
+                        from pathlib import Path
+                        main_path = Path(__file__).parent.parent.parent
+                        if str(main_path) not in sys.path:
+                            sys.path.insert(0, str(main_path))
 
-            # Create temporary deployment directory
+                        from main import notify_deployment_progress
+                        await notify_deployment_progress(deployment_id, step, status, message)
+                    except Exception as e:
+                        logger.warning(f"Failed to send WebSocket notification: {e}")
+
+            # Validate prerequisites
+            await notify_progress("Validating prerequisites", "running")
+            self._validate_prerequisites()
+
+            # Check for existing Lambda function with same name
+            await self._check_function_name_conflict(config.function_name, deployment_logs)
+
+            deployment_logs.append("Prerequisites validated")
+            await notify_progress("Validating prerequisites", "completed")
+
+            # Create persistent storage directory for deployment files
+            project_id = config.project_id or config.function_name  # Use function_name as fallback project_id
+            version = config.version or "v1.0.0"  # Default version
+            storage_dir = Path("storage/deploy_history/lambda") / project_id / version
+            storage_dir.mkdir(parents=True, exist_ok=True)
+            deployment_logs.append(f"Created storage directory: {storage_dir}")
+
+            # Create deployment-specific directory using provided deployment_id or generate one
+            if deployment_id:
+                storage_deployment_id = f"deployment-{deployment_id[:8]}"
+            else:
+                storage_deployment_id = f"deployment-{int(datetime.now().timestamp() * 1000)}"
+            deployment_storage_dir = storage_dir / storage_deployment_id
+            deployment_storage_dir.mkdir(exist_ok=True)
+
+            # Save deployment code and metadata
+            await notify_progress("Saving deployment artifacts", "running")
+            await self._save_deployment_artifacts(
+                deployment_storage_dir, generated_code, config, deployment_logs
+            )
+            await notify_progress("Saving deployment artifacts", "completed")
+
+            # Create temporary deployment directory for SAM operations
             with tempfile.TemporaryDirectory() as temp_dir:
                 temp_path = Path(temp_dir)
                 deployment_logs.append(f"Created temporary directory: {temp_path}")
 
                 # Prepare deployment package
+                await notify_progress("Preparing deployment package", "running")
                 await self._prepare_deployment_package(
                     temp_path, generated_code, config, deployment_logs
                 )
+                await notify_progress("Preparing deployment package", "completed")
 
                 # Build with SAM
-                build_result = await self._sam_build(temp_path, deployment_logs)
+                await notify_progress("Building with SAM", "running")
+                build_result = await self._sam_build(temp_path, deployment_logs, deployment_id)
                 if not build_result:
+                    await notify_progress("Building with SAM", "error", "SAM build failed")
                     return DeploymentResult(
                         success=False,
                         message="SAM build failed",
                         logs=deployment_logs
                     )
+                await notify_progress("Building with SAM", "completed")
 
                 # Deploy with SAM
+                await notify_progress("Deploying to AWS", "running")
                 deploy_result = await self._sam_deploy(
                     temp_path, config, deployment_logs
                 )
                 if not deploy_result["success"]:
+                    await notify_progress("Deploying to AWS", "error", deploy_result["message"])
                     return DeploymentResult(
                         success=False,
                         message=deploy_result["message"],
                         logs=deployment_logs
                     )
+                await notify_progress("Deploying to AWS", "completed")
 
                 # Get deployment outputs
                 outputs = await self._get_stack_outputs(config, deployment_logs)
 
                 deployment_time = (datetime.now() - start_time).total_seconds()
                 deployment_logs.append(f"Deployment completed in {deployment_time:.2f}s")
+
+                # Save deployment results
+                await self._save_deployment_result(
+                    deployment_storage_dir, outputs, deployment_logs, deployment_time
+                )
 
                 logger.info(f"Lambda deployment successful: {config.function_name}")
 
@@ -170,6 +230,35 @@ class LambdaDeploymentService:
 
         if not self.handler_template_path.exists():
             raise RuntimeError(f"Handler template not found: {self.handler_template_path}")
+
+    async def _check_function_name_conflict(self, function_name: str, logs: List[str]):
+        """Check if Lambda function with the same name already exists"""
+        try:
+            result = subprocess.run(
+                ["aws", "lambda", "get-function", "--function-name", function_name],
+                capture_output=True,
+                text=True,
+                check=False  # Don't raise exception on non-zero exit
+            )
+
+            if result.returncode == 0:
+                # Function exists
+                error_msg = f"Lambda function '{function_name}' already exists. Please choose a different name or delete the existing function first."
+                logs.append(error_msg)
+                logger.error(error_msg)
+                raise RuntimeError(error_msg)
+            elif "ResourceNotFoundException" in result.stderr:
+                # Function doesn't exist, which is what we want
+                logs.append(f"Function name '{function_name}' is available")
+                logger.info(f"Function name '{function_name}' is available for deployment")
+            else:
+                # Some other error occurred
+                logger.warning(f"Could not check function name availability: {result.stderr}")
+                logs.append(f"Warning: Could not verify function name availability: {result.stderr}")
+
+        except Exception as e:
+            logger.warning(f"Failed to check function name conflict: {str(e)}")
+            logs.append(f"Warning: Could not check for function name conflicts: {str(e)}")
 
     async def _prepare_deployment_package(
         self,
@@ -252,7 +341,8 @@ class LambdaDeploymentService:
     def _extract_agent_code(self, generated_code: str) -> str:
         """Extract and adapt the agent code for Lambda execution"""
         lines = generated_code.split('\n')
-        extracted_lines = []
+        agent_config_lines = []
+        main_function_lines = []
         in_main_function = False
         indent_level = 8  # Lambda handler indentation level
 
@@ -262,7 +352,7 @@ class LambdaDeploymentService:
                 continue
 
             # Skip the main function definition and if __name__ == "__main__" blocks
-            if 'async def main():' in line or 'if __name__ == "__main__":' in line:
+            if 'async def main(' in line or 'def main(' in line or 'if __name__ == "__main__":' in line:
                 in_main_function = True
                 continue
 
@@ -273,37 +363,136 @@ class LambdaDeploymentService:
                 in_main_function = False
 
             if in_main_function:
+                # Skip problematic global statements since variables are in local scope
+                stripped_line = line.strip()
+                if stripped_line.startswith('global ') and 'agent' in stripped_line:
+                    continue
                 # Remove one level of indentation and add Lambda handler indentation
                 if line.startswith('    '):
-                    extracted_lines.append(' ' * indent_level + line[4:])
+                    main_function_lines.append(' ' * indent_level + line[4:])
                 elif line.strip():
-                    extracted_lines.append(' ' * indent_level + line)
+                    main_function_lines.append(' ' * indent_level + line)
             elif not in_main_function and line.strip() and not line.startswith('#'):
                 # Include tool definitions and agent configurations
-                extracted_lines.append(' ' * indent_level + line)
+                agent_config_lines.append(' ' * indent_level + line)
 
-        # Add return statement adaptation
+        # Build the final extracted code with proper order
+        extracted_lines = []
+
+        # First: Add agent configuration (tools, agent setup)
+        extracted_lines.extend(agent_config_lines)
+
+        # Second: Add variable setup for main function code
         extracted_lines.extend([
-            ' ' * indent_level + '# Import required modules for execution',
-            ' ' * indent_level + 'import asyncio',
-            ' ' * indent_level + 'import inspect',
+            ' ' * indent_level + '# Set up variables for extracted main function code',
+            ' ' * indent_level + 'user_input_arg = input_data if input_data else prompt',
+            ' ' * indent_level + 'messages_arg = None  # Not available in lambda context',
+            ' ' * indent_level + 'user_input = user_input_arg',
+            ' ' * indent_level + ''
+        ])
+
+        # Third: Add extracted main function code
+        extracted_lines.extend(main_function_lines)
+
+        # Fourth: Add fallback execution logic
+        extracted_lines.extend([
             ' ' * indent_level + '',
-            ' ' * indent_level + '# Use input_data if provided, otherwise use prompt',
-            ' ' * indent_level + 'user_input = input_data if input_data else prompt',
-            ' ' * indent_level + '',
-            ' ' * indent_level + '# Execute the main agent (assuming it exists)',
-            ' ' * indent_level + 'if "main" in locals() and callable(locals()["main"]):',
-            ' ' * (indent_level + 4) + 'if inspect.iscoroutinefunction(locals()["main"]):',
-            ' ' * (indent_level + 8) + 'response = asyncio.run(locals()["main"]())',
-            ' ' * (indent_level + 4) + 'else:',
-            ' ' * (indent_level + 8) + 'response = locals()["main"]()',
+            ' ' * indent_level + '# Return the response from main function code or fallback',
+            ' ' * indent_level + 'if "response" in locals():',
+            ' ' * (indent_level + 4) + 'return str(response)',
+            ' ' * indent_level + 'elif "agent" in locals():',
+            ' ' * (indent_level + 4) + '# Fallback: use agent directly',
+            ' ' * (indent_level + 4) + 'response = agent(user_input)',
             ' ' * (indent_level + 4) + 'return str(response)',
             ' ' * indent_level + 'else:',
-            ' ' * (indent_level + 4) + '# Fallback: return user input echo',
-            ' ' * (indent_level + 4) + 'return f"Received: {user_input}"'
+            ' ' * (indent_level + 4) + 'return f"No agent or response found. Received: {user_input}"'
         ])
 
         return '\n'.join(extracted_lines)
+
+    async def _save_deployment_artifacts(
+        self,
+        storage_dir: Path,
+        generated_code: str,
+        config: LambdaDeploymentConfig,
+        logs: List[str]
+    ):
+        """Save deployment artifacts to persistent storage"""
+        try:
+            # Save the original generated code
+            (storage_dir / "deployment_code.py").write_text(generated_code, encoding='utf-8')
+
+            # Save deployment configuration as JSON
+            config_data = {
+                "function_name": config.function_name,
+                "memory_size": config.memory_size,
+                "timeout": config.timeout,
+                "runtime": config.runtime,
+                "architecture": config.architecture,
+                "region": config.region,
+                "stack_name": config.stack_name,
+                "enable_api_gateway": getattr(config, 'enable_api_gateway', True),
+                "enable_function_url": getattr(config, 'enable_function_url', False),
+                "api_keys": config.api_keys if config.api_keys else {},
+                "created_at": datetime.now().isoformat()
+            }
+
+            with open(storage_dir / "deployment_metadata.json", 'w') as f:
+                json.dump(config_data, f, indent=2)
+
+            # Generate and save the Lambda handler that will be deployed
+            handler_content = await self._generate_handler(generated_code)
+            (storage_dir / "agent_handler.py").write_text(handler_content, encoding='utf-8')
+
+            # Save SAM configuration
+            samconfig_content = self._generate_samconfig(config)
+            (storage_dir / "samconfig.toml").write_text(samconfig_content, encoding='utf-8')
+
+            # Copy requirements.txt
+            if self.requirements_path.exists():
+                shutil.copy2(self.requirements_path, storage_dir / "requirements.txt")
+
+            # Copy SAM template
+            if self.template_path.exists():
+                shutil.copy2(self.template_path, storage_dir / "template.yaml")
+
+            logs.append(f"Saved deployment artifacts to {storage_dir}")
+            logger.info(f"Deployment artifacts saved to: {storage_dir}")
+
+        except Exception as e:
+            error_msg = f"Failed to save deployment artifacts: {str(e)}"
+            logs.append(error_msg)
+            logger.error(error_msg)
+
+    async def _save_deployment_result(
+        self,
+        storage_dir: Path,
+        outputs: Dict[str, str],
+        logs: List[str],
+        deployment_time: float
+    ):
+        """Save deployment results to persistent storage"""
+        try:
+            result_data = {
+                "success": True,
+                "outputs": outputs,
+                "deployment_time": deployment_time,
+                "completed_at": datetime.now().isoformat(),
+                "logs": logs
+            }
+
+            with open(storage_dir / "deployment_result.json", 'w') as f:
+                json.dump(result_data, f, indent=2)
+
+            # Also save logs as text file
+            with open(storage_dir / "deployment_logs.txt", 'w') as f:
+                f.write('\n'.join(logs))
+
+            logger.info(f"Deployment result saved to: {storage_dir}")
+
+        except Exception as e:
+            error_msg = f"Failed to save deployment result: {str(e)}"
+            logger.error(error_msg)
 
     def _generate_samconfig(self, config: LambdaDeploymentConfig) -> str:
         """Generate SAM configuration file"""
@@ -330,44 +519,62 @@ image_repositories = []
 """
         return samconfig
 
-    async def _sam_build(self, temp_path: Path, logs: List[str]) -> bool:
-        """Run SAM build with fallback to container build"""
-        # First try regular SAM build
+    async def _sam_build(self, temp_path: Path, logs: List[str], deployment_id: str = None) -> bool:
+        """Run SAM build with container build for better dependency compatibility"""
+
+        # Helper function to send progress notifications
+        async def notify_progress(message: str):
+            if deployment_id:
+                try:
+                    import sys
+                    from pathlib import Path
+                    main_path = Path(__file__).parent.parent.parent
+                    if str(main_path) not in sys.path:
+                        sys.path.insert(0, str(main_path))
+
+                    from main import notify_deployment_progress
+                    await notify_deployment_progress(deployment_id, "Building with SAM", "running", message)
+                except Exception as e:
+                    logger.warning(f"Failed to send SAM build progress notification: {e}")
+
+        # Use container build first to ensure C extensions are compiled correctly
         try:
+            logs.append("Using container build for better dependency compatibility...")
+            await notify_progress("Starting container build for better dependency compatibility...")
+
             result = subprocess.run(
-                ["sam", "build"],
+                ["sam", "build", "--use-container"],
                 cwd=temp_path,
                 capture_output=True,
                 text=True,
                 check=True
             )
-            logs.append("SAM build successful")
-            logger.info("SAM build completed successfully")
+            logs.append("SAM container build successful")
+            logger.info("SAM container build completed successfully")
             return True
-        except subprocess.CalledProcessError as e:
-            if "Binary validation failed" in str(e.stderr):
-                logs.append("Local Python version incompatible, trying container build...")
-                logger.info("Falling back to container build due to Python version mismatch")
+        except subprocess.CalledProcessError as container_error:
+            error_msg = f"Container build failed: {container_error.stderr}"
+            logs.append(error_msg)
+            logs.append("Falling back to regular build...")
+            logger.warning(f"Container build failed, falling back to regular build: {container_error.stderr}")
+            await notify_progress("Container build failed, trying regular build...")
 
-                # Try container build as fallback
-                try:
-                    result = subprocess.run(
-                        ["sam", "build", "--use-container"],
-                        cwd=temp_path,
-                        capture_output=True,
-                        text=True,
-                        check=True
-                    )
-                    logs.append("SAM container build successful")
-                    logger.info("SAM container build completed successfully")
-                    return True
-                except subprocess.CalledProcessError as container_error:
-                    error_msg = f"SAM container build also failed: {container_error.stderr}"
-                    logs.append(error_msg)
-                    logger.error(error_msg)
-                    return False
-            else:
-                error_msg = f"SAM build failed: {e.stderr}"
+            # Fallback to regular SAM build
+            try:
+                await notify_progress("Starting regular SAM build (this may take several minutes)...")
+
+                result = subprocess.run(
+                    ["sam", "build"],
+                    cwd=temp_path,
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+                logs.append("SAM build successful")
+                logger.info("SAM build completed successfully")
+                return True
+            except subprocess.CalledProcessError as e:
+                error_msg = f"Both container and regular SAM builds failed: {e.stderr}"
                 logs.append(error_msg)
                 logger.error(error_msg)
                 return False

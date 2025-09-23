@@ -6,7 +6,15 @@ import json
 import os
 import logging
 import traceback
+import argparse
+import asyncio
+import inspect
 from typing import Dict, Any, Optional
+
+# Strands Agent imports
+from strands import Agent, tool
+from strands.models import BedrockModel
+from strands_tools import calculator, file_read, shell, current_time
 
 # Configure logging
 logger = logging.getLogger()
@@ -36,10 +44,42 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
     logger.info(f"Lambda handler invoked with event keys: {list(event.keys())}")
 
     try:
-        # Extract input from event
-        prompt = event.get('prompt', '')
-        input_data = event.get('input_data')
-        api_keys = event.get('api_keys', {})
+        # Handle API Gateway event format vs direct invocation
+        if 'body' in event and 'httpMethod' in event:
+            # API Gateway format - extract JSON from body
+            body_str = event.get('body', '')
+            logger.info(f"API Gateway body received: {body_str}")
+            logger.info(f"Body type: {type(body_str)}")
+            if body_str:
+                try:
+                    # Handle API Gateway's automatic escaping issues
+                    cleaned_body = body_str.replace('\\!', '!')
+                    body_data = json.loads(cleaned_body)
+                    logger.info(f"Parsed body data: {body_data}")
+                except json.JSONDecodeError as e:
+                    logger.error(f"Invalid JSON in body: {body_str}, error: {str(e)}")
+                    return {
+                        'statusCode': 400,
+                        'headers': {
+                            'Content-Type': 'application/json',
+                            'Access-Control-Allow-Origin': '*'
+                        },
+                        'body': json.dumps({
+                            'error': 'Invalid JSON in request body'
+                        })
+                    }
+            else:
+                body_data = {}
+
+            # Extract input from parsed body
+            prompt = body_data.get('prompt', '')
+            input_data = body_data.get('input_data')
+            api_keys = body_data.get('api_keys', {})
+        else:
+            # Direct Lambda invocation format
+            prompt = event.get('prompt', '')
+            input_data = event.get('input_data')
+            api_keys = event.get('api_keys', {})
 
         if not prompt:
             return {
