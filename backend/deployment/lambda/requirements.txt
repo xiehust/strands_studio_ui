@@ -1,12 +1,19 @@
-# Core dependencies
-strands-agents>=1.9.1
-strands-agents-tools>=0.2.0
+# Strands Agent SDK core dependencies
+strands-agents>=0.1.0
+strands-agents-tools>=0.1.0
 
-# AWS SDK for Python - latest version
-boto3>=1.40.36
+# AWS SDK for Python (if using AWS services)
+boto3>=1.26.0
 
-# Basic HTTP client
-requests>=2.31
+# Additional dependencies that might be needed
+requests>=2.28.0
+httpx>=0.24.0
 
-# Pydantic - let it resolve pydantic-core automatically
-pydantic>=2.8
+# OpenAI client (if using OpenAI models)
+openai>=1.0.0
+
+# MCP dependencies (if using MCP tools)
+mcp>=1.0.0
+
+# JSON handling
+pydantic>=2.0.0

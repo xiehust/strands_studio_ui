@@ -66,17 +66,7 @@ Resources:
       # Add minimal IAM permissions
       Policies:
         - AWSLambdaBasicExecutionRole
-        # Add Bedrock permissions for AI model access
-        - Version: "2012-10-17"
-          Statement:
-            - Effect: Allow
-              Action:
-                - bedrock:InvokeModel
-                - bedrock:InvokeModelWithResponseStream
-                - bedrock:ListFoundationModels
-                - bedrock:GetFoundationModel
-              Resource: "*"
-        # Add CloudWatch Logs permissions
+        # Add additional policies as needed for Strands tools
         - Version: "2012-10-17"
           Statement:
             - Effect: Allow

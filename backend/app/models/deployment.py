@@ -18,7 +18,6 @@ class BaseDeploymentRequest(BaseModel):
     project_id: Optional[str] = Field(None, description="Project identifier")
     version: Optional[str] = Field(None, description="Project version")
     api_keys: Optional[Dict[str, str]] = Field(None, description="API keys for the agent")
-    deployment_id: Optional[str] = Field(None, description="Optional deployment ID from frontend")
 
 # Lambda-specific models
 class LambdaDeploymentRequest(BaseDeploymentRequest):
