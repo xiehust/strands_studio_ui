@@ -18,7 +18,6 @@ class BaseDeploymentRequest(BaseModel):
     project_id: Optional[str] = Field(None, description="Project identifier")
     version: Optional[str] = Field(None, description="Project version")
     api_keys: Optional[Dict[str, str]] = Field(None, description="API keys for the agent")
-    deployment_id: Optional[str] = Field(None, description="Optional deployment ID from frontend")
 
 # Lambda-specific models
 class LambdaDeploymentRequest(BaseDeploymentRequest):
@@ -128,6 +127,7 @@ class AgentCoreInvokeRequest(BaseModel):
     payload: Dict[str, Any] = Field(..., description="Input payload for the agent")
     qualifier: str = Field("DEFAULT", description="Agent qualifier")
     region: str = Field("us-east-1", description="AWS region")
+    enable_stream: bool = Field(False, description="Enable streaming response")
 
 class AgentCoreInvokeResponse(BaseModel):
     """Response model for AgentCore agent invocation"""

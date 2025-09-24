@@ -4,6 +4,7 @@ Deployment API routes
 import logging
 from typing import Dict, List, Union
 from fastapi import APIRouter, HTTPException, Depends
+from fastapi.responses import StreamingResponse
 
 from app.models.deployment import (
     DeploymentRequest,
@@ -158,9 +159,15 @@ async def get_deployment_types():
     }
 
 # AgentCore invoke endpoint
-@router.post("/agentcore/invoke", response_model=AgentCoreInvokeResponse)
+@router.post("/agentcore/invoke")
 async def invoke_agentcore_agent(request: AgentCoreInvokeRequest):
-    """Invoke a deployed AgentCore agent"""
+    """
+    Invoke a deployed AgentCore agent
+
+    Automatically detects response type based on AgentCore's contentType:
+    - text/event-stream: Returns StreamingResponse (SSE format)
+    - application/json: Returns AgentCoreInvokeResponse (JSON format)
+    """
     logger.info(f"AgentCore invoke request: {request.agent_runtime_arn}")
     logger.info(f"Session ID: {request.runtime_session_id}")
 
@@ -172,8 +179,59 @@ async def invoke_agentcore_agent(request: AgentCoreInvokeRequest):
                 detail="Session ID must be at least 33 characters long"
             )
 
-        result = await agentcore_invoke_service.invoke_agent(request)
-        return result
+        # Get raw response from AgentCore
+        raw_response = await agentcore_invoke_service.invoke_agent_raw(request)
+
+        # Determine response type based on user preference and contentType
+        content_type = raw_response.get("contentType", "")
+        logger.info(f"AgentCore response contentType: {content_type}")
+        logger.info(f"User requested streaming: {request.enable_stream}")
+
+        if request.enable_stream and "text/event-stream" in content_type:
+            # User wants streaming and AgentCore supports it - return StreamingResponse
+            logger.info("Returning streaming response (user requested + AgentCore supports)")
+            return StreamingResponse(
+                agentcore_invoke_service.parse_streaming_response(raw_response),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Headers": "Cache-Control"
+                }
+            )
+        elif "application/json" in content_type:
+            # JSON response - return standard response
+            logger.info("Returning JSON response")
+            result = await agentcore_invoke_service.parse_json_response(raw_response)
+            return result
+        elif "text/event-stream" in content_type:
+            # AgentCore returned streaming but user didn't request it - convert to JSON-like response
+            logger.info("Converting streaming response to aggregated result (user didn't request streaming)")
+
+            # Collect all streaming chunks
+            chunks = []
+            async for chunk in agentcore_invoke_service.parse_streaming_response(raw_response):
+                if chunk.startswith("event: message\ndata: "):
+                    data_part = chunk[len("event: message\ndata: "):-2]  # Remove SSE formatting
+                    if data_part.strip():
+                        chunks.append(data_part)
+
+            # Return aggregated response
+            aggregated_content = "".join(chunks)
+            return AgentCoreInvokeResponse(
+                success=True,
+                response_data={"response": aggregated_content, "type": "aggregated_stream"},
+                execution_time=None
+            )
+        else:
+            # Unknown response type
+            logger.error(f"Unsupported response content type: {content_type}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Unsupported response content type: {content_type}"
+            )
+
     except Exception as e:
         logger.error(f"AgentCore invoke error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
