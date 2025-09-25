@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Play, RefreshCw, Trash2, X } from 'lucide-react';
+import { Play, RefreshCw, X, Trash2, AlertTriangle } from 'lucide-react';
 
 interface DeploymentHistory {
   agent_runtime_arn: string;
@@ -15,6 +15,77 @@ interface InvokePanelProps {
   className?: string;
 }
 
+interface DeleteConfirmationModalProps {
+  isOpen: boolean;
+  agentName: string;
+  agentArn: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+function DeleteConfirmationModal({ isOpen, agentName, agentArn, onConfirm, onCancel }: DeleteConfirmationModalProps) {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-5 w-5 text-red-500" />
+            <h3 className="text-lg font-semibold text-gray-900">Delete AgentCore Runtime</h3>
+          </div>
+          <button
+            onClick={onCancel}
+            className="p-1 text-gray-400 hover:text-gray-600 rounded"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="p-4">
+          <div className="mb-4">
+            <p className="text-gray-700 mb-3">
+              Are you sure you want to delete the AgentCore runtime <strong>"{agentName}"</strong>?
+            </p>
+            <div className="bg-red-50 border border-red-200 rounded-md p-3 mb-4">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 text-red-500 mt-0.5 flex-shrink-0" />
+                <div className="text-sm text-red-800">
+                  <p className="font-medium mb-1">This action cannot be undone!</p>
+                  <p>This will permanently delete the AWS resources and all associated data.</p>
+                </div>
+              </div>
+            </div>
+            <div className="bg-gray-50 rounded-md p-3">
+              <p className="text-xs text-gray-600 mb-1">ARN:</p>
+              <p className="text-xs font-mono text-gray-800 break-all">{agentArn}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex justify-end gap-3 p-4 border-t bg-gray-50 rounded-b-lg">
+          <button
+            onClick={onCancel}
+            className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors flex items-center gap-2"
+          >
+            <Trash2 className="h-4 w-4" />
+            Delete Runtime
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function InvokePanel({ className = '' }: InvokePanelProps) {
   const [deploymentHistory, setDeploymentHistory] = useState<DeploymentHistory[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<DeploymentHistory | null>(null);
@@ -22,9 +93,17 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
   const [sessionId, setSessionId] = useState('');
   const [invokeResult, setInvokeResult] = useState<any>(null);
   const [isInvoking, setIsInvoking] = useState(false);
-  const [enableStream, setEnableStream] = useState(false);
   const [streamContent, setStreamContent] = useState<string[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [deleteModal, setDeleteModal] = useState<{
+    isOpen: boolean;
+    agentName: string;
+    agentArn: string;
+  }>({
+    isOpen: false,
+    agentName: '',
+    agentArn: ''
+  });
 
   // Generate a 33-character random session ID
   const generateSessionId = () => {
@@ -49,16 +128,40 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
     }
   };
 
-  // Clear deployment history
-  const clearDeploymentHistory = () => {
-    localStorage.removeItem('agentcore_deployments');
-    setDeploymentHistory([]);
-    setSelectedAgent(null);
+  // Show delete confirmation modal
+  const showDeleteConfirmation = (agentArn: string, agentName: string) => {
+    setDeleteModal({
+      isOpen: true,
+      agentArn,
+      agentName
+    });
   };
 
-  // Delete single agent from deployment history
-  const deleteAgent = (agentArn: string) => {
+  // Handle delete confirmation
+  const handleDeleteConfirm = async () => {
+    const { agentArn } = deleteModal;
+
+    // Close modal first
+    setDeleteModal({ isOpen: false, agentArn: '', agentName: '' });
+
     try {
+      // First, call the backend API to delete the actual AWS resources
+      const response = await fetch(`/api/deploy/agentcore/${encodeURIComponent(agentArn)}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log('AgentCore deletion result:', result);
+
+      // Only remove from localStorage if backend deletion was successful
       const saved = localStorage.getItem('agentcore_deployments');
       if (saved) {
         const deployments = JSON.parse(saved);
@@ -73,9 +176,19 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
           setSelectedAgent(null);
         }
       }
+
+      // Show success message
+      // alert(`Successfully deleted AgentCore runtime "${agentName}"`);
     } catch (error) {
       console.error('Failed to delete agent:', error);
+      // Show error to user
+      alert(`Failed to delete agent: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
+  };
+
+  // Handle delete cancellation
+  const handleDeleteCancel = () => {
+    setDeleteModal({ isOpen: false, agentArn: '', agentName: '' });
   };
 
   // Handle streaming response
@@ -154,7 +267,7 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
           payload: parsedPayload,
           qualifier: 'DEFAULT',
           region: selectedAgent.region,
-          enable_stream: enableStream
+          enable_stream: true  // Always enable streaming, let backend auto-detect
         }),
       });
 
@@ -162,10 +275,10 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      // Check response type
+      // Check response type and handle accordingly
       const contentType = response.headers.get('content-type') || '';
 
-      if (enableStream && contentType.includes('text/event-stream')) {
+      if (contentType.includes('text/event-stream')) {
         // Handle streaming response
         await handleStreamingResponse(response);
       } else {
@@ -173,9 +286,6 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
         const result = await response.json();
         setInvokeResult(result);
       }
-
-      const result = await response.json();
-      setInvokeResult(result);
     } catch (error) {
       console.error('Agent invocation failed:', error);
       setInvokeResult({
@@ -209,13 +319,6 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
             title="Refresh deployment history"
           >
             <RefreshCw className="h-4 w-4" />
-          </button>
-          <button
-            onClick={clearDeploymentHistory}
-            className="p-1 text-gray-400 hover:text-red-600"
-            title="Clear deployment history"
-          >
-            <Trash2 className="h-4 w-4" />
           </button>
         </div>
       </div>
@@ -258,7 +361,7 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        deleteAgent(deployment.agent_runtime_arn);
+                        showDeleteConfirmation(deployment.agent_runtime_arn, deployment.agent_runtime_name);
                       }}
                       className="p-1 text-gray-400 hover:text-red-600 transition-colors"
                       title="Delete this agent"
@@ -318,21 +421,6 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
           </div>
         </div>
 
-        {/* Stream Options */}
-        <div>
-          <label className="flex items-center space-x-2">
-            <input
-              type="checkbox"
-              checked={enableStream}
-              onChange={(e) => setEnableStream(e.target.checked)}
-              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-            />
-            <span className="text-sm font-medium text-gray-700">Enable Streaming</span>
-          </label>
-          <p className="text-xs text-gray-500 mt-1">
-            Enable real-time streaming response from the agent
-          </p>
-        </div>
 
         {/* Invoke Button */}
         <div>
@@ -346,7 +434,7 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
         </div>
 
         {/* Streaming Response */}
-        {enableStream && (isStreaming || streamContent.length > 0) && (
+        {(isStreaming || streamContent.length > 0) && (
           <div>
             <h4 className="text-sm font-medium text-gray-900 mb-2">
               Streaming Response
@@ -371,7 +459,7 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
         )}
 
         {/* Invoke Result */}
-        {invokeResult && !enableStream && (
+        {invokeResult && !(isStreaming || streamContent.length > 0) && (
           <div>
             <h4 className="text-sm font-medium text-gray-900 mb-2">Invoke Result</h4>
             <div className="bg-black text-green-400 p-3 rounded text-xs font-mono overflow-auto max-h-64">
@@ -388,6 +476,15 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
           <span>{deploymentHistory.length} agent(s) available</span>
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      <DeleteConfirmationModal
+        isOpen={deleteModal.isOpen}
+        agentName={deleteModal.agentName}
+        agentArn={deleteModal.agentArn}
+        onConfirm={handleDeleteConfirm}
+        onCancel={handleDeleteCancel}
+      />
     </div>
   );
 }

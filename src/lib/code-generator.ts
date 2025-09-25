@@ -830,6 +830,7 @@ ${baseIndent}async for event in ${agentName}.stream_async(user_input):
 ${baseIndent}    if "data" in event:
 ${baseIndent}        print(event['data'],end='',flush=True)
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Execute Strands Agent')
     parser.add_argument('--user-input', type=str, help='User input prompt')

@@ -389,7 +389,7 @@ export function MainLayout() {
                 }`}
               >
                 <Terminal className="w-4 h-4 mr-2" />
-                Execute
+                Local Invoke
               </button>
 
               <button
@@ -404,7 +404,7 @@ export function MainLayout() {
                 }`}
               >
                 <Rocket className="w-4 h-4 mr-2" />
-                Deploy
+                Deploy to Cloud
               </button>
 
               <button
@@ -419,7 +419,7 @@ export function MainLayout() {
                 }`}
               >
                 <Play className="w-4 h-4 mr-2" />
-                Invoke
+                Cloud Invoke
               </button>
 
               <div className="w-px h-6 bg-gray-300 mx-2" />

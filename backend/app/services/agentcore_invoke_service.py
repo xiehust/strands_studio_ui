@@ -227,7 +227,6 @@ class AgentCoreInvokeService:
                     # Process lines that start with "data: " - based on test logic
                     if decoded_line.startswith("data: "):
                         data_content = decoded_line[6:]  # Remove "data: " prefix
-
                         if data_content.strip():  # Only process non-empty data
                             # Try to extract text from contentBlockDelta events
                             text_content = self._extract_text_from_data(data_content)

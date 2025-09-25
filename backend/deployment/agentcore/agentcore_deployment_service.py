@@ -159,6 +159,82 @@ class AgentCoreDeploymentService:
         except (subprocess.CalledProcessError, FileNotFoundError):
             raise RuntimeError("AWS CLI is not installed or not in PATH")
 
+        # Check and create IAM role if needed
+        self._ensure_iam_role_exists(config)
+
+    def _ensure_iam_role_exists(self, config: AgentCoreDeploymentConfig):
+        """Check if the default AgentCore IAM role exists, create if not"""
+        import boto3
+        from botocore.exceptions import ClientError
+
+        try:
+            # Initialize IAM client
+            iam_client = boto3.client('iam', region_name=config.region)
+
+            # Default role name used by AgentCore
+            role_name = "AmazonBedrockAgentCoreRuntimeDefaultServiceRole"
+
+            logger.info(f"Checking if IAM role exists: {role_name}")
+
+            # Try to get the role
+            try:
+                response = iam_client.get_role(RoleName=role_name)
+                logger.info(f"IAM role already exists: {response['Role']['Arn']}")
+                return
+            except ClientError as e:
+                if e.response['Error']['Code'] != 'NoSuchEntity':
+                    raise e
+
+            # Role doesn't exist, create it using the script
+            logger.info(f"IAM role {role_name} not found, creating it...")
+            self._create_iam_role_with_script()
+
+        except Exception as e:
+            logger.error(f"Error checking/creating IAM role: {str(e)}")
+            raise RuntimeError(f"Failed to ensure IAM role exists: {str(e)}")
+
+    def _create_iam_role_with_script(self):
+        """Run the create_agentcore_role.sh script to create the IAM role"""
+        import os
+        from pathlib import Path
+
+        try:
+            # Get the path to the script
+            backend_dir = Path(__file__).parent.parent.parent
+            script_path = backend_dir / "create_agentcore_role.sh"
+
+            if not script_path.exists():
+                raise FileNotFoundError(f"IAM role creation script not found: {script_path}")
+
+            logger.info(f"Running IAM role creation script: {script_path}")
+
+            # Make script executable
+            os.chmod(script_path, 0o755)
+
+            # Run the script with 'create' command
+            result = subprocess.run(
+                [str(script_path), "create"],
+                capture_output=True,
+                text=True,
+                cwd=str(backend_dir),
+                timeout=300  # 5 minute timeout
+            )
+
+            if result.returncode == 0:
+                logger.info("IAM role creation script completed successfully")
+                logger.info(f"Script output: {result.stdout}")
+            else:
+                logger.error(f"IAM role creation script failed with return code {result.returncode}")
+                logger.error(f"Script stderr: {result.stderr}")
+                raise RuntimeError(f"IAM role creation failed: {result.stderr}")
+
+        except subprocess.TimeoutExpired:
+            logger.error("IAM role creation script timed out")
+            raise RuntimeError("IAM role creation timed out after 5 minutes")
+        except Exception as e:
+            logger.error(f"Error running IAM role creation script: {str(e)}")
+            raise RuntimeError(f"Failed to create IAM role: {str(e)}")
+
         # Check bedrock-agentcore SDK
         logger.info("Checking bedrock-agentcore SDK...")
         try:
@@ -333,6 +409,15 @@ class AgentCoreDeploymentService:
         dockerfile_content = f'''FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 WORKDIR /app
 
+# Install system dependencies
+RUN apt-get update && apt-get install -y \\
+    gcc \\
+    g++ \\
+    curl \\
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \\
+    && apt-get install -y nodejs zip \\
+    && rm -rf /var/lib/apt/lists/*
+    
 # Configure UV for container environment
 ENV UV_SYSTEM_PYTHON=1 UV_COMPILE_BYTECODE=1
 
@@ -1017,26 +1102,40 @@ CMD ["opentelemetry-instrument", "python", "-m", "{agent_name}"]
 
     async def delete_deployment(
         self,
-        config: AgentCoreDeploymentConfig
+        agent_runtime_arn: str,
+        region: str
     ) -> AgentCoreDeploymentResult:
-        """Delete an AgentCore deployment"""
+        """Delete an AgentCore deployment by ARN"""
         try:
             import boto3
+
+            client = boto3.client('bedrock-agentcore-control', region_name=region)
+
+            # Extract the runtime ID from the ARN
+            # ARN format: arn:aws:bedrock-agentcore:region:account:runtime/agent-name-id
+            if not agent_runtime_arn.startswith('arn:aws:bedrock-agentcore:'):
+                raise ValueError("Invalid AgentCore ARN format")
+
+            # The AWS API expects just the runtime ID part (without the full ARN)
+            # Extract everything after 'runtime/' in the ARN
+            # ARN format: arn:aws:bedrock-agentcore:region:account:runtime/agent-name-id
+            arn_parts = agent_runtime_arn.split(':')
+            if len(arn_parts) >= 6 and arn_parts[5].startswith('runtime/'):
+                agent_runtime_id = arn_parts[5][8:]  # Remove 'runtime/' prefix
+            else:
+                raise ValueError(f"Invalid AgentCore ARN - missing runtime part. ARN: {agent_runtime_arn}")
+
+            logger.info(f"Deleting AgentRuntime with ID: {agent_runtime_id}")
+
+            # Delete the AgentRuntime using the correct parameter name
+            client.delete_agent_runtime(agentRuntimeId=agent_runtime_id)
             
-            client = boto3.client('bedrock-agentcore-control', region_name=config.region)
-            
-            # Get the AgentRuntime ARN
-            agent_runtime_arn = f"arn:aws:bedrock-agentcore:{config.region}:123456789012:agent-runtime/{config.agent_runtime_name}"
-            
-            # Delete the AgentRuntime
-            client.delete_agent_runtime(agentRuntimeArn=agent_runtime_arn)
-            
-            logger.info(f"Initiated AgentRuntime deletion: {config.agent_runtime_name}")
-            
+            logger.info(f"Successfully initiated AgentRuntime deletion: {agent_runtime_id}")
+
             return AgentCoreDeploymentResult(
                 success=True,
-                message=f"AgentRuntime deletion initiated: {config.agent_runtime_name}",
-                logs=[f"Deleting AgentRuntime: {config.agent_runtime_name}"]
+                message=f"AgentRuntime deletion initiated: {agent_runtime_id}",
+                logs=[f"Deleting AgentRuntime: {agent_runtime_id}"]
             )
             
         except Exception as e:

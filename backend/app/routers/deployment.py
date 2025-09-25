@@ -249,3 +249,49 @@ async def generate_agentcore_session_id():
     except Exception as e:
         logger.error(f"Session ID generation error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/agentcore/{agent_runtime_arn:path}")
+async def delete_agentcore_agent(agent_runtime_arn: str):
+    """Delete AgentCore deployment and AWS resources"""
+    logger.info(f"Deleting AgentCore agent: {agent_runtime_arn}")
+
+    try:
+        # Import AgentCore deployment service
+        import sys
+        from pathlib import Path
+
+        # Add deployment module to path
+        deployment_path = Path(__file__).parent.parent.parent / "deployment" / "agentcore"
+        if str(deployment_path) not in sys.path:
+            sys.path.insert(0, str(deployment_path))
+
+        from agentcore_deployment_service import AgentCoreDeploymentService
+        from agentcore_config import AgentCoreDeploymentConfig, DeploymentMethod, NetworkMode
+
+        # Parse region from ARN for client initialization
+        # ARN format: arn:aws:bedrock-agentcore:region:account:runtime/agent-name
+        arn_parts = agent_runtime_arn.split(":")
+        if len(arn_parts) < 6:
+            raise HTTPException(status_code=400, detail="Invalid AgentCore ARN format")
+
+        region = arn_parts[3]
+
+        # Initialize AgentCore service
+        agentcore_service = AgentCoreDeploymentService()
+
+        # Delete the deployment by passing the full ARN
+        result = await agentcore_service.delete_deployment(agent_runtime_arn, region)
+
+        if result.success:
+            return {
+                "success": True,
+                "message": result.message,
+                "agent_runtime_arn": agent_runtime_arn,
+                "logs": result.logs
+            }
+        else:
+            raise HTTPException(status_code=500, detail=result.message)
+
+    except Exception as e:
+        logger.error(f"AgentCore deletion error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))

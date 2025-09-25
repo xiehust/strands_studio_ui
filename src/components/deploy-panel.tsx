@@ -72,23 +72,35 @@ export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) 
   // Save deployment output to localStorage
   const saveDeploymentOutput = (deploymentOutput: any) => {
     try {
+      console.log('saveDeploymentOutput called with:', deploymentOutput);
+
+      if (!deploymentOutput) {
+        console.warn('No deployment output provided to save');
+        return;
+      }
+
       const existingDeployments = JSON.parse(localStorage.getItem('agentcore_deployments') || '[]');
+      console.log('Existing deployments:', existingDeployments);
+
       const newDeployment = {
         ...deploymentOutput,
         saved_at: new Date().toISOString()
       };
+      console.log('New deployment to save:', newDeployment);
 
       // Remove existing deployment with same ARN to avoid duplicates
       const filteredDeployments = existingDeployments.filter(
         (dep: any) => dep.agent_runtime_arn !== deploymentOutput.agent_runtime_arn
       );
+      console.log('Filtered deployments:', filteredDeployments);
 
       filteredDeployments.push(newDeployment);
       localStorage.setItem('agentcore_deployments', JSON.stringify(filteredDeployments));
 
-      console.log('Saved deployment output to localStorage:', newDeployment);
+      console.log('Successfully saved deployment output to localStorage:', newDeployment);
     } catch (error) {
       console.error('Failed to save deployment output:', error);
+      throw error; // Re-throw so we can catch it in the caller
     }
   };
 
@@ -331,8 +343,8 @@ export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) 
       deploymentState.config.agentName.trim() !== '' &&
       !formErrors.agentName &&
       (!isAgentCore || (deploymentState.config.executeRole?.trim() !== '' && !formErrors.executeRole)) &&
-      !deploymentState.isDeploying &&
-      isConverted  // Only allow deployment when code has been converted
+      !deploymentState.isDeploying
+      // Code conversion now happens automatically during deployment
     );
   };
 
@@ -398,9 +410,9 @@ async def entry(payload):
 
       // For streaming code, also modify the stream_async yield pattern
       if (isStreamingCode) {
-        const streamPattern = /(\s+async for event in agent\.stream_async\([^)]+\):\s*\n\s+if "data" in event:\s*\n\s+print\(event\['data'\][^)]*\))/g;
-        convertedCode = convertedCode.replace(streamPattern, (match) => {
-          return match + '\n            yield event';
+        const streamPattern = /(\s+async for event in \w+\.stream_async\([^)]+\):\s*\n)(\s+)(if "data" in event:\s*\n\s+print\(event\['data'\][^)]*\))/g;
+        convertedCode = convertedCode.replace(streamPattern, (_, asyncForPart, ifIndent, restPart) => {
+          return asyncForPart + ifIndent + 'yield event\n' + ifIndent + restPart;
         });
       }
     }
@@ -419,21 +431,28 @@ async def entry(payload):
 
 
   const handleDeploy = async () => {
-    // Update API keys in deployment state
-    const apiKeysObject = apiKeys.reduce((acc, item) => {
-      if (item.key && item.value) {
-        acc[item.key] = item.value;
-      }
-      return acc;
-    }, {} as Record<string, string>);
-
-    setDeploymentState(prev => ({ ...prev, apiKeys: apiKeysObject, isDeploying: true, error: undefined }));
-
-    // Prepare deployment request - use edited code if available
-    const codeToUse = isEditing ? editableCode : generatedCode;
-    let logsText = 'No deployment logs available';
+    console.log('Starting deployment process...');
 
     try {
+      // Automatically convert code if not already converted
+      console.log('Converting code for AgentCore deployment...');
+      convertCode();
+
+      // Update API keys in deployment state
+      const apiKeysObject = apiKeys.reduce((acc, item) => {
+        if (item.key && item.value) {
+          acc[item.key] = item.value;
+        }
+        return acc;
+      }, {} as Record<string, string>);
+
+      console.log('Setting deployment state to deploying...');
+      setDeploymentState(prev => ({ ...prev, apiKeys: apiKeysObject, isDeploying: true, error: undefined }));
+
+      // Prepare deployment request - use edited code if available
+      const codeToUse = isEditing ? editableCode : generatedCode;
+      let logsText = 'No deployment logs available';
+      console.log('Using code length:', codeToUse.length, 'characters');
       const deploymentRequest: any = {
         code: codeToUse,
         agent_name: deploymentState.config.agentName,
@@ -470,6 +489,7 @@ async def entry(payload):
       }
 
       const result = await response.json();
+      console.log('Deployment result received:', result);
 
       setDeploymentState(prev => ({
         ...prev,
@@ -478,12 +498,22 @@ async def entry(payload):
       }));
 
       // Save deployment outputs to localStorage if deployment was successful
-      if (result.success && result.status?.deployment_outputs) {
-        saveDeploymentOutput(result.status.deployment_outputs);
+      try {
+        if (result.success && result.status?.deployment_outputs) {
+          console.log('Saving deployment outputs:', result.status.deployment_outputs);
+          saveDeploymentOutput(result.status.deployment_outputs);
+        } else {
+          console.log('No deployment outputs to save or deployment not successful');
+        }
+      } catch (saveError) {
+        console.error('Error saving deployment outputs:', saveError);
+        // Don't let this break the deployment flow
       }
 
       // Save to persistent deployment history (both success and failure)
       try {
+        console.log('Starting deployment history save...');
+
         // Handle logs - they might be an array or string
         if (result.status?.logs) {
           if (Array.isArray(result.status.logs)) {
@@ -516,37 +546,53 @@ async def entry(payload):
           created_at: new Date().toISOString()
         };
 
+        console.log('Saving deployment history item:', deploymentHistoryItem);
         await apiClient.saveDeploymentHistory(deploymentHistoryItem);
         console.log('Deployment saved to persistent storage:', deploymentHistoryItem.deployment_id);
 
         // Also save to localStorage history for backward compatibility
-        if (result.success) {
-          saveToHistory({
-            deploymentTarget: deploymentState.deploymentTarget,
-            config: deploymentState.config,
-            apiKeys: apiKeysObject,
-            generatedCode: codeToUse,
-            result: result,
-            logs: logsText,
-            status: 'success'
-          });
+        try {
+          if (result.success) {
+            console.log('Saving to localStorage history...');
+            saveToHistory({
+              deploymentTarget: deploymentState.deploymentTarget,
+              config: deploymentState.config,
+              apiKeys: apiKeysObject,
+              generatedCode: codeToUse,
+              result: result,
+              logs: logsText,
+              status: 'success'
+            });
+            console.log('Successfully saved to localStorage history');
+          }
+        } catch (localStorageError) {
+          console.error('Error saving to localStorage history:', localStorageError);
+          // Don't let this break the deployment flow
         }
       } catch (storageError) {
         console.error('Failed to save deployment to persistent storage:', storageError);
         // Fall back to localStorage only
-        if (result.success) {
-          saveToHistory({
-            deploymentTarget: deploymentState.deploymentTarget,
-            config: deploymentState.config,
-            apiKeys: apiKeysObject,
-            generatedCode: codeToUse,
-            result: result,
-            logs: logsText,
-            status: 'success'
-          });
+        try {
+          if (result.success) {
+            console.log('Falling back to localStorage only...');
+            saveToHistory({
+              deploymentTarget: deploymentState.deploymentTarget,
+              config: deploymentState.config,
+              apiKeys: apiKeysObject,
+              generatedCode: codeToUse,
+              result: result,
+              logs: logsText,
+              status: 'success'
+            });
+          }
+        } catch (fallbackError) {
+          console.error('Even localStorage fallback failed:', fallbackError);
+          // Continue anyway - don't break the deployment flow
         }
       }
     } catch (error) {
+      console.error('Deployment error caught:', error);
+
       setDeploymentState(prev => ({
         ...prev,
         isDeploying: false,
@@ -555,6 +601,15 @@ async def entry(payload):
 
       // Also save failed deployments to persistent storage
       try {
+        const apiKeysObject = apiKeys.reduce((acc, item) => {
+          if (item.key && item.value) {
+            acc[item.key] = item.value;
+          }
+          return acc;
+        }, {} as Record<string, string>);
+
+        const codeToUse = isEditing ? editableCode : generatedCode;
+
         const deploymentHistoryItem: DeploymentHistoryItem = {
           deployment_id: `deployment-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
           project_id: deploymentState.config.projectId || 'default-project',
@@ -572,6 +627,7 @@ async def entry(payload):
           created_at: new Date().toISOString()
         };
 
+        console.log('Saving failed deployment to history:', deploymentHistoryItem);
         await apiClient.saveDeploymentHistory(deploymentHistoryItem);
         console.log('Failed deployment saved to persistent storage:', deploymentHistoryItem.deployment_id);
       } catch (storageError) {
@@ -608,7 +664,7 @@ async def entry(payload):
                 : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
             }`}
           >
-            Code
+            Deploy Code
           </button>
         </div>
       </div>
@@ -798,15 +854,6 @@ async def entry(payload):
 
               {/* Deploy Actions */}
               <div className="space-y-3 pt-4 border-t border-gray-200">
-                {/* Convert Code Button */}
-                <button
-                  onClick={convertCode}
-                  disabled={isConverted}
-                  className="w-full px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-sm font-medium"
-                >
-                  {isConverted ? 'Convert Completed' : 'Convert Code'}
-                </button>
-
                 {/* Deploy Button */}
                 <button
                   onClick={handleDeploy}
@@ -857,13 +904,13 @@ async def entry(payload):
                                 expandedHistoryId === entry.deployment_id ? 'bg-blue-50' : ''
                               }`}
                               onClick={() => toggleHistoryExpansion(entry.deployment_id)}
-                              title={`Deployment ID: ${entry.deployment_id}`}
+                              title={`Deployment ID: ${entry.deployment_id || 'Unknown'}`}
                             >
                               <div className="flex items-center justify-between text-xs">
                                 <div className="flex items-center space-x-2">
                                   <Rocket className="w-3 h-3 text-gray-500" />
                                   <span className="text-gray-700">
-                                    {entry.deployment_id.substring(0, 12)}...
+                                    {entry.deployment_id ? entry.deployment_id.substring(0, 12) + '...' : 'Unknown ID'}
                                   </span>
                                   <span className={`text-xs px-1 rounded ${
                                     entry.success ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
@@ -871,12 +918,12 @@ async def entry(payload):
                                     {entry.success ? '✓' : '✗'}
                                   </span>
                                   <span className="text-xs bg-gray-100 px-1 rounded text-gray-600">
-                                    {entry.deployment_target.toUpperCase()}
+                                    {entry.deployment_target ? entry.deployment_target.toUpperCase() : 'UNKNOWN'}
                                   </span>
                                 </div>
                                 <div className="flex items-center space-x-2">
                                   <span className="text-gray-500">
-                                    {new Date(entry.created_at).toLocaleTimeString()}
+                                    {entry.created_at ? new Date(entry.created_at).toLocaleTimeString() : 'Unknown time'}
                                   </span>
                                   <button
                                     onClick={(e) => {
@@ -891,7 +938,7 @@ async def entry(payload):
                                 </div>
                               </div>
                               <div className="mt-1 text-xs text-gray-600">
-                                Agent: {entry.agent_name} • Region: {entry.region}
+                                Agent: {entry.agent_name || 'Unknown'} • Region: {entry.region || 'Unknown'}
                                 {!entry.success && entry.error_message && (
                                   <span className="text-red-600 ml-2">• Error: {entry.error_message.substring(0, 50)}...</span>
                                 )}
@@ -941,9 +988,11 @@ async def entry(payload):
                 </div>
 
               {/* Deployment Result */}
-              {deploymentState.deploymentResult && (
-                <div className="space-y-3">
-                  {deploymentState.deploymentResult.success ? (
+              {deploymentState.deploymentResult && (() => {
+                try {
+                  return (
+                    <div className="space-y-3">
+                      {deploymentState.deploymentResult.success ? (
                     <>
                       <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
                         <div className="text-sm text-green-800">
@@ -1045,7 +1094,16 @@ async def entry(payload):
                     </div>
                   )}
                 </div>
-              )}
+                    );
+                } catch (renderError) {
+                  console.error('Error rendering deployment result:', renderError);
+                  return (
+                    <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                      <p className="text-sm text-red-800">Error displaying deployment result. Check console for details.</p>
+                    </div>
+                  );
+                }
+              })()}
 
               {/* Error */}
               {deploymentState.error && (
@@ -1061,7 +1119,7 @@ async def entry(payload):
             {/* Code Preview Header */}
             <div className="flex items-center justify-between p-4 border-b border-gray-200">
               <div className="flex items-center gap-2">
-                <span className="font-medium text-gray-900">Generated Code</span>
+                <span className="font-medium text-gray-900">Deploy Code</span>
                 {isEditing && (
                   <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded">
                     Editing

@@ -10,6 +10,7 @@ botocore>=1.29.0
 # Strands Agent Framework
 strands-agents
 strands-agents-tools
+strands-agents[openai]
 
 # Container and deployment tools
 docker>=6.0.0

@@ -1,7 +1,7 @@
 # AWS Bedrock AgentCore Dockerfile Template
 # This template is used for Method B (Manual Deployment) to build container images
 
-FROM python:3.11-slim
+FROM --platform=linux/arm64 ghcr.io/astral-sh/uv:python3.13-bookworm-slim
 
 # Set working directory
 WORKDIR /app
@@ -11,6 +11,8 @@ RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
     curl \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y nodejs zip \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies
