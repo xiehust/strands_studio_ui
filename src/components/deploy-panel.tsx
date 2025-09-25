@@ -353,7 +353,7 @@ export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) 
 
     // Check if already converted
     if (codeToConvert.includes('@app.entrypoint')) {
-      return;
+      return codeToConvert;
     }
 
     // Check if it's streaming code
@@ -426,6 +426,8 @@ async def entry(payload):
     }
 
     setIsConverted(true);
+
+    return convertedCode;
   };
 
 
@@ -434,9 +436,9 @@ async def entry(payload):
     console.log('Starting deployment process...');
 
     try {
-      // Automatically convert code if not already converted
+      // Automatically convert code if not already converted and get the converted code
       console.log('Converting code for AgentCore deployment...');
-      convertCode();
+      const codeToUse = convertCode();
 
       // Update API keys in deployment state
       const apiKeysObject = apiKeys.reduce((acc, item) => {
@@ -448,9 +450,6 @@ async def entry(payload):
 
       console.log('Setting deployment state to deploying...');
       setDeploymentState(prev => ({ ...prev, apiKeys: apiKeysObject, isDeploying: true, error: undefined }));
-
-      // Prepare deployment request - use edited code if available
-      const codeToUse = isEditing ? editableCode : generatedCode;
       let logsText = 'No deployment logs available';
       console.log('Using code length:', codeToUse.length, 'characters');
       const deploymentRequest: any = {
@@ -608,7 +607,7 @@ async def entry(payload):
           return acc;
         }, {} as Record<string, string>);
 
-        const codeToUse = isEditing ? editableCode : generatedCode;
+        const codeToUse = convertCode();
 
         const deploymentHistoryItem: DeploymentHistoryItem = {
           deployment_id: `deployment-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
