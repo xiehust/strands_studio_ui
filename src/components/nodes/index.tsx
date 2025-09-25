@@ -1,5 +1,6 @@
 export { AgentNode } from './agent-node';
 export { OrchestratorAgentNode } from './orchestrator-agent-node';
+export { SwarmNode } from './swarm-node';
 export { ToolNode } from './tool-node';
 export { InputNode } from './input-node';
 export { OutputNode } from './output-node';

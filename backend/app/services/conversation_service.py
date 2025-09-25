@@ -125,6 +125,7 @@ class ConversationService:
         try:
             # Get session and API key
             session = self.sessions[session_id]
+            # logger.info(user_input)
 
             # Construct full conversation history
             messages_list = self._construct_messages_list(session_id, user_input)
@@ -170,7 +171,7 @@ class ConversationService:
 
         # Get existing messages for this session
         existing_messages = self.messages.get(session_id, [])
-
+        # logger.info(f"self.messages:{self.messages}")
         # Convert existing messages to the required schema
         for message in existing_messages:
             role = "user" if message.sender == "user" else "assistant"
@@ -180,10 +181,10 @@ class ConversationService:
             })
 
         # Add the new user input to the messages list
-        messages_list.append({
-            "role": "user",
-            "content": [{"text": new_user_input}]
-        })
+        # messages_list.append({
+        #     "role": "user",
+        #     "content": [{"text": new_user_input}]
+        # })
 
         return messages_list
 
@@ -264,7 +265,7 @@ class ConversationService:
             # Construct full conversation history
             messages_list = self._construct_messages_list(session_id, user_input)
             messages_json = json.dumps(messages_list)
-
+            logger.info(messages_list)
             # Prepare environment with API key
             env = {**os.environ, 'PYTHONUNBUFFERED': '1'}
             if session.openai_api_key:

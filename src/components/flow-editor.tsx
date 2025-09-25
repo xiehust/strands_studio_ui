@@ -22,6 +22,7 @@ import '@xyflow/react/dist/style.css';
 import {
   AgentNode,
   OrchestratorAgentNode,
+  SwarmNode,
   ToolNode,
   InputNode,
   OutputNode,
@@ -36,6 +37,7 @@ const initialEdges: Edge[] = [];
 const nodeTypes = {
   agent: AgentNode,
   'orchestrator-agent': OrchestratorAgentNode,
+  swarm: SwarmNode,
   tool: ToolNode,
   'mcp-tool': MCPToolNode,
   input: InputNode,

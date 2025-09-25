@@ -34,7 +34,6 @@ s
 ### 4. Hierarchy multi agents execution
 ![alt text](assets/image.png)
 
-
 ## Quick Start
 
 ### Envrionment Setup

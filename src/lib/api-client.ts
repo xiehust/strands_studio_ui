@@ -62,6 +62,23 @@ export interface ExecutionHistoryItem {
   created_at: string;
 }
 
+export interface DeploymentHistoryItem {
+  deployment_id: string;
+  project_id?: string;
+  version?: string;
+  deployment_target: string; // 'agentcore' or 'lambda'
+  agent_name: string;
+  region: string;
+  execute_role?: string;
+  api_keys?: Record<string, string>;
+  code: string;
+  deployment_result: Record<string, any>;
+  deployment_logs?: string;
+  success: boolean;
+  error_message?: string;
+  created_at: string;
+}
+
 export interface ExecutionHistoryResponse {
   executions: ExecutionHistoryItem[];
 }
@@ -514,6 +531,38 @@ class ApiClient {
 
   async deleteExecutionHistoryItem(executionId: string): Promise<{ message: string }> {
     return this.request(`/api/execution-history/${executionId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // Deployment History Methods
+  async saveDeploymentHistory(item: DeploymentHistoryItem): Promise<{ message: string; deployment_id: string }> {
+    return this.request('/api/deployment-history', {
+      method: 'POST',
+      body: JSON.stringify(item),
+    });
+  }
+
+  async getDeploymentHistory(
+    projectId?: string,
+    version?: string,
+    limit?: number
+  ): Promise<{ deployments: DeploymentHistoryItem[] }> {
+    const params = new URLSearchParams();
+    if (projectId) params.append('project_id', projectId);
+    if (version) params.append('version', version);
+    if (limit) params.append('limit', limit.toString());
+
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return this.request(`/api/deployment-history${query}`);
+  }
+
+  async getDeploymentHistoryItem(deploymentId: string): Promise<DeploymentHistoryItem> {
+    return this.request(`/api/deployment-history/${deploymentId}`);
+  }
+
+  async deleteDeploymentHistoryItem(deploymentId: string): Promise<{ message: string }> {
+    return this.request(`/api/deployment-history/${deploymentId}`, {
       method: 'DELETE',
     });
   }
