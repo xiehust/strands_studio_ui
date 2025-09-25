@@ -22,6 +22,9 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
   const [sessionId, setSessionId] = useState('');
   const [invokeResult, setInvokeResult] = useState<any>(null);
   const [isInvoking, setIsInvoking] = useState(false);
+  const [enableStream, setEnableStream] = useState(false);
+  const [streamContent, setStreamContent] = useState<string[]>([]);
+  const [isStreaming, setIsStreaming] = useState(false);
 
   // Generate a 33-character random session ID
   const generateSessionId = () => {
@@ -75,6 +78,52 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
     }
   };
 
+  // Handle streaming response
+  const handleStreamingResponse = async (response: Response) => {
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error('No response body reader available');
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    setIsStreaming(true);
+    setStreamContent([]);
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) {
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+
+        // Process SSE data
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || ''; // Keep incomplete line
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6); // Remove "data: " prefix
+            if (data.trim()) {
+              setStreamContent(prev => [...prev, data]);
+            }
+          } else if (line.startsWith('event: error')) {
+            throw new Error('Streaming error occurred');
+          } else if (line.startsWith('event: end')) {
+            return; // End of stream
+          }
+        }
+      }
+    } finally {
+      setIsStreaming(false);
+      reader.releaseLock();
+    }
+  };
+
   // Invoke agent
   const handleInvokeAgent = async () => {
     if (!selectedAgent || !payload || !sessionId) {
@@ -83,6 +132,7 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
 
     setIsInvoking(true);
     setInvokeResult(null);
+    setStreamContent([]);
 
     try {
       // Parse payload as JSON
@@ -103,12 +153,25 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
           runtime_session_id: sessionId,
           payload: parsedPayload,
           qualifier: 'DEFAULT',
-          region: selectedAgent.region
+          region: selectedAgent.region,
+          enable_stream: enableStream
         }),
       });
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      // Check response type
+      const contentType = response.headers.get('content-type') || '';
+
+      if (enableStream && contentType.includes('text/event-stream')) {
+        // Handle streaming response
+        await handleStreamingResponse(response);
+      } else {
+        // Handle JSON response
+        const result = await response.json();
+        setInvokeResult(result);
       }
 
       const result = await response.json();
@@ -255,6 +318,22 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
           </div>
         </div>
 
+        {/* Stream Options */}
+        <div>
+          <label className="flex items-center space-x-2">
+            <input
+              type="checkbox"
+              checked={enableStream}
+              onChange={(e) => setEnableStream(e.target.checked)}
+              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            <span className="text-sm font-medium text-gray-700">Enable Streaming</span>
+          </label>
+          <p className="text-xs text-gray-500 mt-1">
+            Enable real-time streaming response from the agent
+          </p>
+        </div>
+
         {/* Invoke Button */}
         <div>
           <button
@@ -266,8 +345,33 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
           </button>
         </div>
 
+        {/* Streaming Response */}
+        {enableStream && (isStreaming || streamContent.length > 0) && (
+          <div>
+            <h4 className="text-sm font-medium text-gray-900 mb-2">
+              Streaming Response
+              {isStreaming && (
+                <span className="ml-2 inline-flex items-center px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800">
+                  <div className="w-2 h-2 bg-blue-600 rounded-full animate-pulse mr-1"></div>
+                  Streaming...
+                </span>
+              )}
+            </h4>
+            <div className="bg-black text-green-400 p-3 rounded text-xs font-mono overflow-auto max-h-64">
+              <div className="whitespace-pre-wrap">
+                {streamContent.map((chunk, index) => (
+                  <span key={index}>{chunk}</span>
+                ))}
+                {isStreaming && (
+                  <span className="animate-pulse">▋</span>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Invoke Result */}
-        {invokeResult && (
+        {invokeResult && !enableStream && (
           <div>
             <h4 className="text-sm font-medium text-gray-900 mb-2">Invoke Result</h4>
             <div className="bg-black text-green-400 p-3 rounded text-xs font-mono overflow-auto max-h-64">

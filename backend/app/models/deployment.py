@@ -127,6 +127,7 @@ class AgentCoreInvokeRequest(BaseModel):
     payload: Dict[str, Any] = Field(..., description="Input payload for the agent")
     qualifier: str = Field("DEFAULT", description="Agent qualifier")
     region: str = Field("us-east-1", description="AWS region")
+    enable_stream: bool = Field(False, description="Enable streaming response")
 
 class AgentCoreInvokeResponse(BaseModel):
     """Response model for AgentCore agent invocation"""
