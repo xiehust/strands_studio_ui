@@ -22,6 +22,13 @@ Parameters:
     MaxValue: 900
     Description: Timeout for the Lambda function (seconds)
 
+  Runtime:
+    Type: String
+    Default: python3.12
+    AllowedValues:
+      - python3.12
+    Description: Python runtime version (only 3.12 is supported)
+
   Architecture:
     Type: String
     Default: x86_64
@@ -55,7 +62,7 @@ Resources:
       FunctionName: !Sub "${FunctionName}-sync"
       CodeUri: python_function/
       Handler: agent_handler_python.handler
-      Runtime: python3.12
+      Runtime: !Ref Runtime
       Description: "Strands Agent - Python non-streaming (BUFFERED mode only)"
       Environment:
         Variables:

@@ -213,7 +213,7 @@ class LambdaDeploymentService:
 
                 # Build with SAM
                 await notify_progress("Building with SAM", "running")
-                build_result = await self._sam_build(temp_path, deployment_logs, deployment_id, streaming_capable)
+                build_result = await self._sam_build(temp_path, deployment_logs, deployment_id, streaming_capable, config)
                 if not build_result:
                     await notify_progress("Building with SAM", "error", "SAM build failed")
                     return DeploymentResult(
@@ -467,8 +467,11 @@ class LambdaDeploymentService:
 
             # Use main requirements.txt for dependencies (not the minimal stream one)
             shutil.copy2(self.requirements_path, python_stream_dir / "requirements.txt")
-            shutil.copy2(stream_source_dir / "Dockerfile", python_stream_dir / "Dockerfile")
-            logs.append("Copied Python stream function files (using main requirements.txt)")
+
+            # Generate dynamic Dockerfile with user-specified runtime
+            dynamic_dockerfile = self._generate_dynamic_dockerfile(config.runtime)
+            (python_stream_dir / "Dockerfile").write_text(dynamic_dockerfile, encoding='utf-8')
+            logs.append(f"Generated dynamic Dockerfile with runtime: {config.runtime}")
 
             # Create generated_agent.py file for streaming function
             (python_stream_dir / "generated_agent.py").write_text(generated_code, encoding='utf-8')
@@ -527,7 +530,10 @@ class LambdaDeploymentService:
                 stream_source_dir = self.base_deployment_dir / "python_stream_function"
                 shutil.copy2(stream_source_dir / "app.py", stream_dir / "app.py")
                 shutil.copy2(stream_source_dir / "requirements.txt", stream_dir / "requirements.txt")
-                shutil.copy2(stream_source_dir / "Dockerfile", stream_dir / "Dockerfile")
+
+                # Generate and save dynamic Dockerfile with user-specified runtime
+                dynamic_dockerfile = self._generate_dynamic_dockerfile(config.runtime)
+                (stream_dir / "Dockerfile").write_text(dynamic_dockerfile, encoding='utf-8')
 
             # Save SAM configuration
             samconfig_content = self._generate_samconfig(config, streaming_capable)
@@ -609,7 +615,7 @@ image_repositories = []
 """
         return samconfig
 
-    async def _sam_build(self, temp_path: Path, logs: List[str], deployment_id: str = None, streaming_capable: bool = False) -> bool:
+    async def _sam_build(self, temp_path: Path, logs: List[str], deployment_id: str = None, streaming_capable: bool = False, config: LambdaDeploymentConfig = None) -> bool:
         """Run SAM build with selective resource building based on streaming capability"""
 
         # Helper function to send progress notifications
@@ -640,9 +646,11 @@ image_repositories = []
 
             # Set Docker platform for architecture consistency
             env = os.environ.copy()
-            # Default to x86_64 for now - could be made configurable via UI later
-            env['DOCKER_DEFAULT_PLATFORM'] = 'linux/amd64'
-            logs.append("Set DOCKER_DEFAULT_PLATFORM=linux/amd64 for architecture consistency")
+            # Use the architecture from config, default to x86_64 if not provided
+            architecture = config.architecture if config else 'x86_64'
+            docker_platform = 'linux/arm64' if architecture == 'arm64' else 'linux/amd64'
+            env['DOCKER_DEFAULT_PLATFORM'] = docker_platform
+            logs.append(f"Set DOCKER_DEFAULT_PLATFORM={docker_platform} for {architecture} architecture")
 
             # Build all resources in the template (template is already selected based on streaming_capable)
             build_cmd = ["sam", "build", "--use-container"]
@@ -672,7 +680,10 @@ image_repositories = []
 
                 # Ensure consistent environment for fallback build too
                 env = os.environ.copy()
-                env['DOCKER_DEFAULT_PLATFORM'] = 'linux/amd64'
+                # Use the same architecture setting as container build
+                architecture = config.architecture if config else 'x86_64'
+                docker_platform = 'linux/arm64' if architecture == 'arm64' else 'linux/amd64'
+                env['DOCKER_DEFAULT_PLATFORM'] = docker_platform
 
                 # Build all resources in the template (same as container build)
                 build_cmd = ["sam", "build"]
@@ -1348,6 +1359,50 @@ def execute_fallback_streaming(user_input: str, context) -> Dict[str, Any]:
 '''
 
         return handler_code
+
+    def _generate_dynamic_dockerfile(self, runtime: str) -> str:
+        """
+        Generate Dockerfile content with dynamic Python runtime version
+
+        Args:
+            runtime: Python runtime version (e.g., 'python3.12', 'python3.11')
+
+        Returns:
+            Dockerfile content as string
+        """
+        # Extract version number from runtime (e.g., 'python3.12' -> '3.12')
+        version = runtime.replace('python', '') if runtime.startswith('python') else '3.12'
+
+        dockerfile_content = f"""# Use multi-arch ECR image for Lambda Web Adapter (no manual arch handling needed)
+FROM public.ecr.aws/awsguru/aws-lambda-adapter:0.8.4 as adapter
+
+# Python runtime version dynamically set from user configuration: {runtime}
+FROM python:{version}-slim
+
+# Copy Lambda Web Adapter from ECR multi-arch image
+COPY --from=adapter /lambda-adapter /opt/extensions/lambda-adapter
+RUN chmod +x /opt/extensions/lambda-adapter
+
+# Set working directory
+WORKDIR /var/task
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY app.py .
+COPY generated_agent.py .
+
+# Set environment variables for Lambda Web Adapter
+ENV AWS_LWA_PORT=8080
+ENV AWS_LWA_INVOKE_MODE=response_stream
+
+# LWA runs as extension, not ENTRYPOINT - Lambda will auto-inject it
+# Start FastAPI with uvicorn
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]
+"""
+        return dockerfile_content
 
     async def get_function_logs(
         self,

@@ -558,10 +558,8 @@ export function LambdaDeployPanel({ nodes, edges, className = '' }: LambdaDeploy
                         className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
                       >
                         <option value="python3.12">python3.12</option>
-                        <option value="python3.11">python3.11</option>
-                        <option value="python3.10">python3.10</option>
-                        <option value="python3.9">python3.9</option>
                       </select>
+                      <p className="text-xs text-gray-500 mt-1">Only Python 3.12 is currently available (more versions coming soon)</p>
                     </div>
 
                     <div>
