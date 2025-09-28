@@ -46,8 +46,6 @@ Globals:
   Function:
     Timeout: !Ref Timeout
     MemorySize: !Ref MemorySize
-    Architectures:
-      - !Ref Architecture
     Environment:
       Variables:
         BYPASS_TOOL_CONSENT: "true"
@@ -63,6 +61,8 @@ Resources:
       CodeUri: python_function/
       Handler: agent_handler_python.handler
       Runtime: !Ref Runtime
+      Architectures:
+        - !Ref Architecture
       Description: "Strands Agent - Python non-streaming (BUFFERED mode only)"
       Environment:
         Variables:
