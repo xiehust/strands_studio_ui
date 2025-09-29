@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import Editor from '@monaco-editor/react';
 import { type Node, type Edge } from '@xyflow/react';
 import { Rocket, Download, Copy, CheckCircle, AlertCircle, Edit3, Save, RotateCcw, History, ChevronDown, ChevronUp, Trash2, Plus, X, Eye, EyeOff } from 'lucide-react';
@@ -108,11 +108,40 @@ export function AgentCoreDeployPanel({ nodes, edges, className = '' }: AgentCore
   const [deploymentHistory, setDeploymentHistory] = useState<DeploymentHistoryItem[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
+  const [deploymentSteps, setDeploymentSteps] = useState<Array<{
+    step: string;
+    status: 'pending' | 'running' | 'completed' | 'error';
+    message?: string;
+  }>>([]);
+  const [websocket, setWebsocket] = useState<WebSocket | null>(null);
+  const [currentDeploymentId, setCurrentDeploymentId] = useState<string | null>(null);
+
+  // Use websocket to avoid unused variable warning
+  console.log('WebSocket state:', websocket ? 'connected' : 'disconnected');
+
+  // Define updateDeploymentStep before it's used in useEffect
+  const updateDeploymentStep = useCallback((stepName: string, status: 'pending' | 'running' | 'completed' | 'error', message?: string) => {
+    console.log(`🔄 AgentCore updateDeploymentStep called: ${stepName} -> ${status}`, message);
+    setDeploymentSteps(prev => {
+      const existingIndex = prev.findIndex(s => s.step === stepName);
+      console.log(`📊 Current AgentCore steps before update:`, prev);
+      if (existingIndex >= 0) {
+        const updated = [...prev];
+        updated[existingIndex] = { step: stepName, status, message };
+        console.log(`📊 Updated existing AgentCore step at index ${existingIndex}:`, updated);
+        return updated;
+      } else {
+        const newSteps = [...prev, { step: stepName, status, message }];
+        console.log(`📊 Added new AgentCore step:`, newSteps);
+        return newSteps;
+      }
+    });
+  }, []);
 
   // Save deployment output to localStorage
-  const saveDeploymentOutput = (deploymentOutput: any) => {
+  const saveDeploymentOutput = (deploymentOutput: any, streamingCapable?: boolean) => {
     try {
-      console.log('saveDeploymentOutput called with:', deploymentOutput);
+      console.log('saveDeploymentOutput called with:', deploymentOutput, 'streamingCapable:', streamingCapable);
 
       if (!deploymentOutput) {
         console.warn('No deployment output provided to save');
@@ -124,6 +153,7 @@ export function AgentCoreDeployPanel({ nodes, edges, className = '' }: AgentCore
 
       const newDeployment = {
         ...deploymentOutput,
+        streaming_capable: streamingCapable ?? deploymentOutput.streaming_capable ?? false,
         saved_at: new Date().toISOString()
       };
       console.log('New deployment to save:', newDeployment);
@@ -171,6 +201,109 @@ export function AgentCoreDeployPanel({ nodes, edges, className = '' }: AgentCore
   useEffect(() => {
     loadDeploymentHistory();
   }, []);
+
+  // Store current deployment ID globally to avoid closure issues
+  useEffect(() => {
+    (window as any).__currentAgentCoreDeploymentId = currentDeploymentId;
+    console.log('🔄 Updated global AgentCore deployment ID:', currentDeploymentId);
+  }, [currentDeploymentId]);
+
+  // WebSocket connection management with global singleton approach
+  useEffect(() => {
+    const connectWebSocket = () => {
+      // Check if there's already a global WebSocket connection
+      if ((window as any).__globalWebSocket && (window as any).__globalWebSocket.readyState === WebSocket.OPEN) {
+        console.log('🔗 AgentCore reusing existing WebSocket connection');
+        setWebsocket((window as any).__globalWebSocket);
+        return;
+      }
+
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/ws`;
+
+      console.log('🔌 AgentCore creating new WebSocket connection:', wsUrl);
+
+      const ws = new WebSocket(wsUrl);
+      (window as any).__globalWebSocket = ws;
+
+      ws.onopen = () => {
+        console.log('✅ AgentCore WebSocket connected');
+        setWebsocket(ws);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log('📨 Raw AgentCore WebSocket message:', event.data);
+          console.log('📨 Parsed AgentCore WebSocket data:', data);
+
+          if (data.type === 'deployment_progress') {
+            console.log(`🔄 AgentCore deployment progress: ${data.step} - ${data.status}`);
+            console.log('🆔 AgentCore message deployment_id:', data.deployment_id);
+            console.log('🆔 Current global AgentCore deployment_id:', (window as any).__currentAgentCoreDeploymentId);
+            // Broadcast to all listeners
+            window.dispatchEvent(new CustomEvent('agentcore-deployment-progress', { detail: data }));
+            console.log('✅ AgentCore custom event dispatched');
+          }
+        } catch (error) {
+          console.error('❌ AgentCore WebSocket message parse error:', error);
+        }
+      };
+
+      ws.onclose = (event) => {
+        console.log('❌ AgentCore WebSocket closed:', event.code, event.reason);
+        setWebsocket(null);
+        (window as any).__globalWebSocket = null;
+
+        // Auto-reconnect after a delay unless it's a normal close
+        if (event.code !== 1000) {
+          console.log('🔄 AgentCore WebSocket will reconnect in 5 seconds...');
+          setTimeout(() => {
+            connectWebSocket();
+          }, 5000);
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error('❌ AgentCore WebSocket error:', error);
+      };
+    };
+
+    // Event listener for AgentCore deployment progress
+    const handleDeploymentProgress = (event: CustomEvent) => {
+      const data = event.detail;
+      console.log('📨 AgentCore handleDeploymentProgress called with data:', data);
+
+      // Only process messages for the current deployment
+      const currentId = (window as any).__currentAgentCoreDeploymentId;
+      const idMatch = data.deployment_id === currentId;
+
+      console.log('🔍 AgentCore ID Comparison:');
+      console.log('  - Received ID:', data.deployment_id);
+      console.log('  - Current ID:', currentId);
+      console.log('  - Match:', idMatch);
+
+      if (data.deployment_id && currentId && !idMatch) {
+        console.log(`🚫 IGNORING AgentCore: Different deployment ID`);
+        return;
+      }
+
+      console.log(`✅ PROCESSING AgentCore: ${data.step} -> ${data.status}`);
+      updateDeploymentStep(data.step, data.status, data.message);
+    };
+
+    // Add event listener
+    window.addEventListener('agentcore-deployment-progress', handleDeploymentProgress as EventListener);
+
+    // Connect WebSocket
+    connectWebSocket();
+
+    // Cleanup function
+    return () => {
+      window.removeEventListener('agentcore-deployment-progress', handleDeploymentProgress as EventListener);
+      // Don't close the global WebSocket - let it persist for other components
+    };
+  }, [updateDeploymentStep]); // Include updateDeploymentStep in dependencies
 
   // Auto-populate API keys when generated code or nodes change
   useEffect(() => {
@@ -477,10 +610,23 @@ async def entry(payload):
 
   const handleDeploy = async () => {
     console.log('Starting AgentCore deployment process...');
+    setDeploymentSteps([]);
+
+    // Generate deployment ID and set it for WebSocket filtering
+    const deploymentId = crypto.randomUUID();
+    setCurrentDeploymentId(deploymentId);
+    // CRITICAL: Set global variable immediately to catch early WebSocket messages
+    (window as any).__currentAgentCoreDeploymentId = deploymentId;
+    console.log('🚀 Starting AgentCore deployment with ID:', deploymentId);
+
+    // Start with initial deployment steps
+    updateDeploymentStep('Initializing AgentCore deployment', 'running');
 
     try {
       // Automatically convert code if not already converted and get the converted code
       console.log('Converting code for AgentCore deployment...');
+      updateDeploymentStep('Initializing AgentCore deployment', 'completed');
+      updateDeploymentStep('Converting code for AgentCore', 'running');
       const codeToUse = convertCode();
 
       // Extract API keys from multiple sources
@@ -504,6 +650,9 @@ async def entry(payload):
       console.log('Manual API keys:', manualApiKeys);
       console.log('Final API keys object:', apiKeysObject);
 
+      updateDeploymentStep('Converting code for AgentCore', 'completed');
+      updateDeploymentStep('Preparing deployment request', 'running');
+
       console.log('Setting deployment state to deploying...');
       setDeploymentState(prev => ({ ...prev, apiKeys: apiKeysObject, isDeploying: true, error: undefined }));
       let logsText = 'No deployment logs available';
@@ -514,6 +663,7 @@ async def entry(payload):
       console.log('Code streaming capability detected:', isStreamingCapable);
 
       const deploymentRequest: any = {
+        deployment_id: deploymentId,
         code: codeToUse,
         agent_name: deploymentState.config.agentName,
         region: deploymentState.config.region,
@@ -526,6 +676,9 @@ async def entry(payload):
       };
 
       console.log('Deploying with config:', deploymentRequest);
+
+      updateDeploymentStep('Preparing deployment request', 'completed');
+      updateDeploymentStep('Sending deployment request', 'running');
 
       // Call backend API
       const response = await fetch('/api/deploy/agentcore', {
@@ -541,8 +694,24 @@ async def entry(payload):
         throw new Error(errorData.detail || `HTTP ${response.status}: ${response.statusText}`);
       }
 
+      updateDeploymentStep('Sending deployment request', 'completed');
+      updateDeploymentStep('Processing AgentCore deployment', 'running');
+
       const result = await response.json();
       console.log('Deployment result received:', result);
+
+      // Verify the deployment ID matches (should be the same)
+      if (result.deployment_id && result.deployment_id !== deploymentId) {
+        console.warn('⚠️ AgentCore deployment ID mismatch:', result.deployment_id, 'vs', deploymentId);
+      }
+
+      // Check if deployment actually succeeded
+      if (!result.success) {
+        throw new Error(result.message || 'AgentCore deployment failed');
+      }
+
+      updateDeploymentStep('Processing AgentCore deployment', 'completed');
+      updateDeploymentStep('AgentCore deployment completed successfully', 'completed');
 
       setDeploymentState(prev => ({
         ...prev,
@@ -550,11 +719,16 @@ async def entry(payload):
         deploymentResult: result
       }));
 
+      // Keep deployment ID for a bit longer to allow late WebSocket messages
+      setTimeout(() => {
+        setCurrentDeploymentId(null);
+      }, 5000); // Clear after 5 seconds
+
       // Save deployment outputs to localStorage if deployment was successful
       try {
         if (result.success && result.status?.deployment_outputs) {
           console.log('Saving deployment outputs:', result.status.deployment_outputs);
-          saveDeploymentOutput(result.status.deployment_outputs);
+          saveDeploymentOutput(result.status.deployment_outputs, isStreamingCapable);
         } else {
           console.log('No deployment outputs to save or deployment not successful');
         }
@@ -646,11 +820,21 @@ async def entry(payload):
     } catch (error) {
       console.error('AgentCore deployment error caught:', error);
 
+      // Mark any pending steps as error
+      setDeploymentSteps(prev => prev.map(step =>
+        step.status === 'pending' || step.status === 'running'
+          ? { ...step, status: 'error' as const, message: error instanceof Error ? error.message : 'Failed' }
+          : step
+      ));
+
       setDeploymentState(prev => ({
         ...prev,
         isDeploying: false,
         error: error instanceof Error ? error.message : 'Deployment failed'
       }));
+
+      // Clear deployment ID after failed deployment
+      setCurrentDeploymentId(null);
 
       // Also save failed deployments to persistent storage
       try {
@@ -888,6 +1072,40 @@ async def entry(payload):
                 >
                   {deploymentState.isDeploying ? 'Deploying...' : 'Deploy'}
                 </button>
+
+                {/* Deployment Steps Display */}
+                {deploymentSteps.length > 0 && (
+                  <div className="mt-4 p-3 bg-black text-green-400 rounded text-xs font-mono">
+                    <div className="space-y-1">
+                      {deploymentSteps.map((step, index) => (
+                        <div key={index} className="flex items-center space-x-2">
+                          <span className={`inline-block w-2 h-2 rounded-full ${
+                            step.status === 'completed' ? 'bg-green-400' :
+                            step.status === 'running' ? 'bg-yellow-400 animate-pulse' :
+                            step.status === 'error' ? 'bg-red-400' :
+                            'bg-gray-600'
+                          }`}></span>
+                          <span className={`${
+                            step.status === 'error' ? 'text-red-400' :
+                            step.status === 'completed' ? 'text-green-400' :
+                            step.status === 'running' ? 'text-yellow-400' :
+                            'text-gray-400'
+                          }`}>
+                            {step.step}
+                            {step.status === 'running' && ' ...'}
+                            {step.status === 'completed' && ' ✓'}
+                            {step.status === 'error' && ' ✗'}
+                          </span>
+                        </div>
+                      ))}
+                      {deploymentSteps.some(step => step.status === 'error' && step.message) && (
+                        <div className="mt-2 text-red-400 text-xs">
+                          Error: {deploymentSteps.find(step => step.status === 'error' && step.message)?.message}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Deployment History */}

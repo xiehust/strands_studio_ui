@@ -600,8 +600,9 @@ export function LambdaDeployPanel({ nodes, edges, className = '' }: LambdaDeploy
                         className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
                       >
                         <option value="python3.12">python3.12</option>
+                        <option value="python3.13">python3.13</option>
                       </select>
-                      <p className="text-xs text-gray-500 mt-1">Only Python 3.12 is currently available (more versions coming soon)</p>
+                      {/* <p className="text-xs text-gray-500 mt-1">Only Python 3.12 is currently available (more versions coming soon)</p> */}
                     </div>
 
                     <div>
@@ -615,6 +616,10 @@ export function LambdaDeployPanel({ nodes, edges, className = '' }: LambdaDeploy
                         <option value="x86_64">x86_64</option>
                         <option value="arm64">arm64</option>
                       </select>
+                      <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
+                        <span className="text-orange-400">💡</span>
+                        <span className="text-orange-400">Choose the same architecture as your deployment host for consistancy</span>
+                      </p>
                     </div>
                   </div>
 

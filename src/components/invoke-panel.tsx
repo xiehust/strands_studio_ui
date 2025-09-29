@@ -146,25 +146,30 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
 
       // Check streaming_capable from deployment outputs if available
       if (agentCoreAgent.streaming_capable !== undefined) {
+        console.log('AgentCore streaming capability from stored metadata:', agentCoreAgent.streaming_capable);
         return agentCoreAgent.streaming_capable;
       }
 
       // Legacy fallback: infer from agent name patterns
       const agentName = agentCoreAgent.agent_runtime_name?.toLowerCase() || '';
+      console.log('AgentCore agent name for streaming inference:', agentName);
 
       // If agent name suggests non-streaming, assume false
       if (agentName.includes('no_stream') || agentName.includes('non_stream') ||
           agentName.includes('sync') || agentName.includes('regular')) {
+        console.log('AgentCore inferred as non-streaming from name pattern');
         return false;
       }
 
       // If agent name suggests streaming, assume true
       if (agentName.includes('stream') || agentName.includes('async')) {
+        console.log('AgentCore inferred as streaming from name pattern');
         return true;
       }
 
-      // Final fallback: assume non-streaming for safety (was previously always true)
-      return false;
+      // Final fallback: assume streaming for AgentCore (most AgentCore agents support streaming)
+      console.log('AgentCore defaulting to streaming capability (most AgentCore agents support streaming)');
+      return true;
     }
 
     return false;
@@ -775,20 +780,20 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
                     onClick={() => setSelectedAgent(deployment)}
                   >
                     <div className="flex items-center justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
                           {deployment.deployment_type === 'agentcore' ? (
-                            <Zap className="h-4 w-4 text-purple-600" />
+                            <Zap className="h-4 w-4 text-purple-600 flex-shrink-0" />
                           ) : (
-                            <Cloud className="h-4 w-4 text-orange-600" />
+                            <Cloud className="h-4 w-4 text-orange-600 flex-shrink-0" />
                           )}
-                          <h3 className="text-sm font-medium text-gray-900">
+                          <h3 className="text-sm font-medium text-gray-900 truncate">
                             {agentName}
                           </h3>
-                          <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">
+                          <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded flex-shrink-0">
                             {deployment.region}
                           </span>
-                          <span className={`text-xs px-2 py-1 rounded ${
+                          <span className={`text-xs px-2 py-1 rounded flex-shrink-0 ${
                             deployment.deployment_type === 'agentcore'
                               ? 'bg-purple-100 text-purple-700'
                               : 'bg-orange-100 text-orange-700'
@@ -798,16 +803,30 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
                         </div>
                         {/* Show deployment details */}
                         {deployment.deployment_type === 'agentcore' ? (
-                          <p className="text-xs text-gray-500 mt-1 truncate">
-                            {(deployment as AgentCoreDeployment).agent_runtime_arn}
-                          </p>
+                          <div className="text-xs text-gray-500 mt-1 space-y-1 min-w-0">
+                            {(deployment as AgentCoreDeployment).streaming_capable ? (
+                              <div className="min-w-0">
+                                <span className="font-medium text-green-600">Stream:</span>
+                                <div className="ml-2 min-w-0">
+                                  <div className="truncate">ARN: {(deployment as AgentCoreDeployment).agent_runtime_arn}</div>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="min-w-0">
+                                <span className="font-medium text-blue-600">Sync:</span>
+                                <div className="ml-2 min-w-0">
+                                  <div className="truncate">ARN: {(deployment as AgentCoreDeployment).agent_runtime_arn}</div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         ) : lambdaDeployment ? (
-                          <div className="text-xs text-gray-500 mt-1 space-y-1">
+                          <div className="text-xs text-gray-500 mt-1 space-y-1 min-w-0">
                             {/* Sync function details */}
                             {lambdaDeployment.deployment_result.python_function_arn && (
-                              <div>
+                              <div className="min-w-0">
                                 <span className="font-medium text-blue-600">Sync:</span>
-                                <div className="ml-2">
+                                <div className="ml-2 min-w-0">
                                   <div className="truncate">ARN: {lambdaDeployment.deployment_result.python_function_arn}</div>
                                   {lambdaDeployment.deployment_result.sync_function_url && (
                                     <div className="truncate">URL: {lambdaDeployment.deployment_result.sync_function_url}</div>
@@ -817,9 +836,9 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
                             )}
                             {/* Stream function details */}
                             {lambdaDeployment.deployment_result.python_stream_function_arn && (
-                              <div>
+                              <div className="min-w-0">
                                 <span className="font-medium text-green-600">Stream:</span>
-                                <div className="ml-2">
+                                <div className="ml-2 min-w-0">
                                   <div className="truncate">ARN: {lambdaDeployment.deployment_result.python_stream_function_arn}</div>
                                   {lambdaDeployment.deployment_result.stream_function_url && (
                                     <div className="truncate">URL: {lambdaDeployment.deployment_result.stream_function_url}</div>
@@ -841,7 +860,7 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
                           e.stopPropagation();
                           deleteAgent(deployment);
                         }}
-                        className="p-1 text-gray-400 hover:text-red-600 transition-colors"
+                        className="p-1 text-gray-400 hover:text-red-600 transition-colors flex-shrink-0 ml-2"
                         title="Delete this agent"
                       >
                         <X className="h-4 w-4" />
