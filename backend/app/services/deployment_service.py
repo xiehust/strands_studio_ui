@@ -315,6 +315,7 @@ class DeploymentService:
                 deployment_method=DeploymentMethod.SDK,  # Always use SDK method
                 network_mode=NetworkMode.PUBLIC,        # Default to PUBLIC
                 api_keys=request.api_keys,              # Pass through API keys if provided
+                streaming_capable=getattr(request, 'streaming_capable', None),  # Pass through streaming capability
                 # All other parameters use defaults or are auto-generated
             )
 
@@ -347,7 +348,8 @@ class DeploymentService:
                     "invoke_endpoint": result.invoke_endpoint,
                     "deployment_method": "sdk",  # Always use SDK method in simplified API
                     "region": request.region,
-                    "network_mode": "PUBLIC"  # Default network mode in simplified API
+                    "network_mode": "PUBLIC",  # Default network mode in simplified API
+                    "streaming_capable": result.streaming_capable
                 }
             else:
                 status.status = "failed"

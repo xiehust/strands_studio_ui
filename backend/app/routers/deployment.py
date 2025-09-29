@@ -333,6 +333,37 @@ async def delete_lambda_agent(function_name: str, region: str = "us-east-1", sta
         result = await lambda_service.delete_deployment(config)
 
         if result.success:
+            # Clean up deployment history records for this Lambda function
+            try:
+                from app.services.storage_service import StorageService
+                storage_service = StorageService()
+
+                # Get all deployment history records for this function
+                deployments = await storage_service.get_deployment_history()
+
+                # Find and delete records matching this Lambda function
+                deleted_count = 0
+                for deployment in deployments:
+                    if (deployment.get("deployment_target") == "lambda" and
+                        deployment.get("agent_name") == function_name and
+                        deployment.get("region") == region):
+
+                        deployment_id = deployment.get("deployment_id")
+                        if deployment_id:
+                            try:
+                                await storage_service.delete_deployment_history_item(deployment_id)
+                                deleted_count += 1
+                                logger.info(f"Deleted deployment history record: {deployment_id}")
+                            except Exception as e:
+                                logger.warning(f"Failed to delete deployment history record {deployment_id}: {e}")
+
+                if deleted_count > 0:
+                    logger.info(f"Cleaned up {deleted_count} deployment history records for {function_name}")
+
+            except Exception as e:
+                logger.warning(f"Failed to clean up deployment history for {function_name}: {e}")
+                # Don't fail the entire deletion if history cleanup fails
+
             return {
                 "success": True,
                 "message": result.message,

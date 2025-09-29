@@ -130,7 +130,8 @@ class AgentCoreDeploymentService:
                 invoke_endpoint=outputs.get("invoke_endpoint"),
                 logs=deployment_logs,
                 deployment_time=deployment_time,
-                deployment_outputs=outputs
+                deployment_outputs=outputs,
+                streaming_capable=config.streaming_capable
             )
 
         except Exception as e:
@@ -816,8 +817,19 @@ CMD ["opentelemetry-instrument", "python", "-m", "{agent_name}"]
             env = os.environ.copy()
             env.update(config.get_environment_variables())
 
-            # Deploy to AWS with auto-update-on-conflict parameter
+            # Get environment variables from config (includes API keys converted to proper format)
+            agent_env_vars = config.get_environment_variables()
+
+            # Create agentcore launch command with environment variables
             deploy_cmd = agentcore_cmd_prefix + ["agentcore", "launch", "--auto-update-on-conflict"]
+
+            # Add environment variables to the command (format: --env KEY=VALUE)
+            for key, value in agent_env_vars.items():
+                if value and value.strip():  # Only add non-empty values
+                    deploy_cmd.extend(["--env", f"{key}={value}"])
+                    logs.append(f"Added environment variable: {key}")
+
+            logs.append(f"Total environment variables passed to AgentCore: {len([k for k, v in agent_env_vars.items() if v and v.strip()])}")
 
             logger.info(f"Executing launch command: {' '.join(deploy_cmd)}")
             logger.info(f"Working directory: {project_dir}")
@@ -1139,6 +1151,57 @@ CMD ["opentelemetry-instrument", "python", "-m", "{agent_name}"]
             )
             
         except Exception as e:
+            # Import boto3 exceptions for specific error handling
+            try:
+                from botocore.exceptions import ClientError
+
+                if isinstance(e, ClientError):
+                    error_code = e.response['Error']['Code']
+
+                    # Handle ResourceNotFoundException - resource already deleted
+                    if error_code == 'ResourceNotFoundException':
+                        # Try to get agent_runtime_id if available, otherwise use ARN
+                        try:
+                            runtime_identifier = agent_runtime_id
+                        except NameError:
+                            runtime_identifier = agent_runtime_arn
+
+                        logger.info(f"AgentRuntime {runtime_identifier} not found - likely already deleted")
+                        return AgentCoreDeploymentResult(
+                            success=True,
+                            message=f"AgentRuntime was already deleted: {runtime_identifier}",
+                            logs=[f"AgentRuntime {runtime_identifier} not found in AWS (already deleted)"]
+                        )
+
+                    # Handle ConflictException - resource is being deleted
+                    elif error_code == 'ConflictException':
+                        # Try to get agent_runtime_id if available, otherwise use ARN
+                        try:
+                            runtime_identifier = agent_runtime_id
+                        except NameError:
+                            runtime_identifier = agent_runtime_arn
+
+                        logger.info(f"AgentRuntime {runtime_identifier} is currently being deleted")
+                        return AgentCoreDeploymentResult(
+                            success=True,
+                            message=f"AgentRuntime deletion already in progress: {runtime_identifier}",
+                            logs=[f"AgentRuntime {runtime_identifier} is already being deleted"]
+                        )
+
+                    # Handle other AWS errors
+                    else:
+                        error_msg = f"AWS API error ({error_code}): {e.response['Error'].get('Message', str(e))}"
+                        logger.error(error_msg)
+                        return AgentCoreDeploymentResult(
+                            success=False,
+                            message=error_msg,
+                            logs=[error_msg]
+                        )
+
+            except ImportError:
+                pass  # Fall through to generic error handling
+
+            # Generic error handling for non-AWS errors
             error_msg = f"Failed to delete deployment: {str(e)}"
             logger.error(error_msg)
             return AgentCoreDeploymentResult(

@@ -10,6 +10,7 @@ interface AgentCoreDeployment {
   network_mode: string;
   saved_at: string;
   deployment_type: 'agentcore';
+  streaming_capable?: boolean;
 }
 
 interface LambdaDeployment {
@@ -140,8 +141,30 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
       // For Lambda: check if deployment has streaming capability
       return !!(agent as LambdaDeployment).deployment_result.streaming_capable;
     } else if (agent.deployment_type === 'agentcore') {
-      // For AgentCore: always try streaming (backend will auto-detect)
-      return true;
+      // For AgentCore: check if deployment has streaming capability from stored metadata
+      const agentCoreAgent = agent as AgentCoreDeployment;
+
+      // Check streaming_capable from deployment outputs if available
+      if (agentCoreAgent.streaming_capable !== undefined) {
+        return agentCoreAgent.streaming_capable;
+      }
+
+      // Legacy fallback: infer from agent name patterns
+      const agentName = agentCoreAgent.agent_runtime_name?.toLowerCase() || '';
+
+      // If agent name suggests non-streaming, assume false
+      if (agentName.includes('no_stream') || agentName.includes('non_stream') ||
+          agentName.includes('sync') || agentName.includes('regular')) {
+        return false;
+      }
+
+      // If agent name suggests streaming, assume true
+      if (agentName.includes('stream') || agentName.includes('async')) {
+        return true;
+      }
+
+      // Final fallback: assume non-streaming for safety (was previously always true)
+      return false;
     }
 
     return false;
@@ -334,6 +357,21 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
 
       const result = await response.json();
       console.log('AgentCore deletion result:', result);
+
+      // Remove from localStorage after successful deletion
+      try {
+        const saved = localStorage.getItem('agentcore_deployments');
+        if (saved) {
+          const agentCoreDeployments = JSON.parse(saved);
+          const filteredDeployments = agentCoreDeployments.filter(
+            (dep: any) => dep.agent_runtime_arn !== identifier
+          );
+          localStorage.setItem('agentcore_deployments', JSON.stringify(filteredDeployments));
+          console.log('Removed AgentCore deployment from localStorage:', identifier);
+        }
+      } catch (error) {
+        console.error('Failed to remove AgentCore deployment from localStorage:', error);
+      }
 
       // Reload deployment history after successful deletion
       await loadDeploymentHistory();
@@ -876,42 +914,6 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
           />
         </div>
 
-        {/* Streaming Status Display */}
-        <div className="p-3 bg-gray-50 border border-gray-200 rounded-md">
-          <div className="flex items-center gap-2">
-            <Waves className="h-4 w-4 text-blue-600" />
-            <div>
-              <label className="text-sm font-medium text-gray-700">Streaming Mode</label>
-              <p className="text-xs text-gray-500">
-                Automatically detected based on deployment capabilities
-              </p>
-              {/* Show streaming capability status */}
-              {selectedAgent && selectedAgent.deployment_type === 'lambda' && (
-                (() => {
-                  if (isStreamingCapable) {
-                    return (
-                      <p className="text-xs text-green-600 mt-1">
-                        ✅ Streaming enabled (detected from deployment)
-                      </p>
-                    );
-                  } else {
-                    return (
-                      <p className="text-xs text-amber-600 mt-1">
-                        ⚠️ Non-streaming mode (sync-only deployment)
-                      </p>
-                    );
-                  }
-                })()
-              )}
-              {/* AgentCore streaming info */}
-              {selectedAgent && selectedAgent.deployment_type === 'agentcore' && (
-                <p className="text-xs text-green-600 mt-1">
-                  ✅ AgentCore streaming auto-detected from code
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
 
         {/* Session ID - Only for AgentCore */}
         {selectedAgent && selectedAgent.deployment_type === 'agentcore' && (
@@ -953,10 +955,10 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
                 : 'Invoking...'
               : selectedAgent?.deployment_type === 'lambda'
                 ? isStreamingCapable
-                  ? 'Stream Lambda Function'
+                  ? 'Invoke Lambda Function'
                   : 'Invoke Lambda Function'
                 : isStreamingCapable
-                  ? 'Stream AgentCore Agent'
+                  ? 'Invoke AgentCore Agent'
                   : 'Invoke AgentCore Agent'
             }
           </button>
@@ -969,11 +971,11 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
               <Waves className="h-4 w-4 text-blue-600 animate-pulse" />
               Streaming Response
             </h4>
-            <div className="p-3 rounded text-sm overflow-auto max-h-64 bg-blue-50 border border-blue-200 text-blue-800">
-              <div className="whitespace-pre-wrap font-normal">
+            <div className="bg-black text-green-400 p-3 rounded text-xs font-mono overflow-auto max-h-64">
+              <div className="whitespace-pre-wrap">
                 {streamingResult}
                 {isInvoking && (
-                  <span className="inline-block w-2 h-4 bg-blue-600 animate-pulse ml-1"></span>
+                  <span className="animate-pulse">▋</span>
                 )}
               </div>
             </div>
@@ -981,11 +983,11 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
         )}
 
         {/* Streaming Response (AgentCore) */}
-        {(isStreamingCapable || streamContent.length > 0) && selectedAgent?.deployment_type === 'agentcore' && (
+        {((isInvoking && isStreamingCapable) || streamContent.length > 0) && selectedAgent?.deployment_type === 'agentcore' && (
           <div>
             <h4 className="text-sm font-medium text-gray-900 mb-2">
               Streaming Response
-              {isStreamingCapable && (
+              {(isInvoking && isStreamingCapable) && (
                 <span className="ml-2 inline-flex items-center px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800">
                   <div className="w-2 h-2 bg-blue-600 rounded-full animate-pulse mr-1"></div>
                   Streaming...
@@ -997,7 +999,7 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
                 {streamContent.map((chunk, index) => (
                   <span key={index}>{chunk}</span>
                 ))}
-                {isStreamingCapable && (
+                {(isInvoking && isStreamingCapable) && (
                   <span className="animate-pulse">▋</span>
                 )}
               </div>
@@ -1007,7 +1009,7 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
 
         {/* Invoke Result */}
         {invokeResult && (
-          (selectedAgent?.deployment_type === 'agentcore' && !(isStreamingCapable || streamContent.length > 0)) ||
+          (selectedAgent?.deployment_type === 'agentcore' && !((isInvoking && isStreamingCapable) || streamContent.length > 0)) ||
           (selectedAgent?.deployment_type === 'lambda' && !streamingResult)
         ) && (
           <div>
@@ -1042,10 +1044,10 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
               </div>
             )}
 
-            <div className={`p-3 rounded text-sm overflow-auto max-h-64 ${
+            <div className={`p-3 rounded overflow-auto max-h-64 ${
               invokeResult.success
-                ? 'bg-green-50 border border-green-200 text-green-800'
-                : 'bg-red-50 border border-red-200 text-red-800'
+                ? 'bg-black text-green-400 text-xs font-mono'
+                : 'bg-red-50 border border-red-200 text-red-800 text-sm'
             }`}>
               {invokeResult.success ? (
                 // Show only the agent's response for successful invocations

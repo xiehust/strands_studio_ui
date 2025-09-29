@@ -42,6 +42,7 @@ class AgentCoreDeploymentConfig:
     
     # Metadata
     tags: Optional[Dict[str, str]] = None
+    streaming_capable: Optional[bool] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert config to dictionary"""
@@ -119,6 +120,7 @@ class AgentCoreDeploymentResult:
     logs: Optional[List[str]] = None
     deployment_time: Optional[float] = None
     deployment_outputs: Optional[Dict[str, Any]] = None
+    streaming_capable: Optional[bool] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert result to dictionary"""

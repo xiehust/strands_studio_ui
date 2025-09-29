@@ -6,6 +6,51 @@ import { generateStrandsAgentCode } from '../lib/code-generator';
 import { apiClient, type DeploymentHistoryItem } from '../lib/api-client';
 import { LambdaDeployPanel } from './lambda-deploy-panel';
 
+// Utility function to extract API key references from generated code
+function extractApiKeysFromCode(generatedCode: string): Record<string, string> {
+  const apiKeyMatches: Record<string, string> = {};
+
+  // Pattern to match os.environ.get("API_KEY_NAME") calls
+  const envGetPattern = /os\.environ\.get\(["']([A-Z_]*API_KEY[A-Z_]*)["']\)/g;
+
+  let match;
+  while ((match = envGetPattern.exec(generatedCode)) !== null) {
+    const keyName = match[1];
+    // Use the actual environment variable name as the key
+    apiKeyMatches[keyName] = '';
+  }
+
+  return apiKeyMatches;
+}
+
+// Utility function to extract API keys from agent nodes
+function extractApiKeysFromNodes(nodes: Node[]): Record<string, string> {
+  const nodeApiKeys: Record<string, string> = {};
+
+  nodes.forEach(node => {
+    if (node.type === 'agent' || node.type === 'orchestratorAgent') {
+      const apiKey = node.data?.apiKey;
+      if (apiKey && typeof apiKey === 'string' && apiKey.trim()) {
+        // Determine the provider type and map to appropriate environment variable name
+        const modelProvider = node.data?.modelProvider;
+        if (modelProvider === 'OpenAI') {
+          nodeApiKeys['OPENAI_API_KEY'] = apiKey.trim();
+        } else if (modelProvider === 'Anthropic') {
+          nodeApiKeys['ANTHROPIC_API_KEY'] = apiKey.trim();
+        } else {
+          // Generic fallback - construct proper env var name
+          const keyName = (typeof modelProvider === 'string' && modelProvider)
+            ? `${modelProvider.toUpperCase()}_API_KEY`
+            : 'OPENAI_API_KEY';
+          nodeApiKeys[keyName] = apiKey.trim();
+        }
+      }
+    }
+  });
+
+  return nodeApiKeys;
+}
+
 interface DeployPanelProps {
   nodes: Node[];
   edges: Edge[];
@@ -133,6 +178,36 @@ export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) 
   useEffect(() => {
     loadDeploymentHistory();
   }, []);
+
+  // Auto-populate API keys when generated code or nodes change
+  useEffect(() => {
+    if (generatedCode) {
+      const extractedApiKeys = extractApiKeysFromCode(generatedCode);
+      const nodeApiKeys = extractApiKeysFromNodes(nodes);
+
+      // Merge extracted and node API keys
+      const allDetectedKeys = { ...extractedApiKeys, ...nodeApiKeys };
+
+      // Only add new API keys that aren't already in the form
+      const existingKeys = new Set(apiKeys.map(k => k.key));
+      const newApiKeys: ApiKeyEntry[] = [];
+
+      Object.entries(allDetectedKeys).forEach(([key, value]) => {
+        if (!existingKeys.has(key)) {
+          newApiKeys.push({
+            key,
+            value: value || '', // Use node value if available, otherwise empty
+            visible: false
+          });
+        }
+      });
+
+      if (newApiKeys.length > 0) {
+        setApiKeys(prev => [...prev, ...newApiKeys]);
+        console.log('Auto-added API keys - from code:', Object.keys(extractedApiKeys), 'from nodes:', Object.keys(nodeApiKeys));
+      }
+    }
+  }, [generatedCode, nodes, apiKeys]);
 
 
   const handleDownload = () => {
@@ -429,18 +504,36 @@ async def entry(payload):
       console.log('Converting code for AgentCore deployment...');
       const codeToUse = convertCode();
 
-      // Update API keys in deployment state
-      const apiKeysObject = apiKeys.reduce((acc, item) => {
+      // Extract API keys from multiple sources
+      const extractedApiKeys = extractApiKeysFromCode(codeToUse);
+      const nodeApiKeys = extractApiKeysFromNodes(nodes);
+
+      // Update API keys in deployment state - merge all sources
+      const manualApiKeys = apiKeys.reduce((acc, item) => {
         if (item.key && item.value) {
           acc[item.key] = item.value;
         }
         return acc;
       }, {} as Record<string, string>);
 
+      // Merge priority: manual keys > node keys > extracted keys
+      // This allows manual override of node values, and node values override empty extracted keys
+      const apiKeysObject = { ...extractedApiKeys, ...nodeApiKeys, ...manualApiKeys };
+
+      console.log('Extracted API keys from code:', extractedApiKeys);
+      console.log('Node API keys:', nodeApiKeys);
+      console.log('Manual API keys:', manualApiKeys);
+      console.log('Final API keys object:', apiKeysObject);
+
       console.log('Setting deployment state to deploying...');
       setDeploymentState(prev => ({ ...prev, apiKeys: apiKeysObject, isDeploying: true, error: undefined }));
       let logsText = 'No deployment logs available';
       console.log('Using code length:', codeToUse.length, 'characters');
+
+      // Detect streaming capability from code
+      const isStreamingCapable = codeToUse.includes('stream_async') || codeToUse.includes('yield');
+      console.log('Code streaming capability detected:', isStreamingCapable);
+
       const deploymentRequest: any = {
         code: codeToUse,
         agent_name: deploymentState.config.agentName,
@@ -449,6 +542,7 @@ async def entry(payload):
         version: deploymentState.config.version || undefined,
         api_keys: apiKeysObject,
         deployment_type: deploymentState.deploymentTarget,
+        streaming_capable: isStreamingCapable,
       };
 
       // Add execute_role for AgentCore deployments
@@ -589,14 +683,18 @@ async def entry(payload):
 
       // Also save failed deployments to persistent storage
       try {
-        const apiKeysObject = apiKeys.reduce((acc, item) => {
+        const codeToUse = convertCode();
+
+        // Extract API keys from all sources for failed deployments too
+        const extractedApiKeys = extractApiKeysFromCode(codeToUse);
+        const nodeApiKeys = extractApiKeysFromNodes(nodes);
+        const manualApiKeys = apiKeys.reduce((acc, item) => {
           if (item.key && item.value) {
             acc[item.key] = item.value;
           }
           return acc;
         }, {} as Record<string, string>);
-
-        const codeToUse = convertCode();
+        const apiKeysObject = { ...extractedApiKeys, ...nodeApiKeys, ...manualApiKeys };
 
         const deploymentHistoryItem: DeploymentHistoryItem = {
           deployment_id: `deployment-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
