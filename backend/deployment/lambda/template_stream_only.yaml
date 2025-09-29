@@ -1,0 +1,149 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Strands Agent with streaming Lambda function - Python with LWA (RESPONSE_STREAM mode only)
+
+Parameters:
+  FunctionName:
+    Type: String
+    Default: StrandsAgentFunction
+    Description: Name for the streaming Lambda function (will be suffixed with -stream)
+
+  MemorySize:
+    Type: Number
+    Default: 512
+    MinValue: 128
+    MaxValue: 10240
+    Description: Memory allocated to the Lambda function (MB)
+
+  Timeout:
+    Type: Number
+    Default: 300
+    MinValue: 3
+    MaxValue: 900
+    Description: Timeout for the Lambda function (seconds)
+
+  Runtime:
+    Type: String
+    Default: python3.12
+    AllowedValues:
+      - python3.12
+    Description: Python runtime version (only 3.12 is supported)
+
+  Architecture:
+    Type: String
+    Default: x86_64
+    AllowedValues:
+      - x86_64
+      - arm64
+    Description: Processor architecture
+
+  OpenAIApiKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: OpenAI API Key (optional, can be provided at runtime instead)
+
+  AnthropicApiKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Anthropic API Key (optional, can be provided at runtime instead)
+
+  AllowedOrigins:
+    Type: CommaDelimitedList
+    Default: "http://localhost:5173,https://localhost:5173"
+    Description: Comma-delimited list of allowed CORS origins (replace with your frontend domains)
+
+Conditions:
+  HasOpenAIApiKey: !Not [!Equals [!Ref OpenAIApiKey, ""]]
+  HasAnthropicApiKey: !Not [!Equals [!Ref AnthropicApiKey, ""]]
+
+Resources:
+  # ---------------------------
+  # Python Lambda Function (Streaming / RESPONSE_STREAM with LWA)
+  # ---------------------------
+  PythonStreamFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${FunctionName}-stream"
+      PackageType: Image
+      MemorySize: !Ref MemorySize
+      Timeout: !Ref Timeout
+      Architectures:
+        - !Ref Architecture
+      Description: "Strands Agent - Python streaming with Lambda Web Adapter (RESPONSE_STREAM mode only)"
+      Environment:
+        Variables:
+          BYPASS_TOOL_CONSENT: "true"
+          STREAMING_CAPABLE: "true"
+          FUNCTION_TYPE: "stream"
+          AWS_LWA_INVOKE_MODE: "response_stream"
+          OPENAI_API_KEY: !If [HasOpenAIApiKey, !Ref OpenAIApiKey, !Ref "AWS::NoValue"]
+          ANTHROPIC_API_KEY: !If [HasAnthropicApiKey, !Ref AnthropicApiKey, !Ref "AWS::NoValue"]
+      # Add minimal IAM permissions
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        # Add Bedrock permissions for AI model access
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+                - bedrock:ListFoundationModels
+                - bedrock:GetFoundationModel
+              Resource: "*"
+    Metadata:
+      Dockerfile: Dockerfile
+      DockerContext: python_stream_function
+
+  # ---------------------------
+  # Function URL for Python Stream (RESPONSE_STREAM)
+  # ---------------------------
+  PythonStreamFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !GetAtt PythonStreamFunction.Arn
+      AuthType: AWS_IAM
+      InvokeMode: RESPONSE_STREAM  # Streaming, 200MB limit
+      Cors:
+        AllowOrigins: !Ref AllowedOrigins
+        AllowMethods:
+          - POST
+        AllowHeaders:
+          - Content-Type
+          - Authorization
+          - Accept
+          - X-Amz-Date
+          - X-Amz-Security-Token
+        MaxAge: 3600
+
+  # ---------------------------
+  # No public permissions needed for AWS_IAM auth
+  # Callers must have lambda:InvokeFunctionUrl permission
+  # ---------------------------
+
+Outputs:
+  PythonStreamFunction:
+    Description: "Python Stream Lambda Function ARN"
+    Value: !GetAtt PythonStreamFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-PythonStreamFunction"
+
+  StreamFunctionUrl:
+    Description: "Streaming endpoint (Python RESPONSE_STREAM Function URL)"
+    Value: !GetAtt PythonStreamFunctionUrl.FunctionUrl
+    Export:
+      Name: !Sub "${AWS::StackName}-StreamFunctionUrl"
+
+  StreamingCapable:
+    Description: "Whether this deployment supports streaming"
+    Value: "true"
+    Export:
+      Name: !Sub "${AWS::StackName}-StreamingCapable"
+
+  DeploymentType:
+    Description: "Deployment type with stream-only function"
+    Value: "stream_only"
+    Export:
+      Name: !Sub "${AWS::StackName}-DeploymentType"

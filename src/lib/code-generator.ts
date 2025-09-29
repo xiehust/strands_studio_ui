@@ -6,6 +6,15 @@ interface CodeGenerationResult {
   errors: string[];
 }
 
+// Safely escape strings for Python triple-quoted string literals
+function escapePythonTripleQuotedString(str: string): string {
+  if (!str) return str;
+  // Escape triple quotes and backslashes to prevent syntax errors
+  return str
+    .replace(/\\/g, '\\\\') // Escape backslashes first
+    .replace(/"""/g, '\\"\\"\\"'); // Then escape triple quotes
+}
+
 export function generateStrandsAgentCode(
   nodes: Node[],
   edges: Edge[]
@@ -277,7 +286,7 @@ function generateAgentCode(
     : '';
 
   // System prompt comes from agent property panel only (no input connections)
-  const systemPromptValue = systemPrompt;
+  const systemPromptValue = String(systemPrompt || 'You are a helpful AI assistant.');
 
   // Generate model configuration based on provider
   const modelConfig = generateModelConfigForCode(agentVarName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string);
@@ -287,7 +296,7 @@ ${modelConfig}
 
 ${agentVarName} = Agent(
     model=${agentVarName}_model,
-    system_prompt="""${systemPromptValue}"""${toolsCode},
+    system_prompt="""${escapePythonTripleQuotedString(systemPromptValue)}"""${toolsCode},
     callback_handler=None
 )`;
 }
@@ -323,7 +332,7 @@ function generateSwarmAgentCode(
     : '';
 
   // System prompt comes from agent property panel only (no input connections)
-  const systemPromptValue = systemPrompt;
+  const systemPromptValue = String(systemPrompt || 'You are a helpful AI assistant.');
 
   // Generate model configuration based on provider
   const modelConfig = generateModelConfigForCode(agentVarName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string);
@@ -334,7 +343,7 @@ ${modelConfig}
 ${agentVarName} = Agent(
     name="${label}",
     model=${agentVarName}_model,
-    system_prompt="""${systemPromptValue}"""${toolsCode},
+    system_prompt="""${escapePythonTripleQuotedString(systemPromptValue)}"""${toolsCode},
     callback_handler=None
 )`;
 }
@@ -639,9 +648,9 @@ ${indentation}# Swarm ${agentName} is already configured with its agents`;
            ? `[${allRegularTools.join(', ')}]`
            : '[]');
       
-      const fullSystemPrompt = coordinationPrompt 
-        ? `${systemPrompt}\\n\\nCoordination Instructions: ${coordinationPrompt}`
-        : systemPrompt;
+      const fullSystemPrompt = coordinationPrompt
+        ? `${String(systemPrompt)}\\n\\nCoordination Instructions: ${String(coordinationPrompt)}`
+        : String(systemPrompt);
       
       const indentation = executionAgentMcpClientVars.length > 0 ? '        ' : '    ';
       mainCode += `
@@ -649,7 +658,7 @@ ${indentation}
 ${indentation}# Create orchestrator agent ${executionAgentMcpClientVars.length > 0 ? 'with MCP tools' : ''}
 ${indentation}${agentName} = Agent(
 ${indentation}    model=${agentName}_model,
-${indentation}    system_prompt="""${fullSystemPrompt}""",
+${indentation}    system_prompt="""${escapePythonTripleQuotedString(fullSystemPrompt)}""",
 ${indentation}    tools=${toolsArrayCode},
 ${indentation}    callback_handler=None
 ${indentation})`;
@@ -668,7 +677,7 @@ ${indentation}
 ${indentation}# Create agent ${executionAgentMcpClientVars.length > 0 ? 'with MCP tools' : ''}
 ${indentation}${agentName} = Agent(
 ${indentation}    model=${agentName}_model,
-${indentation}    system_prompt="""${systemPrompt}""",
+${indentation}    system_prompt="""${escapePythonTripleQuotedString(String(systemPrompt || 'You are a helpful AI agent.'))}""",
 ${indentation}    tools=${toolsArrayCode},
 ${indentation}    callback_handler=None
 ${indentation})`;
@@ -1024,7 +1033,7 @@ def ${functionName}(user_input: str) -> str:
         # Create agent with MCP tools
         agent = Agent(
             model=${functionName}_model,
-            system_prompt="""${systemPrompt}""",
+            system_prompt="""${escapePythonTripleQuotedString(String(systemPrompt || 'You are a helpful AI agent.'))}""",
             tools=${toolsArrayCode},
             callback_handler=None
         )
@@ -1048,7 +1057,7 @@ def ${functionName}(user_input: str) -> str:
     # Create agent
     agent = Agent(
         model=${functionName}_model,
-        system_prompt="""${systemPrompt}"""${toolsCode},
+        system_prompt="""${escapePythonTripleQuotedString(String(systemPrompt || 'You are a helpful AI agent.'))}"""${toolsCode},
         callback_handler=None
     )
     
@@ -1108,9 +1117,9 @@ function generateOrchestratorAsToolCode(
   const allRegularTools = [...regularToolsList, ...subFunctions];
   
   const hasMCPTools = connectedMCPTools.length > 0;
-  const fullSystemPrompt = coordinationPrompt 
-    ? `${systemPrompt}\\n\\nCoordination Instructions: ${coordinationPrompt}`
-    : systemPrompt;
+  const fullSystemPrompt = coordinationPrompt
+    ? `${String(systemPrompt)}\\n\\nCoordination Instructions: ${String(coordinationPrompt)}`
+    : String(systemPrompt);
   
   if (hasMCPTools) {
     // Generate MCP-aware orchestrator-as-tool function
@@ -1139,7 +1148,7 @@ def ${functionName}(user_input: str) -> str:
         # Create orchestrator agent with MCP tools
         agent = Agent(
             model=${functionName}_model,
-            system_prompt="""${fullSystemPrompt}""",
+            system_prompt="""${escapePythonTripleQuotedString(fullSystemPrompt)}""",
             tools=${toolsArrayCode},
             callback_handler=None
         )
@@ -1163,7 +1172,7 @@ def ${functionName}(user_input: str) -> str:
     # Create orchestrator agent
     agent = Agent(
         model=${functionName}_model,
-        system_prompt="""${fullSystemPrompt}"""${toolsCode},
+        system_prompt="""${escapePythonTripleQuotedString(fullSystemPrompt)}"""${toolsCode},
         callback_handler=None
     )
     
@@ -1267,9 +1276,9 @@ function generateOrchestratorCode(
       : '';
   }
 
-  const fullSystemPrompt = coordinationPrompt 
-    ? `${systemPrompt}\n\nCoordination Instructions: ${coordinationPrompt}`
-    : systemPrompt;
+  const fullSystemPrompt = coordinationPrompt
+    ? `${String(systemPrompt)}\n\nCoordination Instructions: ${String(coordinationPrompt)}`
+    : String(systemPrompt);
 
   if (hasMCPTools) {
     // When MCP tools are present, only define the model - agent creation happens in main()
@@ -1286,7 +1295,7 @@ ${modelConfig}
 
 ${orchestratorName} = Agent(
     model=${orchestratorName}_model,
-    system_prompt="""${fullSystemPrompt}"""${toolsCode},
+    system_prompt="""${escapePythonTripleQuotedString(fullSystemPrompt)}"""${toolsCode},
     callback_handler=None
 )`;
   }

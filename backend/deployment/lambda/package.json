@@ -1,0 +1,23 @@
+{
+  "name": "strands-agent-nodejs-stream",
+  "version": "1.0.0",
+  "description": "Node.js streaming handler for Strands Agent Lambda function",
+  "main": "agent_handler_nodejs.js",
+  "scripts": {
+    "test": "node test.js"
+  },
+  "keywords": [
+    "aws",
+    "lambda",
+    "streaming",
+    "strands",
+    "agent",
+    "nodejs"
+  ],
+  "author": "Strands Studio",
+  "license": "MIT",
+  "dependencies": {},
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

@@ -2,9 +2,10 @@
 Deployment API routes
 """
 import logging
-from typing import Dict, List, Union
-from fastapi import APIRouter, HTTPException, Depends
+from typing import Dict, List, Union, Optional
+from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from app.models.deployment import (
     DeploymentRequest,
@@ -16,10 +17,14 @@ from app.models.deployment import (
     DeploymentType,
     DeploymentHealthStatus,
     AgentCoreInvokeRequest,
-    AgentCoreInvokeResponse
+    AgentCoreInvokeResponse,
+    LambdaInvokeRequest,
+    LambdaInvokeResponse
 )
 from app.services.deployment_service import DeploymentService
 from app.services.agentcore_invoke_service import AgentCoreInvokeService
+from app.services.lambda_invoke_service import LambdaInvokeService
+from fastapi.responses import StreamingResponse
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +34,7 @@ router = APIRouter(prefix="/api/deploy", tags=["deployment"])
 # Global service instances
 deployment_service = DeploymentService()
 agentcore_invoke_service = AgentCoreInvokeService()
+lambda_invoke_service = LambdaInvokeService()
 
 @router.post("/", response_model=DeploymentResponse)
 async def deploy_agent(request: Union[LambdaDeploymentRequest, AgentCoreDeploymentRequest, ECSFargateDeploymentRequest]):
@@ -294,4 +300,137 @@ async def delete_agentcore_agent(agent_runtime_arn: str):
 
     except Exception as e:
         logger.error(f"AgentCore deletion error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/lambda/{function_name}")
+async def delete_lambda_agent(function_name: str, region: str = "us-east-1", stack_name: Optional[str] = None):
+    """Delete Lambda deployment and AWS resources"""
+    logger.info(f"Deleting Lambda agent: {function_name} in region: {region}")
+
+    try:
+        # Import Lambda deployment service
+        import sys
+        from pathlib import Path
+
+        # Add deployment module to path
+        deployment_path = Path(__file__).parent.parent.parent / "deployment" / "lambda"
+        if str(deployment_path) not in sys.path:
+            sys.path.insert(0, str(deployment_path))
+
+        from lambda_deployment_service import LambdaDeploymentService, LambdaDeploymentConfig
+
+        # Create deployment config for deletion
+        config = LambdaDeploymentConfig(
+            function_name=function_name,
+            region=region,
+            stack_name=stack_name or f"strands-agent-{function_name.lower()}"
+        )
+
+        # Initialize Lambda service
+        lambda_service = LambdaDeploymentService()
+
+        # Delete the deployment
+        result = await lambda_service.delete_deployment(config)
+
+        if result.success:
+            # Clean up deployment history records for this Lambda function
+            try:
+                from app.services.storage_service import StorageService
+                storage_service = StorageService()
+
+                # Get all deployment history records for this function
+                deployments = await storage_service.get_deployment_history()
+
+                # Find and delete records matching this Lambda function
+                deleted_count = 0
+                for deployment in deployments:
+                    if (deployment.get("deployment_target") == "lambda" and
+                        deployment.get("agent_name") == function_name and
+                        deployment.get("region") == region):
+
+                        deployment_id = deployment.get("deployment_id")
+                        if deployment_id:
+                            try:
+                                await storage_service.delete_deployment_history_item(deployment_id)
+                                deleted_count += 1
+                                logger.info(f"Deleted deployment history record: {deployment_id}")
+                            except Exception as e:
+                                logger.warning(f"Failed to delete deployment history record {deployment_id}: {e}")
+
+                if deleted_count > 0:
+                    logger.info(f"Cleaned up {deleted_count} deployment history records for {function_name}")
+
+            except Exception as e:
+                logger.warning(f"Failed to clean up deployment history for {function_name}: {e}")
+                # Don't fail the entire deletion if history cleanup fails
+
+            return {
+                "success": True,
+                "message": result.message,
+                "function_name": function_name,
+                "region": region,
+                "stack_name": config.stack_name,
+                "logs": result.logs
+            }
+        else:
+            raise HTTPException(status_code=500, detail=result.message)
+
+    except Exception as e:
+        logger.error(f"Lambda deletion error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Pydantic models for Function URL invocation
+class FunctionUrlInvokeRequest(BaseModel):
+    """Request model for Lambda Function URL invocation"""
+    function_url: str
+    payload: Dict
+    region: Optional[str] = None
+    timeout: Optional[float] = 30.0
+
+
+# Lambda Function URL invoke endpoints (with AWS IAM authentication)
+@router.post("/lambda/invoke-url", response_model=LambdaInvokeResponse)
+async def invoke_lambda_function_url(request: FunctionUrlInvokeRequest):
+    """Invoke a Lambda Function URL with AWS IAM authentication"""
+    logger.info(f"Lambda Function URL invoke request: {request.function_url}")
+    logger.info(f"Region: {request.region}")
+
+    try:
+        result = await lambda_invoke_service.invoke_function_url(
+            function_url=request.function_url,
+            payload=request.payload,
+            region=request.region,
+            timeout=request.timeout
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Lambda Function URL invoke error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/lambda/invoke-url/stream")
+async def invoke_lambda_function_url_stream(request: FunctionUrlInvokeRequest):
+    """Invoke a Lambda Function URL with AWS IAM authentication (streaming)"""
+    logger.info(f"Lambda Function URL streaming invoke request: {request.function_url}")
+    logger.info(f"Region: {request.region}")
+
+    try:
+        return StreamingResponse(
+            lambda_invoke_service.invoke_function_url_stream(
+                function_url=request.function_url,
+                payload=request.payload,
+                region=request.region,
+                timeout=request.timeout or 60.0
+            ),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Cache-Control"
+            }
+        )
+    except Exception as e:
+        logger.error(f"Lambda Function URL streaming invoke error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

@@ -72,7 +72,19 @@ export interface DeploymentHistoryItem {
   execute_role?: string;
   api_keys?: Record<string, string>;
   code: string;
-  deployment_result: Record<string, any>;
+  deployment_result: {
+    function_arn?: string;
+    api_endpoint?: string;
+    invoke_endpoint?: string;
+    streaming_invoke_endpoint?: string;
+    streaming_capable?: boolean;
+    deployment_type?: string;
+    python_function_arn?: string;
+    nodejs_function_arn?: string;
+    sync_function_url?: string;
+    stream_function_url?: string;
+    [key: string]: any;
+  };
   deployment_logs?: string;
   success: boolean;
   error_message?: string;
@@ -563,6 +575,17 @@ class ApiClient {
 
   async deleteDeploymentHistoryItem(deploymentId: string): Promise<{ message: string }> {
     return this.request(`/api/deployment-history/${deploymentId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async deleteLambdaDeployment(functionName: string, region: string = 'us-east-1', stackName?: string): Promise<{ success: boolean; message: string; function_name: string; region: string; stack_name: string; logs: string[] }> {
+    const params = new URLSearchParams({ region });
+    if (stackName) {
+      params.append('stack_name', stackName);
+    }
+
+    return this.request(`/api/deploy/lambda/${encodeURIComponent(functionName)}?${params.toString()}`, {
       method: 'DELETE',
     });
   }

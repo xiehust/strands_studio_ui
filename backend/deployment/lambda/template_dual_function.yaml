@@ -1,0 +1,237 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Strands Agent with dual Lambda functions - Python (BUFFERED) + Python with LWA (RESPONSE_STREAM)
+
+Parameters:
+  FunctionName:
+    Type: String
+    Default: StrandsAgentFunction
+    Description: Base name for the Lambda functions (will be suffixed with -sync and -stream)
+
+  MemorySize:
+    Type: Number
+    Default: 512
+    MinValue: 128
+    MaxValue: 10240
+    Description: Memory allocated to both Lambda functions (MB)
+
+  Timeout:
+    Type: Number
+    Default: 300
+    MinValue: 3
+    MaxValue: 900
+    Description: Timeout for both Lambda functions (seconds)
+
+  Runtime:
+    Type: String
+    Default: python3.12
+    AllowedValues:
+      - python3.12
+    Description: Python runtime version (only 3.12 is supported)
+
+  Architecture:
+    Type: String
+    Default: x86_64
+    AllowedValues:
+      - x86_64
+      - arm64
+    Description: Processor architecture
+
+  StreamingCapable:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Whether the agent code supports streaming
+
+  OpenAIApiKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: OpenAI API Key (optional, can be provided at runtime instead)
+
+  AnthropicApiKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Anthropic API Key (optional, can be provided at runtime instead)
+
+  AllowedOrigins:
+    Type: CommaDelimitedList
+    Default: "http://localhost:5173,https://localhost:5173"
+    Description: Comma-delimited list of allowed CORS origins (replace with your frontend domains)
+
+Globals:
+  Function:
+    Timeout: !Ref Timeout
+    MemorySize: !Ref MemorySize
+    Environment:
+      Variables:
+        BYPASS_TOOL_CONSENT: "true"
+
+Resources:
+  # ---------------------------
+  # Python Lambda Function (Non-Streaming / BUFFERED)
+  # ---------------------------
+  PythonSyncFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${FunctionName}-sync"
+      CodeUri: python_function/
+      Handler: agent_handler_python.handler
+      Runtime: !Ref Runtime
+      Architectures:
+        - !Ref Architecture
+      Description: "Strands Agent - Python non-streaming (BUFFERED mode)"
+      Environment:
+        Variables:
+          BYPASS_TOOL_CONSENT: "true"
+          STREAMING_CAPABLE: !Ref StreamingCapable
+          FUNCTION_TYPE: "sync"
+          OPENAI_API_KEY: !If [HasOpenAIApiKey, !Ref OpenAIApiKey, !Ref "AWS::NoValue"]
+          ANTHROPIC_API_KEY: !If [HasAnthropicApiKey, !Ref AnthropicApiKey, !Ref "AWS::NoValue"]
+      # Add minimal IAM permissions
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        # Add Bedrock permissions for AI model access
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+                - bedrock:ListFoundationModels
+                - bedrock:GetFoundationModel
+              Resource: "*"
+
+  # ---------------------------
+  # Python Lambda Function (Streaming / RESPONSE_STREAM with LWA)
+  # ---------------------------
+  PythonStreamFunction:
+    Type: AWS::Serverless::Function
+    Condition: IsStreamingCapable
+    Properties:
+      FunctionName: !Sub "${FunctionName}-stream"
+      PackageType: Image
+      MemorySize: !Ref MemorySize
+      Timeout: !Ref Timeout
+      Architectures:
+        - !Ref Architecture
+      Description: "Strands Agent - Python streaming with Lambda Web Adapter (RESPONSE_STREAM mode)"
+      Environment:
+        Variables:
+          BYPASS_TOOL_CONSENT: "true"
+          STREAMING_CAPABLE: !Ref StreamingCapable
+          FUNCTION_TYPE: "stream"
+          AWS_LWA_INVOKE_MODE: "response_stream"
+          OPENAI_API_KEY: !If [HasOpenAIApiKey, !Ref OpenAIApiKey, !Ref "AWS::NoValue"]
+          ANTHROPIC_API_KEY: !If [HasAnthropicApiKey, !Ref AnthropicApiKey, !Ref "AWS::NoValue"]
+      # Add minimal IAM permissions
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        # Add Bedrock permissions for AI model access
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+                - bedrock:ListFoundationModels
+                - bedrock:GetFoundationModel
+              Resource: "*"
+    Metadata:
+      Dockerfile: Dockerfile
+      DockerContext: python_stream_function
+
+  # ---------------------------
+  # Function URL for Python (BUFFERED)
+  # ---------------------------
+  PythonSyncFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !GetAtt PythonSyncFunction.Arn
+      AuthType: AWS_IAM
+      InvokeMode: BUFFERED  # Non-streaming, 6MB limit
+      Cors:
+        AllowOrigins: !Ref AllowedOrigins
+        AllowMethods:
+          - POST
+        AllowHeaders:
+          - Content-Type
+          - Authorization
+          - Accept
+          - X-Amz-Date
+          - X-Amz-Security-Token
+        MaxAge: 3600
+
+  # ---------------------------
+  # Function URL for Python Stream (RESPONSE_STREAM)
+  # ---------------------------
+  PythonStreamFunctionUrl:
+    Type: AWS::Lambda::Url
+    Condition: IsStreamingCapable
+    Properties:
+      TargetFunctionArn: !GetAtt PythonStreamFunction.Arn
+      AuthType: AWS_IAM
+      InvokeMode: RESPONSE_STREAM  # Streaming, 200MB limit
+      Cors:
+        AllowOrigins: !Ref AllowedOrigins
+        AllowMethods:
+          - POST
+        AllowHeaders:
+          - Content-Type
+          - Authorization
+          - Accept
+          - X-Amz-Date
+          - X-Amz-Security-Token
+        MaxAge: 3600
+
+  # ---------------------------
+  # No public permissions needed for AWS_IAM auth
+  # Callers must have lambda:InvokeFunctionUrl permission
+  # ---------------------------
+
+Conditions:
+  IsStreamingCapable: !Equals [!Ref StreamingCapable, "true"]
+  HasOpenAIApiKey: !Not [!Equals [!Ref OpenAIApiKey, ""]]
+  HasAnthropicApiKey: !Not [!Equals [!Ref AnthropicApiKey, ""]]
+
+Outputs:
+  PythonSyncFunction:
+    Description: "Python Sync Lambda Function ARN"
+    Value: !GetAtt PythonSyncFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-PythonSyncFunction"
+
+  PythonStreamFunction:
+    Condition: IsStreamingCapable
+    Description: "Python Stream Lambda Function ARN"
+    Value: !GetAtt PythonStreamFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-PythonStreamFunction"
+
+  SyncFunctionUrl:
+    Description: "Non-streaming endpoint (Python BUFFERED Function URL)"
+    Value: !GetAtt PythonSyncFunctionUrl.FunctionUrl
+    Export:
+      Name: !Sub "${AWS::StackName}-SyncFunctionUrl"
+
+  StreamFunctionUrl:
+    Condition: IsStreamingCapable
+    Description: "Streaming endpoint (Python RESPONSE_STREAM Function URL)"
+    Value: !GetAtt PythonStreamFunctionUrl.FunctionUrl
+    Export:
+      Name: !Sub "${AWS::StackName}-StreamFunctionUrl"
+
+  StreamingCapable:
+    Description: "Whether this deployment supports streaming"
+    Value: !Ref StreamingCapable
+    Export:
+      Name: !Sub "${AWS::StackName}-StreamingCapable"
+
+  DeploymentType:
+    Description: "Deployment type with dual functions"
+    Value: "dual_function"
+    Export:
+      Name: !Sub "${AWS::StackName}-DeploymentType"
