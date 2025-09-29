@@ -1,6 +1,7 @@
 # Core dependencies
 strands-agents>=1.9.1
 strands-agents-tools>=0.2.0
+strands-agents[openai]
 
 # FastAPI for streaming Lambda function
 fastapi>=0.104.1
@@ -13,4 +14,5 @@ boto3>=1.40.36
 requests>=2.31
 
 # Pydantic - let it resolve pydantic-core automatically
-pydantic>=2.8
+pydantic>=2.0.0
+pydantic-core>=2.0.0

@@ -1,5 +1,5 @@
 # Use multi-arch ECR image for Lambda Web Adapter (no manual arch handling needed)
-FROM public.ecr.aws/awsguru/aws-lambda-adapter:0.8.4 as adapter
+FROM public.ecr.aws/awsguru/aws-lambda-adapter:0.9.1 as adapter
 FROM python:3.12-slim
 
 # Copy Lambda Web Adapter from ECR multi-arch image

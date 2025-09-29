@@ -300,6 +300,53 @@ async def delete_agentcore_agent(agent_runtime_arn: str):
 
     except Exception as e:
         logger.error(f"AgentCore deletion error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/lambda/{function_name}")
+async def delete_lambda_agent(function_name: str, region: str = "us-east-1", stack_name: Optional[str] = None):
+    """Delete Lambda deployment and AWS resources"""
+    logger.info(f"Deleting Lambda agent: {function_name} in region: {region}")
+
+    try:
+        # Import Lambda deployment service
+        import sys
+        from pathlib import Path
+
+        # Add deployment module to path
+        deployment_path = Path(__file__).parent.parent.parent / "deployment" / "lambda"
+        if str(deployment_path) not in sys.path:
+            sys.path.insert(0, str(deployment_path))
+
+        from lambda_deployment_service import LambdaDeploymentService, LambdaDeploymentConfig
+
+        # Create deployment config for deletion
+        config = LambdaDeploymentConfig(
+            function_name=function_name,
+            region=region,
+            stack_name=stack_name or f"strands-agent-{function_name.lower()}"
+        )
+
+        # Initialize Lambda service
+        lambda_service = LambdaDeploymentService()
+
+        # Delete the deployment
+        result = await lambda_service.delete_deployment(config)
+
+        if result.success:
+            return {
+                "success": True,
+                "message": result.message,
+                "function_name": function_name,
+                "region": region,
+                "stack_name": config.stack_name,
+                "logs": result.logs
+            }
+        else:
+            raise HTTPException(status_code=500, detail=result.message)
+
+    except Exception as e:
+        logger.error(f"Lambda deletion error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # Pydantic models for Function URL invocation

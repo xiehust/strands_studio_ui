@@ -132,7 +132,7 @@ class DeploymentService:
                     "region": request.region,
                     "memory_size": request.memory_size,
                     "timeout": request.timeout,
-                    # Dual-function specific fields
+                    # Lambda deployment specific fields
                     "streaming_capable": getattr(result, 'streaming_capable', None),
                     "deployment_type": getattr(result, 'deployment_type', None),
                     "python_function_arn": getattr(result, 'python_function_arn', None),
@@ -168,7 +168,7 @@ class DeploymentService:
                     "success": result.success,
                     "error_message": None if result.success else result.message,
                     "created_at": status.created_at,
-                    # Dual-function specific fields
+                    # Lambda deployment specific fields
                     "streaming_capable": getattr(result, 'streaming_capable', None),
                     "python_function_arn": getattr(result, 'python_function_arn', None),
                     "python_stream_function_arn": getattr(result, 'python_stream_function_arn', None),

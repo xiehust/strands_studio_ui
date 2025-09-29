@@ -66,8 +66,6 @@ export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) 
   const [deploymentHistory, setDeploymentHistory] = useState<DeploymentHistoryItem[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
-  const [isConverted, setIsConverted] = useState(false);
-
 
 
 
@@ -128,11 +126,7 @@ export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) 
     setErrors(result.errors);
     // Reset editing state when code regenerates
     setIsEditing(false);
-    // Don't reset isConverted when flow changes - conversion state should persist
-    // Only set to true if the generated code already has @app.entrypoint (rare case)
-    if (fullCode.includes('@app.entrypoint')) {
-      setIsConverted(true);
-    }
+    // Reset state when flow changes
   }, [nodes, edges]);
 
   // Load deployment history on component mount
@@ -140,12 +134,6 @@ export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) 
     loadDeploymentHistory();
   }, []);
 
-  // Check conversion status when editableCode changes (for editing mode)
-  useEffect(() => {
-    if (isEditing) {
-      setIsConverted(editableCode.includes('@app.entrypoint'));
-    }
-  }, [editableCode, isEditing]);
 
   const handleDownload = () => {
     const codeToUse = isEditing ? editableCode : generatedCode;
@@ -427,8 +415,6 @@ async def entry(payload):
       setGeneratedCode(convertedCode);
       setEditableCode(convertedCode);
     }
-
-    setIsConverted(true);
 
     return convertedCode;
   };

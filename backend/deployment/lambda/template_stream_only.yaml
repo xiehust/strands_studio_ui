@@ -1,12 +1,12 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Strands Agent with single Lambda function - Python (BUFFERED mode only)
+Description: Strands Agent with streaming Lambda function - Python with LWA (RESPONSE_STREAM mode only)
 
 Parameters:
   FunctionName:
     Type: String
     Default: StrandsAgentFunction
-    Description: Name for the Lambda function (will be suffixed with -sync)
+    Description: Name for the streaming Lambda function (will be suffixed with -stream)
 
   MemorySize:
     Type: Number
@@ -58,35 +58,26 @@ Conditions:
   HasOpenAIApiKey: !Not [!Equals [!Ref OpenAIApiKey, ""]]
   HasAnthropicApiKey: !Not [!Equals [!Ref AnthropicApiKey, ""]]
 
-Globals:
-  Function:
-    Timeout: !Ref Timeout
-    MemorySize: !Ref MemorySize
-    Environment:
-      Variables:
-        BYPASS_TOOL_CONSENT: "true"
-        OPENAI_API_KEY: !If [HasOpenAIApiKey, !Ref OpenAIApiKey, !Ref "AWS::NoValue"]
-        ANTHROPIC_API_KEY: !If [HasAnthropicApiKey, !Ref AnthropicApiKey, !Ref "AWS::NoValue"]
-
 Resources:
   # ---------------------------
-  # Python Lambda Function (Non-Streaming / BUFFERED)
+  # Python Lambda Function (Streaming / RESPONSE_STREAM with LWA)
   # ---------------------------
-  PythonSyncFunction:
+  PythonStreamFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "${FunctionName}-sync"
-      CodeUri: python_function/
-      Handler: agent_handler_python.handler
-      Runtime: !Ref Runtime
+      FunctionName: !Sub "${FunctionName}-stream"
+      PackageType: Image
+      MemorySize: !Ref MemorySize
+      Timeout: !Ref Timeout
       Architectures:
         - !Ref Architecture
-      Description: "Strands Agent - Python non-streaming (BUFFERED mode only)"
+      Description: "Strands Agent - Python streaming with Lambda Web Adapter (RESPONSE_STREAM mode only)"
       Environment:
         Variables:
           BYPASS_TOOL_CONSENT: "true"
-          STREAMING_CAPABLE: "false"
-          FUNCTION_TYPE: "sync"
+          STREAMING_CAPABLE: "true"
+          FUNCTION_TYPE: "stream"
+          AWS_LWA_INVOKE_MODE: "response_stream"
           OPENAI_API_KEY: !If [HasOpenAIApiKey, !Ref OpenAIApiKey, !Ref "AWS::NoValue"]
           ANTHROPIC_API_KEY: !If [HasAnthropicApiKey, !Ref AnthropicApiKey, !Ref "AWS::NoValue"]
       # Add minimal IAM permissions
@@ -102,16 +93,19 @@ Resources:
                 - bedrock:ListFoundationModels
                 - bedrock:GetFoundationModel
               Resource: "*"
+    Metadata:
+      Dockerfile: Dockerfile
+      DockerContext: python_stream_function
 
   # ---------------------------
-  # Function URL for Python (BUFFERED)
+  # Function URL for Python Stream (RESPONSE_STREAM)
   # ---------------------------
-  PythonSyncFunctionUrl:
+  PythonStreamFunctionUrl:
     Type: AWS::Lambda::Url
     Properties:
-      TargetFunctionArn: !GetAtt PythonSyncFunction.Arn
+      TargetFunctionArn: !GetAtt PythonStreamFunction.Arn
       AuthType: AWS_IAM
-      InvokeMode: BUFFERED  # Non-streaming, 6MB limit
+      InvokeMode: RESPONSE_STREAM  # Streaming, 200MB limit
       Cors:
         AllowOrigins: !Ref AllowedOrigins
         AllowMethods:
@@ -130,26 +124,26 @@ Resources:
   # ---------------------------
 
 Outputs:
-  PythonSyncFunction:
-    Description: "Python Sync Lambda Function ARN"
-    Value: !GetAtt PythonSyncFunction.Arn
+  PythonStreamFunction:
+    Description: "Python Stream Lambda Function ARN"
+    Value: !GetAtt PythonStreamFunction.Arn
     Export:
-      Name: !Sub "${AWS::StackName}-PythonSyncFunction"
+      Name: !Sub "${AWS::StackName}-PythonStreamFunction"
 
-  SyncFunctionUrl:
-    Description: "Non-streaming endpoint (Python BUFFERED Function URL)"
-    Value: !GetAtt PythonSyncFunctionUrl.FunctionUrl
+  StreamFunctionUrl:
+    Description: "Streaming endpoint (Python RESPONSE_STREAM Function URL)"
+    Value: !GetAtt PythonStreamFunctionUrl.FunctionUrl
     Export:
-      Name: !Sub "${AWS::StackName}-SyncFunctionUrl"
+      Name: !Sub "${AWS::StackName}-StreamFunctionUrl"
 
   StreamingCapable:
     Description: "Whether this deployment supports streaming"
-    Value: "false"
+    Value: "true"
     Export:
       Name: !Sub "${AWS::StackName}-StreamingCapable"
 
   DeploymentType:
-    Description: "Deployment type with single sync function"
-    Value: "sync_only"
+    Description: "Deployment type with stream-only function"
+    Value: "stream_only"
     Export:
       Name: !Sub "${AWS::StackName}-DeploymentType"

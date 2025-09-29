@@ -45,6 +45,18 @@ Parameters:
       - "false"
     Description: Whether the agent code supports streaming
 
+  OpenAIApiKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: OpenAI API Key (optional, can be provided at runtime instead)
+
+  AnthropicApiKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Anthropic API Key (optional, can be provided at runtime instead)
+
   AllowedOrigins:
     Type: CommaDelimitedList
     Default: "http://localhost:5173,https://localhost:5173"
@@ -77,6 +89,8 @@ Resources:
           BYPASS_TOOL_CONSENT: "true"
           STREAMING_CAPABLE: !Ref StreamingCapable
           FUNCTION_TYPE: "sync"
+          OPENAI_API_KEY: !If [HasOpenAIApiKey, !Ref OpenAIApiKey, !Ref "AWS::NoValue"]
+          ANTHROPIC_API_KEY: !If [HasAnthropicApiKey, !Ref AnthropicApiKey, !Ref "AWS::NoValue"]
       # Add minimal IAM permissions
       Policies:
         - AWSLambdaBasicExecutionRole
@@ -111,6 +125,8 @@ Resources:
           STREAMING_CAPABLE: !Ref StreamingCapable
           FUNCTION_TYPE: "stream"
           AWS_LWA_INVOKE_MODE: "response_stream"
+          OPENAI_API_KEY: !If [HasOpenAIApiKey, !Ref OpenAIApiKey, !Ref "AWS::NoValue"]
+          ANTHROPIC_API_KEY: !If [HasAnthropicApiKey, !Ref AnthropicApiKey, !Ref "AWS::NoValue"]
       # Add minimal IAM permissions
       Policies:
         - AWSLambdaBasicExecutionRole
@@ -178,6 +194,8 @@ Resources:
 
 Conditions:
   IsStreamingCapable: !Equals [!Ref StreamingCapable, "true"]
+  HasOpenAIApiKey: !Not [!Equals [!Ref OpenAIApiKey, ""]]
+  HasAnthropicApiKey: !Not [!Equals [!Ref AnthropicApiKey, ""]]
 
 Outputs:
   PythonSyncFunction:

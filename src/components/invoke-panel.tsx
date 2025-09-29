@@ -24,6 +24,7 @@ interface LambdaDeployment {
     streaming_capable?: boolean;
     deployment_type?: string;
     python_function_arn?: string;
+    python_stream_function_arn?: string;
     nodejs_function_arn?: string;
     sync_function_url?: string;
     stream_function_url?: string;
@@ -41,13 +42,19 @@ interface InvokePanelProps {
 interface DeleteConfirmationModalProps {
   isOpen: boolean;
   agentName: string;
-  agentArn: string;
+  deploymentType: 'agentcore' | 'lambda';
+  identifier: string; // ARN for AgentCore, function name for Lambda
+  region?: string; // For Lambda deployments
   onConfirm: () => void;
   onCancel: () => void;
 }
 
-function DeleteConfirmationModal({ isOpen, agentName, agentArn, onConfirm, onCancel }: DeleteConfirmationModalProps) {
+function DeleteConfirmationModal({ isOpen, agentName, deploymentType, identifier, region, onConfirm, onCancel }: DeleteConfirmationModalProps) {
   if (!isOpen) return null;
+
+  const isAgentCore = deploymentType === 'agentcore';
+  const title = isAgentCore ? 'Delete AgentCore Runtime' : 'Delete Lambda Deployment';
+  const typeLabel = isAgentCore ? 'AgentCore runtime' : 'Lambda deployment';
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -56,7 +63,7 @@ function DeleteConfirmationModal({ isOpen, agentName, agentArn, onConfirm, onCan
         <div className="flex items-center justify-between p-4 border-b">
           <div className="flex items-center gap-2">
             <AlertTriangle className="h-5 w-5 text-red-500" />
-            <h3 className="text-lg font-semibold text-gray-900">Delete AgentCore Runtime</h3>
+            <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
           </div>
           <button
             onClick={onCancel}
@@ -70,7 +77,7 @@ function DeleteConfirmationModal({ isOpen, agentName, agentArn, onConfirm, onCan
         <div className="p-4">
           <div className="mb-4">
             <p className="text-gray-700 mb-3">
-              Are you sure you want to delete the AgentCore runtime <strong>"{agentName}"</strong>?
+              Are you sure you want to delete the {typeLabel} <strong>"{agentName}"</strong>?
             </p>
             <div className="bg-red-50 border border-red-200 rounded-md p-3 mb-4">
               <div className="flex items-start gap-2">
@@ -78,12 +85,21 @@ function DeleteConfirmationModal({ isOpen, agentName, agentArn, onConfirm, onCan
                 <div className="text-sm text-red-800">
                   <p className="font-medium mb-1">This action cannot be undone!</p>
                   <p>This will permanently delete the AWS resources and all associated data.</p>
+                  {!isAgentCore && (
+                    <p className="mt-1">This includes the CloudFormation stack, Lambda functions, and ECR repositories.</p>
+                  )}
                 </div>
               </div>
             </div>
             <div className="bg-gray-50 rounded-md p-3">
-              <p className="text-xs text-gray-600 mb-1">ARN:</p>
-              <p className="text-xs font-mono text-gray-800 break-all">{agentArn}</p>
+              <p className="text-xs text-gray-600 mb-1">{isAgentCore ? 'ARN:' : 'Function Name:'}</p>
+              <p className="text-xs font-mono text-gray-800 break-all">{identifier}</p>
+              {region && !isAgentCore && (
+                <>
+                  <p className="text-xs text-gray-600 mb-1 mt-2">Region:</p>
+                  <p className="text-xs font-mono text-gray-800">{region}</p>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -116,18 +132,37 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
   const [sessionId, setSessionId] = useState('');
   const [invokeResult, setInvokeResult] = useState<any>(null);
   const [isInvoking, setIsInvoking] = useState(false);
-  const [isStreaming, setIsStreaming] = useState(false);
+  // Auto-detect streaming capability based on deployment metadata
+  const getStreamingCapability = (agent: DeploymentHistory | null): boolean => {
+    if (!agent) return false;
+
+    if (agent.deployment_type === 'lambda') {
+      // For Lambda: check if deployment has streaming capability
+      return !!(agent as LambdaDeployment).deployment_result.streaming_capable;
+    } else if (agent.deployment_type === 'agentcore') {
+      // For AgentCore: always try streaming (backend will auto-detect)
+      return true;
+    }
+
+    return false;
+  };
+
+  const isStreamingCapable = getStreamingCapability(selectedAgent);
   const [streamContent, setStreamContent] = useState<string[]>([]);
   const [streamingResult, setStreamingResult] = useState<string>('');
   const [showStreamingWarning, setShowStreamingWarning] = useState(false);
   const [deleteModal, setDeleteModal] = useState<{
     isOpen: boolean;
     agentName: string;
-    agentArn: string;
+    deploymentType: 'agentcore' | 'lambda';
+    identifier: string; // ARN for AgentCore, function name for Lambda
+    region?: string; // For Lambda deployments
+    deploymentId?: string; // For Lambda deployment history cleanup
   }>({
     isOpen: false,
     agentName: '',
-    agentArn: ''
+    deploymentType: 'agentcore',
+    identifier: ''
   });
 
   // Generate a 33-character random session ID
@@ -217,30 +252,81 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
   };
 
   // Show delete confirmation modal
-  const showDeleteConfirmation = (agentArn: string, agentName: string) => {
+  const showDeleteConfirmation = (
+    agentName: string,
+    deploymentType: 'agentcore' | 'lambda',
+    identifier: string,
+    region?: string,
+    deploymentId?: string
+  ) => {
     setDeleteModal({
       isOpen: true,
-      agentArn,
-      agentName
+      agentName,
+      deploymentType,
+      identifier,
+      region,
+      deploymentId
     });
   };
 
   // Handle delete confirmation
   const handleDeleteConfirm = async () => {
-    const { agentArn } = deleteModal;
+    const { deploymentType, identifier, region, deploymentId } = deleteModal;
 
     // Close modal first
-    setDeleteModal({ isOpen: false, agentArn: '', agentName: '' });
+    setDeleteModal({
+      isOpen: false,
+      agentName: '',
+      deploymentType: 'agentcore',
+      identifier: ''
+    });
 
     try {
-      // First, call the backend API to delete the actual AWS resources
-      const response = await fetch(`/api/deploy/agentcore/${encodeURIComponent(agentArn)}`, {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+      let response: Response;
 
+      if (deploymentType === 'agentcore') {
+        // Delete AgentCore deployment
+        response = await fetch(`/api/deploy/agentcore/${encodeURIComponent(identifier)}`, {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+      } else {
+        // Delete Lambda deployment using the new API client method
+        const apiClient = (await import('../lib/api-client')).apiClient;
+        const result = await apiClient.deleteLambdaDeployment(identifier, region);
+
+        console.log('Lambda deletion result:', result);
+
+        if (!result.success) {
+          throw new Error(result.message);
+        }
+
+        // Also delete from deployment history if we have a deployment ID
+        if (deploymentId) {
+          try {
+            await apiClient.deleteDeploymentHistoryItem(deploymentId);
+            console.log('Lambda deployment history record deleted:', deploymentId);
+          } catch (historyError) {
+            console.warn('Failed to delete deployment history record:', historyError);
+            // Don't fail the entire operation if history deletion fails
+          }
+        }
+
+        // Reload deployment history after successful deletion
+        await loadDeploymentHistory();
+
+        // Clear selection if the deleted deployment was selected
+        if (selectedAgent && selectedAgent.deployment_type === 'lambda' &&
+            (selectedAgent as LambdaDeployment).agent_name === identifier) {
+          setSelectedAgent(null);
+        }
+
+        return; // Exit early for Lambda since apiClient handles everything
+      }
+
+      // Handle AgentCore response
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
@@ -249,28 +335,19 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
       const result = await response.json();
       console.log('AgentCore deletion result:', result);
 
-      // Only remove from localStorage if backend deletion was successful
-      const saved = localStorage.getItem('agentcore_deployments');
-      if (saved) {
-        const deployments = JSON.parse(saved);
-        const filteredDeployments = deployments.filter(
-          (deployment: DeploymentHistory) => deployment.agent_runtime_arn !== agentArn
-        );
-        localStorage.setItem('agentcore_deployments', JSON.stringify(filteredDeployments));
-        setDeploymentHistory(filteredDeployments);
+      // Reload deployment history after successful deletion
+      await loadDeploymentHistory();
 
-        // If the deleted agent was selected, clear selection
-        if (selectedAgent?.agent_runtime_arn === agentArn) {
-          setSelectedAgent(null);
-        }
+      // Clear selection if the deleted agent was selected
+      if (selectedAgent && selectedAgent.deployment_type === 'agentcore' &&
+          (selectedAgent as AgentCoreDeployment).agent_runtime_arn === identifier) {
+        setSelectedAgent(null);
       }
 
-      // Show success message
-      // alert(`Successfully deleted AgentCore runtime "${agentName}"`);
     } catch (error) {
       console.error('Failed to delete agent:', error);
       // Show error to user
-      alert(`Failed to delete agent: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      alert(`Failed to delete ${deploymentType === 'agentcore' ? 'AgentCore runtime' : 'Lambda deployment'}: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
@@ -280,29 +357,23 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
       if (deployment.deployment_type === 'agentcore') {
         // For AgentCore, show confirmation modal
         const agentCore = deployment as AgentCoreDeployment;
-        showDeleteConfirmation(agentCore.agent_runtime_arn, agentCore.agent_runtime_name);
+        showDeleteConfirmation(
+          agentCore.agent_runtime_name,
+          'agentcore',
+          agentCore.agent_runtime_arn
+        );
         return;
       } else if (deployment.deployment_type === 'lambda') {
-        // Delete from backend API for Lambda
-        try {
-          await fetch(`/api/deployment-history/${deployment.deployment_id}`, {
-            method: 'DELETE',
-          });
-        } catch (error) {
-          console.error('Failed to delete Lambda deployment:', error);
-        }
-      }
-
-      // Reload the deployment history
-      await loadDeploymentHistory();
-
-      // Clear selection if the deleted deployment was selected
-      if (selectedAgent &&
-          ((selectedAgent.deployment_type === 'agentcore' && deployment.deployment_type === 'agentcore' &&
-            (selectedAgent as AgentCoreDeployment).agent_runtime_arn === (deployment as AgentCoreDeployment).agent_runtime_arn) ||
-           (selectedAgent.deployment_type === 'lambda' && deployment.deployment_type === 'lambda' &&
-            (selectedAgent as LambdaDeployment).deployment_id === (deployment as LambdaDeployment).deployment_id))) {
-        setSelectedAgent(null);
+        // For Lambda, show confirmation modal with deployment_id for history cleanup
+        const lambdaDeployment = deployment as LambdaDeployment;
+        showDeleteConfirmation(
+          lambdaDeployment.agent_name,
+          'lambda',
+          lambdaDeployment.agent_name, // Use agent_name as function name
+          lambdaDeployment.region,
+          lambdaDeployment.deployment_id // Pass deployment_id for history cleanup
+        );
+        return;
       }
     } catch (error) {
       console.error('Failed to delete agent:', error);
@@ -312,7 +383,12 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
 
   // Handle delete cancellation
   const handleDeleteCancel = () => {
-    setDeleteModal({ isOpen: false, agentArn: '', agentName: '' });
+    setDeleteModal({
+      isOpen: false,
+      agentName: '',
+      deploymentType: 'agentcore',
+      identifier: ''
+    });
   };
 
   // Handle streaming response
@@ -325,7 +401,7 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
     const decoder = new TextDecoder();
     let buffer = '';
 
-    setIsStreaming(true);
+    // Streaming will be automatically determined by isStreamingCapable
     setStreamContent([]);
 
     try {
@@ -356,7 +432,7 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
         }
       }
     } finally {
-      setIsStreaming(false);
+      // Streaming automatically determined by deployment capability
       reader.releaseLock();
     }
   };
@@ -422,7 +498,7 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
         // Lambda invocation using Function URLs
         const lambdaDeployment = selectedAgent as LambdaDeployment;
 
-        if (isStreaming) {
+        if (isStreamingCapable) {
           // Use streaming function URL if available
           const streamFunctionUrl = lambdaDeployment.deployment_result.stream_function_url;
 
@@ -800,71 +876,41 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
           />
         </div>
 
-        {/* Stream Mode Toggle */}
-        <div className="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-md">
+        {/* Streaming Status Display */}
+        <div className="p-3 bg-gray-50 border border-gray-200 rounded-md">
           <div className="flex items-center gap-2">
             <Waves className="h-4 w-4 text-blue-600" />
             <div>
-              <label className="text-sm font-medium text-gray-700">Enable Streaming</label>
+              <label className="text-sm font-medium text-gray-700">Streaming Mode</label>
               <p className="text-xs text-gray-500">
-                Get real-time response chunks as they are generated
+                Automatically detected based on deployment capabilities
               </p>
               {/* Show streaming capability status */}
               {selectedAgent && selectedAgent.deployment_type === 'lambda' && (
                 (() => {
-                  const lambdaAgent = selectedAgent as LambdaDeployment;
-                  const hasStreamFunction = !!lambdaAgent.deployment_result.python_stream_function_arn;
-
-                  if (!hasStreamFunction) {
-                    return (
-                      <p className="text-xs text-amber-600 mt-1">
-                        ⚠️ This is a sync-only deployment (no streaming function)
-                      </p>
-                    );
-                  } else if (isStreaming) {
+                  if (isStreamingCapable) {
                     return (
                       <p className="text-xs text-green-600 mt-1">
-                        ✅ Streaming function available
+                        ✅ Streaming enabled (detected from deployment)
+                      </p>
+                    );
+                  } else {
+                    return (
+                      <p className="text-xs text-amber-600 mt-1">
+                        ⚠️ Non-streaming mode (sync-only deployment)
                       </p>
                     );
                   }
-                  return null;
                 })()
               )}
               {/* AgentCore streaming info */}
-              {selectedAgent && selectedAgent.deployment_type === 'agentcore' && isStreaming && (
+              {selectedAgent && selectedAgent.deployment_type === 'agentcore' && (
                 <p className="text-xs text-green-600 mt-1">
-                  ✅ AgentCore supports streaming
+                  ✅ AgentCore streaming auto-detected from code
                 </p>
               )}
             </div>
           </div>
-          {(() => {
-            // Determine if streaming toggle should be disabled
-            const isStreamingDisabled = selectedAgent && selectedAgent.deployment_type === 'lambda' &&
-              !(selectedAgent as LambdaDeployment).deployment_result.python_stream_function_arn;
-
-            return (
-              <label className={`relative inline-flex items-center ${
-                isStreamingDisabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'
-              }`}>
-                <input
-                  type="checkbox"
-                  checked={isStreaming}
-                  onChange={(e) => {
-                    if (!isStreamingDisabled) {
-                      setIsStreaming(e.target.checked);
-                    }
-                  }}
-                  disabled={isStreamingDisabled}
-                  className="sr-only peer"
-                />
-                <div className={`w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all ${
-                  isStreamingDisabled ? 'peer-checked:bg-gray-400' : 'peer-checked:bg-blue-600'
-                }`}></div>
-              </label>
-            );
-          })()}
         </div>
 
         {/* Session ID - Only for AgentCore */}
@@ -902,14 +948,14 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
             className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isInvoking
-              ? isStreaming
+              ? isStreamingCapable
                 ? 'Streaming...'
                 : 'Invoking...'
               : selectedAgent?.deployment_type === 'lambda'
-                ? isStreaming
+                ? isStreamingCapable
                   ? 'Stream Lambda Function'
                   : 'Invoke Lambda Function'
-                : isStreaming
+                : isStreamingCapable
                   ? 'Stream AgentCore Agent'
                   : 'Invoke AgentCore Agent'
             }
@@ -935,11 +981,11 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
         )}
 
         {/* Streaming Response (AgentCore) */}
-        {(isStreaming || streamContent.length > 0) && selectedAgent?.deployment_type === 'agentcore' && (
+        {(isStreamingCapable || streamContent.length > 0) && selectedAgent?.deployment_type === 'agentcore' && (
           <div>
             <h4 className="text-sm font-medium text-gray-900 mb-2">
               Streaming Response
-              {isStreaming && (
+              {isStreamingCapable && (
                 <span className="ml-2 inline-flex items-center px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800">
                   <div className="w-2 h-2 bg-blue-600 rounded-full animate-pulse mr-1"></div>
                   Streaming...
@@ -951,7 +997,7 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
                 {streamContent.map((chunk, index) => (
                   <span key={index}>{chunk}</span>
                 ))}
-                {isStreaming && (
+                {isStreamingCapable && (
                   <span className="animate-pulse">▋</span>
                 )}
               </div>
@@ -961,12 +1007,12 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
 
         {/* Invoke Result */}
         {invokeResult && (
-          (selectedAgent?.deployment_type === 'agentcore' && !(isStreaming || streamContent.length > 0)) ||
+          (selectedAgent?.deployment_type === 'agentcore' && !(isStreamingCapable || streamContent.length > 0)) ||
           (selectedAgent?.deployment_type === 'lambda' && !streamingResult)
         ) && (
           <div>
             <h4 className="text-sm font-medium text-gray-900 mb-2">
-              {isStreaming ? 'Final Result' : 'Invoke Result'}
+              {isStreamingCapable ? 'Final Result' : 'Invoke Result'}
             </h4>
 
             {/* Show streaming capability info if available */}
@@ -1006,7 +1052,7 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
                 <div className="whitespace-pre-wrap font-normal">
                   {(() => {
                     // For streaming, show the accumulated result
-                    if (isStreaming && streamingResult) {
+                    if (isStreamingCapable && streamingResult) {
                       return streamingResult;
                     }
 
@@ -1150,7 +1196,7 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
               <button
                 onClick={() => {
                   setShowStreamingWarning(false);
-                  setIsStreaming(false); // Turn off streaming toggle
+                  // Streaming automatically determined by deployment capability
                 }}
                 className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
               >
@@ -1173,7 +1219,9 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
       <DeleteConfirmationModal
         isOpen={deleteModal.isOpen}
         agentName={deleteModal.agentName}
-        agentArn={deleteModal.agentArn}
+        deploymentType={deleteModal.deploymentType}
+        identifier={deleteModal.identifier}
+        region={deleteModal.region}
         onConfirm={handleDeleteConfirm}
         onCancel={handleDeleteCancel}
       />

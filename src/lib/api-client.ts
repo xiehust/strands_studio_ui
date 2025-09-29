@@ -579,6 +579,17 @@ class ApiClient {
     });
   }
 
+  async deleteLambdaDeployment(functionName: string, region: string = 'us-east-1', stackName?: string): Promise<{ success: boolean; message: string; function_name: string; region: string; stack_name: string; logs: string[] }> {
+    const params = new URLSearchParams({ region });
+    if (stackName) {
+      params.append('stack_name', stackName);
+    }
+
+    return this.request(`/api/deploy/lambda/${encodeURIComponent(functionName)}?${params.toString()}`, {
+      method: 'DELETE',
+    });
+  }
+
   // Utility method to check if backend is available
   async isBackendAvailable(): Promise<boolean> {
     try {

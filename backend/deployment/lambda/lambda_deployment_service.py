@@ -93,8 +93,8 @@ class LambdaDeploymentService:
         Get the appropriate template based on streaming capability
         """
         if streaming_capable:
-            template_path = self.base_deployment_dir / "template_dual_function.yaml"
-            logger.info(f"Using dual-function template (streaming enabled)")
+            template_path = self.base_deployment_dir / "template_stream_only.yaml"
+            logger.info(f"Using stream-only template (streaming enabled)")
         else:
             template_path = self.base_deployment_dir / "template_sync_only.yaml"
             logger.info(f"Using sync-only template (streaming disabled)")
@@ -156,7 +156,8 @@ class LambdaDeploymentService:
             deployment_logs.append(f"Streaming capability detected: {streaming_capable}")
             deployment_logs.append(f"Using template: {selected_template_path.name}")
             deployment_logs.append(f"Using Python handler: {python_handler_path.name}")
-            await notify_progress("Analyzing code capabilities", "completed", f"Dual-function setup, streaming: {streaming_capable}")
+            template_mode = "stream-only" if streaming_capable else "sync-only"
+            await notify_progress("Analyzing code capabilities", "completed", f"Template selected: {template_mode}")
 
             # Validate prerequisites
             await notify_progress("Validating prerequisites", "running")
@@ -168,10 +169,13 @@ class LambdaDeploymentService:
             if not python_handler_path.exists():
                 raise RuntimeError(f"Python handler template not found: {python_handler_path}")
 
-            # Check for existing Lambda functions with same names (both sync and stream)
-            await self._check_function_name_conflict(f"{config.function_name}-sync", deployment_logs)
+            # Check for existing Lambda functions with same names
             if streaming_capable:
+                # Stream-only mode: only check stream function
                 await self._check_function_name_conflict(f"{config.function_name}-stream", deployment_logs)
+            else:
+                # Sync-only mode: only check sync function
+                await self._check_function_name_conflict(f"{config.function_name}-sync", deployment_logs)
 
             deployment_logs.append("Prerequisites validated")
             await notify_progress("Validating prerequisites", "completed")
@@ -260,21 +264,29 @@ class LambdaDeploymentService:
                     deployment_time=deployment_time
                 )
 
-                # Add dual-function deployment information
+                # Add deployment information
                 result.streaming_capable = streaming_capable
-                result.invoke_endpoint = outputs.get("sync_function_url")      # Python BUFFERED Function URL
-                result.streaming_invoke_endpoint = outputs.get("stream_function_url") # Node.js RESPONSE_STREAM Function URL
-                result.deployment_type = outputs.get("deployment_type", "dual_function")
+                result.deployment_type = outputs.get("deployment_type")
                 # For backward compatibility - remove api_endpoint since we're not using API Gateway
                 result.api_endpoint = None
 
-                # Set dual-function specific fields
+                if streaming_capable:
+                    # Stream-only mode: main endpoint is the stream URL
+                    result.invoke_endpoint = outputs.get("stream_function_url")
+                    result.streaming_invoke_endpoint = outputs.get("stream_function_url")
+                else:
+                    # Sync-only mode: main endpoint is the sync URL
+                    result.invoke_endpoint = outputs.get("sync_function_url")
+                    result.streaming_invoke_endpoint = None
+
+                # Set function-specific fields
                 result.python_function_arn = outputs.get("python_function_arn")
                 result.python_stream_function_arn = outputs.get("python_stream_function_arn")
                 result.sync_function_url = outputs.get("sync_function_url")
                 result.stream_function_url = outputs.get("stream_function_url")
 
-                logger.info(f"Dual-function Lambda deployment successful: {config.function_name}, streaming_capable: {streaming_capable}")
+                deployment_mode = "stream-only" if streaming_capable else "sync-only"
+                logger.info(f"Lambda deployment successful: {config.function_name}, mode: {deployment_mode}")
 
                 return result
 
@@ -635,7 +647,7 @@ image_repositories = []
 
         # Build all resources in the selected template
         if streaming_capable:
-            logs.append("Building resources: PythonSyncFunction, PythonStreamFunction (dual-function template)")
+            logs.append("Building resources: PythonStreamFunction (stream-only template)")
         else:
             logs.append("Building resources: PythonSyncFunction (sync-only template)")
 
@@ -651,9 +663,11 @@ image_repositories = []
             docker_platform = 'linux/arm64' if architecture == 'arm64' else 'linux/amd64'
             env['DOCKER_DEFAULT_PLATFORM'] = docker_platform
             logs.append(f"Set DOCKER_DEFAULT_PLATFORM={docker_platform} for {architecture} architecture")
-
+            logger.info(f"config:{config}")
             # Build all resources in the template (template is already selected based on streaming_capable)
-            build_cmd = ["sam", "build", "--use-container"]
+            # Pass architecture parameter to sam build to ensure correct container platform
+            build_cmd = ["sam", "build", "--parameter-overrides",
+            f"Architecture={architecture}"]
             logs.append(f"Running: {' '.join(build_cmd)}")
 
             result = subprocess.run(
@@ -684,9 +698,9 @@ image_repositories = []
                 architecture = config.architecture if config else 'x86_64'
                 docker_platform = 'linux/arm64' if architecture == 'arm64' else 'linux/amd64'
                 env['DOCKER_DEFAULT_PLATFORM'] = docker_platform
-
-                # Build all resources in the template (same as container build)
-                build_cmd = ["sam", "build"]
+                # Pass architecture parameter to sam build to ensure correct container platform
+                build_cmd = ["sam", "build", "--parameter-overrides",
+                f"Architecture={architecture}"]
                 logs.append(f"Fallback running: {' '.join(build_cmd)}")
 
                 result = subprocess.run(
@@ -723,6 +737,31 @@ image_repositories = []
 
             # Build deploy command based on whether we have container functions
             deploy_cmd = ["sam", "deploy", "--no-confirm-changeset", "--no-fail-on-empty-changeset", "--resolve-s3"]
+
+            # Add parameter overrides for all CloudFormation parameters
+            parameter_overrides = [
+                f"FunctionName={config.function_name}",
+                f"MemorySize={config.memory_size}",
+                f"Timeout={config.timeout}",
+                f"Runtime={config.runtime}",
+                f"Architecture={config.architecture}"
+            ]
+            logs.append("Added basic CloudFormation parameter overrides")
+
+            # Add API key parameter overrides if provided
+            if config.api_keys:
+                # Only pass API keys that have actual values (not empty strings)
+                if config.api_keys.get('openai_api_key') and config.api_keys['openai_api_key'].strip():
+                    parameter_overrides.append(f"OpenAIApiKey={config.api_keys['openai_api_key']}")
+                    logs.append("Added OpenAI API key parameter override")
+
+                if config.api_keys.get('anthropic_api_key') and config.api_keys['anthropic_api_key'].strip():
+                    parameter_overrides.append(f"AnthropicApiKey={config.api_keys['anthropic_api_key']}")
+                    logs.append("Added Anthropic API key parameter override")
+
+            # Always add parameter overrides since we have basic CF parameters
+            deploy_cmd.extend(["--parameter-overrides", " ".join(parameter_overrides)])
+            logs.append(f"Added parameter overrides: {len(parameter_overrides)} parameters total")
 
             # Add image repository resolution for container functions
             if streaming_capable:
@@ -813,7 +852,7 @@ image_repositories = []
         self,
         config: LambdaDeploymentConfig
     ) -> DeploymentResult:
-        """Delete a Lambda deployment with ECR cleanup"""
+        """Delete a Lambda deployment with ECR cleanup and companion stack removal"""
         logs = []
         try:
             stack_name = config.stack_name or f"strands-agent-{config.function_name.lower()}"
@@ -834,12 +873,15 @@ image_repositories = []
                 check=True
             )
 
-            logger.info(f"Initiated stack deletion: {stack_name}")
-            logs.append(f"Stack deletion initiated: {stack_name}")
+            logger.info(f"Initiated main stack deletion: {stack_name}")
+            logs.append(f"Main stack deletion initiated: {stack_name}")
+
+            # Step 3: Find and delete companion stacks (created by SAM for container functions)
+            await self._cleanup_companion_stacks(stack_name, config.region, logs)
 
             return DeploymentResult(
                 success=True,
-                message=f"Stack deletion initiated: {stack_name}",
+                message=f"Stack deletion initiated: {stack_name} (including companion stacks)",
                 logs=logs
             )
 
@@ -912,6 +954,127 @@ image_repositories = []
         except Exception as e:
             logs.append(f"Warning: ECR cleanup failed: {str(e)}")
             logger.warning(f"ECR cleanup error: {str(e)}")
+
+    async def _cleanup_companion_stacks(self, stack_name: str, region: str, logs: List[str]):
+        """Clean up SAM companion stacks created for container functions"""
+        try:
+            # List all stacks that match the companion stack naming pattern
+            # SAM creates companion stacks with pattern: {main-stack-name}-{hash}-CompanionStack
+            result = subprocess.run(
+                [
+                    "aws", "cloudformation", "list-stacks",
+                    "--region", region,
+                    "--query", f"StackSummaries[?contains(StackName, '{stack_name}') && contains(StackName, 'CompanionStack') && StackStatus != 'DELETE_COMPLETE'].StackName",
+                    "--output", "text"
+                ],
+                capture_output=True,
+                text=True
+            )
+
+            if result.returncode == 0 and result.stdout.strip():
+                companion_stacks = result.stdout.strip().split()
+
+                for companion_stack in companion_stacks:
+                    if companion_stack:  # Ensure it's not empty
+                        try:
+                            logger.info(f"Deleting companion stack: {companion_stack}")
+
+                            # First, try to empty any ECR repositories in the companion stack
+                            await self._cleanup_companion_stack_ecr(companion_stack, region, logs)
+
+                            # Delete the companion stack
+                            delete_result = subprocess.run(
+                                [
+                                    "aws", "cloudformation", "delete-stack",
+                                    "--stack-name", companion_stack,
+                                    "--region", region
+                                ],
+                                capture_output=True,
+                                text=True,
+                                check=True
+                            )
+
+                            logs.append(f"Companion stack deletion initiated: {companion_stack}")
+                            logger.info(f"Initiated companion stack deletion: {companion_stack}")
+
+                        except subprocess.CalledProcessError as e:
+                            error_msg = f"Failed to delete companion stack {companion_stack}: {e.stderr}"
+                            logs.append(f"Warning: {error_msg}")
+                            logger.warning(error_msg)
+                        except Exception as e:
+                            error_msg = f"Error deleting companion stack {companion_stack}: {str(e)}"
+                            logs.append(f"Warning: {error_msg}")
+                            logger.warning(error_msg)
+            else:
+                logs.append("No companion stacks found to clean up")
+                logger.info("No companion stacks found for cleanup")
+
+        except Exception as e:
+            error_msg = f"Error during companion stack cleanup: {str(e)}"
+            logs.append(f"Warning: {error_msg}")
+            logger.warning(error_msg)
+
+    async def _cleanup_companion_stack_ecr(self, companion_stack_name: str, region: str, logs: List[str]):
+        """Clean up ECR repositories in a companion stack before deleting the stack"""
+        try:
+            # Get ECR repositories from the companion stack
+            result = subprocess.run(
+                [
+                    "aws", "cloudformation", "describe-stack-resources",
+                    "--stack-name", companion_stack_name,
+                    "--region", region,
+                    "--query", "StackResources[?ResourceType=='AWS::ECR::Repository'].PhysicalResourceId",
+                    "--output", "text"
+                ],
+                capture_output=True,
+                text=True
+            )
+
+            if result.returncode == 0 and result.stdout.strip():
+                repositories = result.stdout.strip().split()
+
+                for repo in repositories:
+                    if repo and repo != "None":  # Ensure it's not empty or None
+                        try:
+                            # Get all images in the repository
+                            images_result = subprocess.run(
+                                [
+                                    "aws", "ecr", "list-images",
+                                    "--repository-name", repo,
+                                    "--region", region,
+                                    "--query", "imageIds[*]",
+                                    "--output", "json"
+                                ],
+                                capture_output=True,
+                                text=True
+                            )
+
+                            if images_result.returncode == 0 and images_result.stdout.strip() != "[]":
+                                # Delete all images
+                                subprocess.run(
+                                    [
+                                        "aws", "ecr", "batch-delete-image",
+                                        "--repository-name", repo,
+                                        "--region", region,
+                                        "--image-ids", images_result.stdout
+                                    ],
+                                    capture_output=True,
+                                    text=True,
+                                    check=True
+                                )
+                                logs.append(f"Cleaned up images in companion ECR repository: {repo}")
+                                logger.info(f"Companion ECR cleanup successful for repository: {repo}")
+
+                        except subprocess.CalledProcessError as e:
+                            logs.append(f"Warning: Failed to clean up companion ECR repository {repo}: {e.stderr}")
+                            logger.warning(f"Companion ECR cleanup failed for {repo}: {e.stderr}")
+                        except Exception as e:
+                            logs.append(f"Warning: Error cleaning companion ECR repository {repo}: {str(e)}")
+                            logger.warning(f"Companion ECR cleanup error for {repo}: {str(e)}")
+
+        except Exception as e:
+            logs.append(f"Warning: Companion ECR cleanup failed: {str(e)}")
+            logger.warning(f"Companion ECR cleanup error: {str(e)}")
 
     async def _generate_handler(self, generated_code: str) -> str:
         """
@@ -1360,12 +1523,13 @@ def execute_fallback_streaming(user_input: str, context) -> Dict[str, Any]:
 
         return handler_code
 
-    def _generate_dynamic_dockerfile(self, runtime: str) -> str:
+    def _generate_dynamic_dockerfile(self, runtime: str, architecture: str = None) -> str:
         """
         Generate Dockerfile content with dynamic Python runtime version
 
         Args:
             runtime: Python runtime version (e.g., 'python3.12', 'python3.11')
+            architecture: Target architecture (x86_64 or arm64), if None uses system default
 
         Returns:
             Dockerfile content as string
@@ -1373,15 +1537,15 @@ def execute_fallback_streaming(user_input: str, context) -> Dict[str, Any]:
         # Extract version number from runtime (e.g., 'python3.12' -> '3.12')
         version = runtime.replace('python', '') if runtime.startswith('python') else '3.12'
 
-        dockerfile_content = f"""# Use multi-arch ECR image for Lambda Web Adapter (no manual arch handling needed)
-FROM public.ecr.aws/awsguru/aws-lambda-adapter:0.8.4 as adapter
+        # Add platform specification if architecture is provided
+        platform_spec = ""
+        if architecture:
+            docker_platform = 'linux/arm64' if architecture == 'arm64' else 'linux/amd64'
+            platform_spec = f"--platform={docker_platform} "
 
-# Python runtime version dynamically set from user configuration: {runtime}
-FROM python:{version}-slim
-
-# Copy Lambda Web Adapter from ECR multi-arch image
-COPY --from=adapter /lambda-adapter /opt/extensions/lambda-adapter
-RUN chmod +x /opt/extensions/lambda-adapter
+        dockerfile_content = f"""# Use ECR image for Lambda Web Adapter with platform specification
+FROM {platform_spec}public.ecr.aws/docker/library/python:3.12.0-slim-bullseye
+COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:0.9.1 /lambda-adapter /opt/extensions/lambda-adapter
 
 # Set working directory
 WORKDIR /var/task

@@ -326,6 +326,43 @@ export function LambdaDeployPanel({ nodes, edges, className = '' }: LambdaDeploy
   };
 
 
+  // Extract API key requirements from generated code
+  const extractApiKeyRequirements = (code: string): Record<string, string> => {
+    const apiKeys: Record<string, string> = {};
+
+    // Extract API keys from agent nodes in the flow
+    const agentNodes = nodes.filter(node => node.type === 'agent' || node.type === 'orchestrator-agent');
+
+    for (const node of agentNodes) {
+      // Check for OpenAI API key in node properties
+      if (node.data?.modelProvider === 'OpenAI' && node.data?.apiKey && typeof node.data.apiKey === 'string') {
+        apiKeys.openai_api_key = node.data.apiKey.trim();
+      }
+
+      // Check for Anthropic API key in node properties (if implemented)
+      if (node.data?.modelProvider === 'Anthropic' && node.data?.apiKey && typeof node.data.apiKey === 'string') {
+        apiKeys.anthropic_api_key = node.data.apiKey.trim();
+      }
+    }
+
+    // Fallback: Look for API key usage in code and try environment variables
+    if (code.includes('OPENAI_API_KEY') && !apiKeys.openai_api_key) {
+      const envKey = import.meta.env.VITE_OPENAI_API_KEY || import.meta.env.OPENAI_API_KEY;
+      if (envKey && envKey.trim()) {
+        apiKeys.openai_api_key = envKey.trim();
+      }
+    }
+
+    if (code.includes('ANTHROPIC_API_KEY') && !apiKeys.anthropic_api_key) {
+      const envKey = import.meta.env.VITE_ANTHROPIC_API_KEY || import.meta.env.ANTHROPIC_API_KEY;
+      if (envKey && envKey.trim()) {
+        apiKeys.anthropic_api_key = envKey.trim();
+      }
+    }
+
+    return apiKeys;
+  };
+
   const canDeploy = () => {
     return (
       generatedCode.trim() !== '' &&
@@ -352,6 +389,10 @@ export function LambdaDeployPanel({ nodes, edges, className = '' }: LambdaDeploy
     // Prepare deployment request - use edited code if available
     const codeToUse = isEditing ? editableCode : generatedCode;
 
+    // Extract API key requirements from the code
+    const apiKeyRequirements = extractApiKeyRequirements(codeToUse);
+    console.log('Detected API key requirements:', Object.keys(apiKeyRequirements));
+
     try {
       const deploymentRequest = {
         deployment_type: 'lambda',
@@ -368,6 +409,7 @@ export function LambdaDeployPanel({ nodes, edges, className = '' }: LambdaDeploy
         version: deploymentState.config.version || undefined,
         enable_api_gateway: deploymentState.config.enableApiGateway,
         enable_function_url: deploymentState.config.enableFunctionUrl,
+        api_keys: apiKeyRequirements, // Add API key requirements
       };
 
       console.log('Deploying Lambda with config:', deploymentRequest);
