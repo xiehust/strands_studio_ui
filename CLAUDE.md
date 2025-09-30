@@ -201,6 +201,13 @@ export ALB_HOSTNAME=your-alb-hostname.us-west-2.elb.amazonaws.com
 - **MCP Client Configuration**: Timeout values from MCP node properties are passed as `startup_timeout` parameter to MCPClient
 - **Execution History Optimization**: Uses single API call (`/api/execution-history`) instead of multiple requests for better performance
 
+### Deployment Features
+- **AWS Bedrock AgentCore Deployment**: Deploy agents to AWS Bedrock AgentCore for managed, serverless AI agent execution
+- **AWS Lambda Deployment**: Deploy agents to AWS Lambda with CloudFormation stack management
+- **Deployment History**: Unified storage system for both AgentCore and Lambda deployments in backend (`/api/deployment-history`)
+- **Cross-Browser Persistence**: All deployments stored in backend API, with localStorage as fallback
+- **Deployment Invoke Panel**: Unified interface in `invoke-panel.tsx` for invoking both AgentCore and Lambda agents
+
 ### Critical Architecture Rules
 1. **MCP Connection Constraints**: Each MCP server node can only connect to one agent node. This prevents resource conflicts and ensures proper context management in generated code.
 
@@ -220,6 +227,13 @@ export ALB_HOSTNAME=your-alb-hostname.us-west-2.elb.amazonaws.com
    - Conversation history uses schema: `[{"role":"user","content":[{"text": "..."}]}, {"role":"assistant","content":[{"text": "..."}]}]`
    - Backend conversation service constructs full message history and passes via `--messages` parameter
    - Chat modal provides interactive conversation interface with semi-transparent backdrop
+
+5. **Deployment Storage Architecture**:
+   - Both AgentCore and Lambda deployments are saved to backend via `/api/deployment-history`
+   - Frontend `invoke-panel.tsx` loads all deployments from backend API (not localStorage)
+   - localStorage is used only as fallback if backend API fails or returns no data
+   - Deployment history save operations are non-blocking and use `Promise.resolve().then()` to prevent save failures from affecting deployment success
+   - AgentCore deployment outputs are extracted from `deployment_result.status.deployment_outputs`
 
 ### Development Rules
 1. Always use context7 when I need code generation, setup or configuration steps, or library/API documentation. This means you should automatically use the Context7 MCP tools to resolve library id and get library docs without me having to explicitly ask.
