@@ -744,99 +744,106 @@ async def entry(payload):
         setCurrentDeploymentId(null);
       }, 5000); // Clear after 5 seconds
 
-      // Save deployment outputs to localStorage if deployment was successful
-      try {
-        if (result.success && result.status?.deployment_outputs) {
-          console.log('Saving deployment outputs:', result.status.deployment_outputs);
-          saveDeploymentOutput(result.status.deployment_outputs, isStreamingCapable);
-        } else {
-          console.log('No deployment outputs to save or deployment not successful');
-        }
-      } catch (saveError) {
-        console.error('Error saving deployment outputs:', saveError);
-        // Don't let this break the deployment flow
-      }
-
-      // Save to persistent deployment history (both success and failure)
-      try {
-        console.log('Starting deployment history save...');
-
-        // Handle logs - they might be an array or string
-        if (result.status?.logs) {
-          if (Array.isArray(result.status.logs)) {
-            logsText = result.status.logs.join('\n');
-          } else {
-            logsText = result.status.logs;
-          }
-        } else if (result.logs) {
-          if (Array.isArray(result.logs)) {
-            logsText = result.logs.join('\n');
-          } else {
-            logsText = result.logs;
-          }
-        }
-
-        const deploymentHistoryItem: DeploymentHistoryItem = {
-          deployment_id: `deployment-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-          project_id: deploymentState.config.projectId || 'default-project',
-          version: deploymentState.config.version || '1.0.0',
-          deployment_target: 'agentcore',
-          agent_name: deploymentState.config.agentName,
-          region: deploymentState.config.region,
-          execute_role: deploymentState.config.executeRole,
-          api_keys: apiKeysObject,
-          code: codeToUse,
-          deployment_result: result,
-          deployment_logs: logsText,
-          success: result.success,
-          error_message: result.success ? undefined : (result.message || 'Deployment failed'),
-          created_at: new Date().toISOString()
-        };
-
-        console.log('Saving deployment history item:', deploymentHistoryItem);
-        await apiClient.saveDeploymentHistory(deploymentHistoryItem);
-        console.log('Deployment saved to persistent storage:', deploymentHistoryItem.deployment_id);
-
-        // Also save to localStorage history for backward compatibility
+      // IMPORTANT: Save operations below are non-blocking and should not fail the deployment
+      // Wrap everything in a separate promise to prevent errors from propagating
+      Promise.resolve().then(async () => {
+        // Save deployment outputs to localStorage if deployment was successful
         try {
-          if (result.success) {
-            console.log('Saving to localStorage history...');
-            saveToHistory({
-              deploymentTarget: 'agentcore',
-              config: deploymentState.config,
-              apiKeys: apiKeysObject,
-              generatedCode: codeToUse,
-              result: result,
-              logs: logsText,
-              status: 'success'
-            });
-            console.log('Successfully saved to localStorage history');
+          if (result.success && result.status?.deployment_outputs) {
+            console.log('Saving deployment outputs:', result.status.deployment_outputs);
+            saveDeploymentOutput(result.status.deployment_outputs, isStreamingCapable);
+          } else {
+            console.log('No deployment outputs to save or deployment not successful');
           }
-        } catch (localStorageError) {
-          console.error('Error saving to localStorage history:', localStorageError);
+        } catch (saveError) {
+          console.error('Error saving deployment outputs:', saveError);
           // Don't let this break the deployment flow
         }
-      } catch (storageError) {
-        console.error('Failed to save deployment to persistent storage:', storageError);
-        // Fall back to localStorage only
+
+        // Save to persistent deployment history (both success and failure)
         try {
-          if (result.success) {
-            console.log('Falling back to localStorage only...');
-            saveToHistory({
-              deploymentTarget: 'agentcore',
-              config: deploymentState.config,
-              apiKeys: apiKeysObject,
-              generatedCode: codeToUse,
-              result: result,
-              logs: logsText,
-              status: 'success'
-            });
+          console.log('Starting deployment history save...');
+
+          // Handle logs - they might be an array or string
+          if (result.status?.logs) {
+            if (Array.isArray(result.status.logs)) {
+              logsText = result.status.logs.join('\n');
+            } else {
+              logsText = result.status.logs;
+            }
+          } else if (result.logs) {
+            if (Array.isArray(result.logs)) {
+              logsText = result.logs.join('\n');
+            } else {
+              logsText = result.logs;
+            }
           }
-        } catch (fallbackError) {
-          console.error('Even localStorage fallback failed:', fallbackError);
-          // Continue anyway - don't break the deployment flow
+
+          const deploymentHistoryItem: DeploymentHistoryItem = {
+            deployment_id: `deployment-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+            project_id: deploymentState.config.projectId || 'default-project',
+            version: deploymentState.config.version || '1.0.0',
+            deployment_target: 'agentcore',
+            agent_name: deploymentState.config.agentName,
+            region: deploymentState.config.region,
+            execute_role: deploymentState.config.executeRole,
+            api_keys: apiKeysObject,
+            code: codeToUse,
+            deployment_result: result,
+            deployment_logs: logsText,
+            success: result.success,
+            error_message: result.success ? undefined : (result.message || 'Deployment failed'),
+            created_at: new Date().toISOString()
+          };
+
+          console.log('Saving deployment history item:', deploymentHistoryItem);
+          await apiClient.saveDeploymentHistory(deploymentHistoryItem);
+          console.log('Deployment saved to persistent storage:', deploymentHistoryItem.deployment_id);
+
+          // Also save to localStorage history for backward compatibility
+          try {
+            if (result.success) {
+              console.log('Saving to localStorage history...');
+              saveToHistory({
+                deploymentTarget: 'agentcore',
+                config: deploymentState.config,
+                apiKeys: apiKeysObject,
+                generatedCode: codeToUse,
+                result: result,
+                logs: logsText,
+                status: 'success'
+              });
+              console.log('Successfully saved to localStorage history');
+            }
+          } catch (localStorageError) {
+            console.error('Error saving to localStorage history:', localStorageError);
+            // Don't let this break the deployment flow
+          }
+        } catch (storageError) {
+          console.error('Failed to save deployment to persistent storage:', storageError);
+          // Fall back to localStorage only
+          try {
+            if (result.success) {
+              console.log('Falling back to localStorage only...');
+              saveToHistory({
+                deploymentTarget: 'agentcore',
+                config: deploymentState.config,
+                apiKeys: apiKeysObject,
+                generatedCode: codeToUse,
+                result: result,
+                logs: logsText,
+                status: 'success'
+              });
+            }
+          } catch (fallbackError) {
+            console.error('Even localStorage fallback failed:', fallbackError);
+            // Continue anyway - don't break the deployment flow
+          }
         }
-      }
+      }).catch(err => {
+        // Catch any errors from the save operations and log them without failing
+        console.error('Non-critical error in post-deployment save operations:', err);
+      });
     } catch (error) {
       console.error('AgentCore deployment error caught:', error);
 
