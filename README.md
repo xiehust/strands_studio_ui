@@ -16,6 +16,7 @@ A visual drag-and-drop interface for creating, configuring, and executing AI age
 - **Real-time Execution**: Execute agents with streaming support and live updates
 - **Project Management**: Save, load, and manage multiple agent projects with persistent local storage
 - **Execution History**: Track and replay previous agent runs
+- **One-Click Deployment**: Deploy agents to AWS Bedrock AgentCore or AWS Lambda Function with a single click
 
 ## Demos
 ### Video
@@ -147,6 +148,106 @@ export ALB_HOSTNAME=your-alb-hostname.us-west-2.elb.amazonaws.com
 - Frontend logs: `logs/frontend.log`
 - Backend logs: `logs/backend.log`
 
+## Agent Deployment
+
+The Open Studio now supports **one-click deployment** of your agent workflows to AWS infrastructure, making it easy to move from development to production.
+
+### Deployment Options
+
+#### 1. AWS Bedrock AgentCore Deployment
+
+Deploy your agent as a **Bedrock AgentCore** agent for serverless, managed AI agent execution.
+
+**Features:**
+- Fully managed agent runtime by AWS Bedrock
+- Automatic scaling and high availability
+- Integrated with AWS services (S3, DynamoDB, Lambda)
+- Pay-per-use pricing model
+- Built-in monitoring and logging via CloudWatch
+
+**How to Deploy:**
+1. Build your agent workflow in the visual editor
+2. Click the "Deploy to AgentCore" button in the execution panel
+3. Configure deployment settings (agent name, IAM role, etc.)
+4. The system will automatically:
+   - Generate the agent code
+   - Package dependencies
+   - Create CloudFormation stack
+   - Deploy to Bedrock AgentCore
+   - Provide the agent ARN for invocation
+
+**Requirements:**
+- AWS credentials configured (via AWS CLI or environment variables)
+- Appropriate IAM permissions for Bedrock and CloudFormation
+- Bedrock AgentCore enabled in your AWS region
+
+#### 2. AWS Lambda Function Deployment
+
+Deploy your agent as an **AWS Lambda Function** for serverless execution with HTTP API access.
+
+**Features:**
+- Serverless compute with automatic scaling
+- HTTP API endpoint for agent invocation
+- Support for synchronous and asynchronous execution
+- Integration with API Gateway, EventBridge, and other AWS services
+- Cost-effective pay-per-request pricing
+- Built-in monitoring via CloudWatch Logs
+
+**How to Deploy:**
+1. Build your agent workflow in the visual editor
+2. Click the "Deploy to Lambda" button in the execution panel
+3. Configure deployment settings (function name, memory, timeout, etc.)
+4. The system will automatically:
+   - Generate the agent code with Lambda handler
+   - Package dependencies into deployment package
+   - Create CloudFormation stack with Lambda function and IAM role
+   - Deploy to AWS Lambda
+   - Provide the function ARN and invocation URL
+
+**Requirements:**
+- AWS credentials configured (via AWS CLI or environment variables)
+- Appropriate IAM permissions for Lambda, IAM, and CloudFormation
+- Sufficient Lambda quotas in your AWS account
+
+### Deployment Architecture
+
+Both deployment options use **AWS CloudFormation** for infrastructure as code, ensuring:
+- Reproducible deployments
+- Version control for infrastructure
+- Easy rollback capabilities
+- Automated resource cleanup
+
+The deployment process:
+1. **Code Generation**: Converts visual flow to production-ready Python code
+2. **Dependency Packaging**: Bundles all required packages (Strands SDK, tools, etc.)
+3. **CloudFormation Stack Creation**: Provisions AWS resources (Lambda/AgentCore, IAM roles, etc.)
+4. **Deployment**: Uploads code and creates the agent/function
+5. **Validation**: Verifies successful deployment and provides invocation details
+
+### Managing Deployments
+
+**View Deployment Status:**
+- Use the AWS Console to monitor CloudFormation stacks
+- Check CloudWatch Logs for execution logs
+- View Lambda/AgentCore metrics in CloudWatch
+
+**Update Deployment:**
+- Make changes to your agent workflow
+- Click deploy again with the same stack name to update
+
+**Delete Deployment:**
+- Delete the CloudFormation stack via AWS Console or CLI
+- All associated resources will be cleaned up automatically
+
+### Best Practices
+
+1. **Use Separate AWS Accounts/Regions**: Deploy dev/staging/prod environments separately
+2. **Configure Timeouts**: Set appropriate Lambda timeout values based on agent complexity
+3. **Monitor Costs**: Use AWS Cost Explorer to track deployment costs
+4. **Enable Logging**: CloudWatch Logs are enabled by default for debugging
+5. **Secure Credentials**: Use IAM roles instead of hardcoded credentials in agent code
+6. **Test Locally First**: Validate your agent workflow in the Studio before deploying
+
 ## Tech Stack
 
 - **Frontend**: React 19, TypeScript, Vite, Tailwind CSS, XYFlow
@@ -167,7 +268,7 @@ The application consists of a React frontend for the visual editor and a FastAPI
 - [x] Built tool node
 - [x] Custom tool node
 - [ ] Structural Output Node - to do 
-- [ ] Swarm Agent Node - to do 
+- [x] Swarm Agent Node - to do 
 
 ### Flows
 - [x] Single agent mode
@@ -180,6 +281,6 @@ The application consists of a React frontend for the visual editor and a FastAPI
 - [x] Multi turns interactive chat mode
 
 ### Deployment
-- [ ] One-click deploy to Bedrock AgentCore - in-progress 
-- [ ] One-click deploy to Lambda - in-progress 
+- [x] One-click deploy to Bedrock AgentCore - done 
+- [x] One-click deploy to Lambda - done 
 - [ ] One-click deploy to ECS Fargate - in-progress  
