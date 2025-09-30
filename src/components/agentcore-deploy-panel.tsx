@@ -680,20 +680,33 @@ async def entry(payload):
       updateDeploymentStep('Preparing deployment request', 'completed');
       updateDeploymentStep('Sending deployment request', 'running');
 
+      console.log('📤 Sending deployment request to /api/deploy/agentcore');
+      console.log('📤 Request payload:', deploymentRequest);
+
       // Call backend API
-      const response = await fetch('/api/deploy/agentcore', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(deploymentRequest),
-      });
+      let response;
+      try {
+        response = await fetch('/api/deploy/agentcore', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(deploymentRequest),
+        });
+        console.log('📥 Received response:', response.status, response.statusText);
+      } catch (fetchError) {
+        console.error('❌ Fetch error:', fetchError);
+        throw new Error(`Network error: ${fetchError instanceof Error ? fetchError.message : 'Unknown error'}`);
+      }
 
       if (!response.ok) {
+        console.error('❌ Response not OK:', response.status, response.statusText);
         const errorData = await response.json().catch(() => ({ detail: 'Deployment failed' }));
+        console.error('❌ Error data:', errorData);
         throw new Error(errorData.detail || `HTTP ${response.status}: ${response.statusText}`);
       }
 
+      console.log('✅ Response OK, marking step as completed');
       updateDeploymentStep('Sending deployment request', 'completed');
       updateDeploymentStep('Processing AgentCore deployment', 'running');
 
