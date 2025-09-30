@@ -208,43 +208,75 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
     try {
       const allDeployments: DeploymentHistory[] = [];
 
-      // Load AgentCore deployments from localStorage
+      // Load all deployments (both AgentCore and Lambda) from backend API
       try {
-        const saved = localStorage.getItem('agentcore_deployments');
-        if (saved) {
-          const agentCoreDeployments = JSON.parse(saved);
-          const typedAgentCore = agentCoreDeployments.map((dep: any) => ({
-            ...dep,
-            deployment_type: 'agentcore' as const
-          }));
-          allDeployments.push(...typedAgentCore);
-        }
-      } catch (error) {
-        console.error('Failed to load AgentCore deployments:', error);
-      }
-
-      // Load Lambda deployments from API
-      try {
-        const response = await fetch('/api/deployment-history');
+        const response = await fetch('/api/deployment-history?limit=50');
         if (response.ok) {
           const historyData = await response.json();
-          const lambdaDeployments = historyData.deployments?.filter(
-            (dep: any) => dep.deployment_target === 'lambda' && dep.success
+          const successfulDeployments = historyData.deployments?.filter(
+            (dep: any) => dep.success
           ) || [];
 
-          const typedLambda: LambdaDeployment[] = lambdaDeployments.map((dep: any) => ({
-            deployment_id: dep.deployment_id,
-            agent_name: dep.agent_name,
-            region: dep.region,
-            deployment_result: dep.deployment_result || {},
-            created_at: dep.created_at,
-            deployment_type: 'lambda' as const
-          }));
+          // Process each deployment by type
+          for (const dep of successfulDeployments) {
+            if (dep.deployment_target === 'lambda') {
+              // Lambda deployment
+              const lambdaDeployment: LambdaDeployment = {
+                deployment_id: dep.deployment_id,
+                agent_name: dep.agent_name,
+                region: dep.region,
+                deployment_result: dep.deployment_result || {},
+                created_at: dep.created_at,
+                deployment_type: 'lambda' as const
+              };
+              allDeployments.push(lambdaDeployment);
+            } else if (dep.deployment_target === 'agentcore') {
+              // AgentCore deployment - extract deployment outputs from deployment_result
+              const deploymentOutputs = dep.deployment_result?.status?.deployment_outputs || dep.deployment_result?.deployment_outputs || {};
 
-          allDeployments.push(...typedLambda);
+              const agentCoreDeployment: AgentCoreDeployment = {
+                agent_runtime_arn: deploymentOutputs.agent_runtime_arn || dep.deployment_result?.agent_runtime_arn || '',
+                agent_runtime_name: deploymentOutputs.agent_runtime_name || dep.agent_name || '',
+                invoke_endpoint: deploymentOutputs.invoke_endpoint || dep.deployment_result?.invoke_endpoint || '',
+                deployment_method: deploymentOutputs.deployment_method || 'sdk',
+                region: dep.region || 'us-east-1',
+                network_mode: deploymentOutputs.network_mode || 'PUBLIC',
+                saved_at: dep.created_at,
+                deployment_type: 'agentcore' as const,
+                streaming_capable: deploymentOutputs.streaming_capable
+              };
+
+              // Only add if we have a valid ARN
+              if (agentCoreDeployment.agent_runtime_arn) {
+                allDeployments.push(agentCoreDeployment);
+              } else {
+                console.warn('Skipping AgentCore deployment without ARN:', dep);
+              }
+            }
+          }
         }
       } catch (error) {
-        console.error('Failed to load Lambda deployments:', error);
+        console.error('Failed to load deployments from backend:', error);
+      }
+
+      // Fallback: Load AgentCore deployments from localStorage if backend returns no AgentCore deployments
+      const hasAgentCoreFromBackend = allDeployments.some(dep => dep.deployment_type === 'agentcore');
+      if (!hasAgentCoreFromBackend) {
+        console.log('No AgentCore deployments found in backend, checking localStorage as fallback');
+        try {
+          const saved = localStorage.getItem('agentcore_deployments');
+          if (saved) {
+            const agentCoreDeployments = JSON.parse(saved);
+            const typedAgentCore = agentCoreDeployments.map((dep: any) => ({
+              ...dep,
+              deployment_type: 'agentcore' as const
+            }));
+            allDeployments.push(...typedAgentCore);
+            console.log('Loaded', typedAgentCore.length, 'AgentCore deployments from localStorage fallback');
+          }
+        } catch (error) {
+          console.error('Failed to load AgentCore deployments from localStorage:', error);
+        }
       }
 
       // Sort by creation date (newest first)
