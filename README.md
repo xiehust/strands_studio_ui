@@ -31,9 +31,18 @@ A visual drag-and-drop interface for creating, configuring, and executing AI age
 
 ### 3. Interactive Chat with Agent
 ![Interactive Chat Interface](assets/chat-demo.png)
-s
+
 ### 4. Hierarchy multi agents execution
 ![alt text](assets/image.png)
+
+### 5. Deploy to Bedrock AgentCore
+![alt text](assets/agentcore_deploy.png)
+
+### 6. Deploy to Lambda
+![alt text](assets/lambda_deploy.png)
+
+### 7. Invoke Cloud
+![alt text](assets/invoke_cloud.png)
 
 ## Quick Start
 
@@ -41,7 +50,18 @@ s
 
 1. Install [Node Js 22](https://nodejs.org/en/download) 
 2. Install [uv](https://docs.astral.sh/uv/getting-started/installation/)
+3. Install all frontent dependencies in the project folder
+```bash
+npm install
+```
+4.  Install all backend dependencies in the project folder
+```bash 
+cd backend
+uv sync
+```
 
+5. Install AWS CLI
+https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
 
 ### Development
 ```bash

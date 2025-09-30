@@ -699,6 +699,9 @@ async def entry(payload):
 
       const result = await response.json();
       console.log('Deployment result received:', result);
+      console.log('result.success:', result.success, 'type:', typeof result.success);
+      console.log('result.status:', result.status);
+      console.log('result.message:', result.message);
 
       // Verify the deployment ID matches (should be the same)
       if (result.deployment_id && result.deployment_id !== deploymentId) {
@@ -707,8 +710,12 @@ async def entry(payload):
 
       // Check if deployment actually succeeded
       if (!result.success) {
+        console.error('❌ Deployment failed - result.success is falsy:', result.success);
+        console.error('Full result object:', JSON.stringify(result, null, 2));
         throw new Error(result.message || 'AgentCore deployment failed');
       }
+
+      console.log('✅ Deployment succeeded - result.success is truthy');
 
       updateDeploymentStep('Processing AgentCore deployment', 'completed');
       updateDeploymentStep('AgentCore deployment completed successfully', 'completed');
