@@ -63,6 +63,11 @@ uv sync
 5. Install AWS CLI
 https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
 
+6. (Optional) intall `aws-sam-cli` for Lambda deployment
+```bash
+uv pip install aws-sam-cli
+```
+
 ### Development
 ```bash
 # Start frontend development server
