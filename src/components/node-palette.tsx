@@ -64,7 +64,7 @@ const nodeTypes: NodeTypeItem[] = [
     label: 'Custom Tool',
     icon: Code,
     description: 'Define custom tools with Python code',
-    category: 'Advanced',
+    category: 'Core',
   },
 ];
 

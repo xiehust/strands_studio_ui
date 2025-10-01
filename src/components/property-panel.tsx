@@ -322,6 +322,7 @@ export function PropertyPanel({
             <option value="http_request">Http Request</option>
             <option value="editor">Editor</option>
             <option value="retrieve">Retrieve (KB)</option>
+            <option value="mem0_memory">mem0_memory</option>
           </select>
         ) : (
           <input
