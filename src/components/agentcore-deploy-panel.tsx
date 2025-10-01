@@ -53,6 +53,7 @@ function extractApiKeysFromNodes(nodes: Node[]): Record<string, string> {
 interface AgentCoreDeployPanelProps {
   nodes: Node[];
   edges: Edge[];
+  graphMode?: boolean;
   className?: string;
 }
 
@@ -95,7 +96,7 @@ interface DeploymentHistoryEntry {
   status: 'success' | 'error' | 'pending';
 }
 
-export function AgentCoreDeployPanel({ nodes, edges, className = '' }: AgentCoreDeployPanelProps) {
+export function AgentCoreDeployPanel({ nodes, edges, graphMode = false, className = '' }: AgentCoreDeployPanelProps) {
   const [activeTab, setActiveTab] = useState<'configuration' | 'code-preview'>('configuration');
   const [generatedCode, setGeneratedCode] = useState('');
   const [editableCode, setEditableCode] = useState('');
@@ -187,7 +188,7 @@ export function AgentCoreDeployPanel({ nodes, edges, className = '' }: AgentCore
   });
 
   useEffect(() => {
-    const result = generateStrandsAgentCode(nodes, edges);
+    const result = generateStrandsAgentCode(nodes, edges, graphMode);
     const fullCode = result.imports.join('\n') + '\n\n' + result.code;
     setGeneratedCode(fullCode);
     setEditableCode(fullCode);
@@ -195,7 +196,7 @@ export function AgentCoreDeployPanel({ nodes, edges, className = '' }: AgentCore
     // Reset editing state when code regenerates
     setIsEditing(false);
     // Reset state when flow changes
-  }, [nodes, edges]);
+  }, [nodes, edges, graphMode]);
 
   // Load deployment history on component mount
   useEffect(() => {

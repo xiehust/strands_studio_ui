@@ -121,13 +121,16 @@ export function MCPToolNode({ data, selected, id }: NodeProps) {
       </div>
 
       {/* Output Handle - connects to agent tools input */}
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="mcp-tools"
-        className="!bg-orange-500 !w-3 !h-3 !absolute"
-        style={{ right: -6 }}
-      />
+      <div className="absolute right-0 top-1/2 translate-x-full -translate-y-1/2 flex items-center">
+        <Handle
+          type="source"
+          position={Position.Right}
+          id="mcp-tools"
+          className="!bg-orange-500 !w-3 !h-3 !relative !transform-none"
+          style={{ position: 'relative', right: 0, top: 0 }}
+        />
+        <span className="text-[10px] font-medium text-orange-600 bg-white px-1 rounded ml-0.5">Tool</span>
+      </div>
     </div>
   );
 }

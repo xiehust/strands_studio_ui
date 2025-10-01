@@ -7,10 +7,11 @@ import { generateStrandsAgentCode } from '../lib/code-generator';
 interface CodePanelProps {
   nodes: Node[];
   edges: Edge[];
+  graphMode?: boolean;
   className?: string;
 }
 
-export function CodePanel({ nodes, edges, className = '' }: CodePanelProps) {
+export function CodePanel({ nodes, edges, graphMode = false, className = '' }: CodePanelProps) {
   const [generatedCode, setGeneratedCode] = useState('');
   const [editedCode, setEditedCode] = useState('');
   const [errors, setErrors] = useState<string[]>([]);
@@ -19,7 +20,7 @@ export function CodePanel({ nodes, edges, className = '' }: CodePanelProps) {
   const [flowChangedWhileEditing, setFlowChangedWhileEditing] = useState(false);
 
   useEffect(() => {
-    const result = generateStrandsAgentCode(nodes, edges);
+    const result = generateStrandsAgentCode(nodes, edges, graphMode);
     const fullCode = result.imports.join('\n') + '\n\n' + result.code;
 
     if (isInEditMode) {
@@ -33,7 +34,7 @@ export function CodePanel({ nodes, edges, className = '' }: CodePanelProps) {
     }
 
     setErrors(result.errors);
-  }, [nodes, edges]);
+  }, [nodes, edges, graphMode, isInEditMode]);
 
   const handleCodeChange = (value: string | undefined) => {
     if (value !== undefined && isInEditMode) {

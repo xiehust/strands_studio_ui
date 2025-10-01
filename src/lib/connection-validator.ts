@@ -1,4 +1,5 @@
 import { type Node, type Connection, type Edge } from '@xyflow/react';
+import { detectCycles } from './graph-validator';
 
 interface ConnectionRule {
   sourceType: string;
@@ -151,6 +152,83 @@ const connectionRules: ConnectionRule[] = [
     description: 'Swarm output can connect to output nodes',
   },
 
+  // GRAPH MODE: Agent-to-Agent Dependency Connections (within GraphBuilder container)
+  // These connections define execution dependencies in graph mode
+  // Agent A → Agent B means B depends on A's output (A executes before B)
+  {
+    sourceType: 'agent',
+    sourceHandle: 'output',
+    targetType: 'agent',
+    targetHandle: 'user-input',
+    description: 'Agent dependency: target agent depends on source agent output (Graph Mode)',
+  },
+
+  // Orchestrator agents can also be graph nodes
+  {
+    sourceType: 'agent',
+    sourceHandle: 'output',
+    targetType: 'orchestrator-agent',
+    targetHandle: 'user-input',
+    description: 'Agent to orchestrator dependency (Graph Mode)',
+  },
+
+  {
+    sourceType: 'orchestrator-agent',
+    sourceHandle: 'output',
+    targetType: 'agent',
+    targetHandle: 'user-input',
+    description: 'Orchestrator to agent dependency (Graph Mode)',
+  },
+
+  {
+    sourceType: 'orchestrator-agent',
+    sourceHandle: 'output',
+    targetType: 'orchestrator-agent',
+    targetHandle: 'user-input',
+    description: 'Orchestrator to orchestrator dependency (Graph Mode)',
+  },
+
+  // Swarm nodes can also be graph nodes
+  {
+    sourceType: 'swarm',
+    sourceHandle: 'output',
+    targetType: 'agent',
+    targetHandle: 'user-input',
+    description: 'Swarm to agent dependency (Graph Mode)',
+  },
+
+  {
+    sourceType: 'agent',
+    sourceHandle: 'output',
+    targetType: 'swarm',
+    targetHandle: 'user-input',
+    description: 'Agent to swarm dependency (Graph Mode)',
+  },
+
+  {
+    sourceType: 'swarm',
+    sourceHandle: 'output',
+    targetType: 'orchestrator-agent',
+    targetHandle: 'user-input',
+    description: 'Swarm to orchestrator dependency (Graph Mode)',
+  },
+
+  {
+    sourceType: 'orchestrator-agent',
+    sourceHandle: 'output',
+    targetType: 'swarm',
+    targetHandle: 'user-input',
+    description: 'Orchestrator to swarm dependency (Graph Mode)',
+  },
+
+  {
+    sourceType: 'swarm',
+    sourceHandle: 'output',
+    targetType: 'swarm',
+    targetHandle: 'user-input',
+    description: 'Swarm to swarm dependency (Graph Mode)',
+  },
+
 ];
 
 /**
@@ -257,7 +335,8 @@ function canReachNode(
 export function isValidConnection(
   connection: Connection,
   nodes: Node[],
-  edges: Edge[] = []
+  edges: Edge[] = [],
+  graphMode: boolean = false
 ): { valid: boolean; message?: string } {
   const sourceNode = nodes.find((node) => node.id === connection.source);
   const targetNode = nodes.find((node) => node.id === connection.target);
@@ -328,10 +407,58 @@ export function isValidConnection(
   
   // Prevent circular dependencies in orchestrator hierarchies
   if (wouldCreateCircularDependency(connection, nodes, edges)) {
-    return { 
-      valid: false, 
-      message: 'This connection would create a circular dependency in the orchestrator hierarchy' 
+    return {
+      valid: false,
+      message: 'This connection would create a circular dependency in the orchestrator hierarchy'
     };
+  }
+
+  // In graph mode, enforce special rules
+  if (graphMode) {
+    // Rule 1: Input nodes can ONLY connect to entry point agents (agents with no incoming dependencies)
+    if (sourceNode.type === 'input' &&
+        (targetNode.type === 'agent' || targetNode.type === 'orchestrator-agent' || targetNode.type === 'swarm')) {
+
+      // Check if target agent has incoming dependencies from other agents
+      const hasIncomingAgentDependencies = edges.some(edge => {
+        const edgeSource = nodes.find(n => n.id === edge.source);
+        return edge.target === targetNode.id &&
+               (edgeSource?.type === 'agent' || edgeSource?.type === 'orchestrator-agent' || edgeSource?.type === 'swarm') &&
+               edge.sourceHandle === 'output' &&
+               edge.targetHandle === 'user-input';
+      });
+
+      if (hasIncomingAgentDependencies) {
+        return {
+          valid: false,
+          message: 'Input nodes can only connect to entry point agents (agents with no incoming dependencies from other agents).'
+        };
+      }
+    }
+
+    // Rule 2: Validate agent→agent connections for cycles
+    if ((sourceNode.type === 'agent' || sourceNode.type === 'orchestrator-agent' || sourceNode.type === 'swarm') &&
+        (targetNode.type === 'agent' || targetNode.type === 'orchestrator-agent' || targetNode.type === 'swarm') &&
+        connection.sourceHandle === 'output' &&
+        connection.targetHandle === 'user-input') {
+
+      // Simulate the connection and check for cycles
+      const simulatedEdges = [...edges, {
+        id: 'temp',
+        source: connection.source,
+        target: connection.target,
+        sourceHandle: connection.sourceHandle,
+        targetHandle: connection.targetHandle,
+      } as Edge];
+
+      const cycles = detectCycles(nodes, simulatedEdges);
+      if (cycles.length > 0) {
+        return {
+          valid: false,
+          message: 'This connection would create a circular dependency. Graphs must be acyclic (DAG).'
+        };
+      }
+    }
   }
 
   // MCP tool nodes can only connect to one agent node

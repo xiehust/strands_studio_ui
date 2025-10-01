@@ -35,6 +35,7 @@ This is a **visual agent flow builder** that allows users to create, configure, 
 - **Visual Flow Editor**: Drag-and-drop interface for building agent workflows using XYFlow/React
 - **Code Generation**: Automatically generates Python code from visual flows using the Strands Agent SDK
 - **Agent Execution**: Supports both regular and streaming execution of generated agent code
+- **Graph Mode**: DAG-based multi-agent orchestration using GraphBuilder for complex workflows with dependencies
 - **Project Management**: Save, load, and manage multiple agent projects with persistent storage
 - **Execution History**: Track and replay previous agent executions with artifact storage
 
@@ -94,8 +95,10 @@ This is a **visual agent flow builder** that allows users to create, configure, 
   - `property-panel.tsx` - Node configuration
 - `/src/lib/` - Utility functions and core logic
   - `code-generator.ts` - Converts visual flows to Python code with MCP support and streaming detection
+  - `graph-code-generator.ts` - Specialized code generation for Graph Mode using GraphBuilder
+  - `graph-validator.ts` - Validation logic for DAG structures, cycle detection, and entry point analysis
   - `api-client.ts` - Backend communication and WebSocket handling with streaming chunk processing
-  - `connection-validator.ts` - Node connection rules and validation logic
+  - `connection-validator.ts` - Node connection rules and validation logic (includes Graph Mode constraints)
   - `validation.ts` - Data validation utilities
 - `/backend/` - Python FastAPI server
   - `main.py` - FastAPI application with execution endpoints
@@ -200,6 +203,55 @@ export ALB_HOSTNAME=your-alb-hostname.us-west-2.elb.amazonaws.com
 - **MCP Integration**: Each MCP server node can only connect to one agent node to prevent resource conflicts
 - **MCP Client Configuration**: Timeout values from MCP node properties are passed as `startup_timeout` parameter to MCPClient
 - **Execution History Optimization**: Uses single API call (`/api/execution-history`) instead of multiple requests for better performance
+
+### Graph Mode Implementation
+
+**Graph Mode** is a specialized orchestration mode that enables DAG-based (Directed Acyclic Graph) multi-agent workflows using the Strands Agent SDK's `GraphBuilder`. This mode allows complex agent dependencies and execution ordering.
+
+#### Key Components
+- **Toggle Control**: Located in flow-editor.tsx (top-right corner) with Network icon and purple styling when active
+- **Code Generator**: `graph-code-generator.ts` - Generates GraphBuilder-based Python code instead of sequential execution
+- **Validator**: `graph-validator.ts` - Validates DAG structure, detects cycles, finds entry points and disconnected nodes
+- **Connection Rules**: Enhanced `connection-validator.ts` with Graph Mode-specific connection constraints
+
+#### How Graph Mode Works
+1. **Agent Dependencies**: Agents connect via output→user-input connections to define execution dependencies
+2. **Entry Points**: Agents with no incoming dependencies from other agents become entry points
+3. **Execution Order**: GraphBuilder automatically determines optimal execution order based on dependencies
+4. **Input Routing**: Input nodes can ONLY connect to entry point agents (prevents mid-graph injection)
+
+#### Generated Code Structure
+```python
+# Uses GraphBuilder instead of sequential execution
+from strands.multiagent import GraphBuilder
+
+builder = GraphBuilder()
+builder.add_node(agent1, "agent1")
+builder.add_node(agent2, "agent2")
+builder.add_edge("agent1", "agent2")  # agent2 depends on agent1
+builder.set_entry_point("agent1")
+graph = builder.build()
+result = graph(user_input)  # Returns GraphResult with execution details
+```
+
+#### Validation Rules
+- **No Cycles**: Circular dependencies are detected and blocked
+- **Entry Points Required**: At least one agent must have no incoming dependencies
+- **Input Constraints**: Input nodes can only connect to entry point agents
+- **Reachability**: Warns about disconnected agents unreachable from entry points
+- **DAG Structure**: Ensures valid directed acyclic graph topology
+
+#### UI Integration
+- **Visual Toggle**: Network icon in flow editor with tooltip "Toggle Graph Mode: Enable DAG-based multi-agent orchestration"
+- **Connection Validation**: Real-time validation prevents invalid connections with user feedback
+- **Project Persistence**: Graph mode state is saved in project files and auto-save
+- **Code Generation**: Automatically switches between regular and graph code generation based on mode
+
+#### Technical Architecture
+- **State Management**: `graphMode` boolean state tracked in main-layout.tsx and flow-editor.tsx
+- **Code Branching**: `generateStrandsAgentCode()` routes to `generateGraphCode()` when `graphMode=true`
+- **Validation Integration**: `isValidConnection()` accepts `graphMode` parameter for enhanced validation
+- **MCP Support**: Full MCP tool integration in Graph Mode with proper context manager handling
 
 ### Deployment Features
 - **AWS Bedrock AgentCore Deployment**: Deploy agents to AWS Bedrock AgentCore for managed, serverless AI agent execution

@@ -322,6 +322,7 @@ export function PropertyPanel({
             <option value="http_request">Http Request</option>
             <option value="editor">Editor</option>
             <option value="retrieve">Retrieve (KB)</option>
+            <option value="mem0_memory">mem0_memory</option>
           </select>
         ) : (
           <input
@@ -763,6 +764,74 @@ export function PropertyPanel({
     </div>
   );
 
+  const renderGraphBuilderProperties = (data: any) => (
+    <div className="space-y-4">
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-2">
+          Graph Name
+        </label>
+        <input
+          type="text"
+          value={data.label || ''}
+          onChange={(e) => handleInputChange('label', e.target.value)}
+          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500"
+          placeholder="Graph"
+        />
+        <p className="text-xs text-gray-500 mt-1">
+          Name for this graph workflow
+        </p>
+      </div>
+
+      <div className="border-t pt-4">
+        <h4 className="text-sm font-semibold text-purple-800 mb-2">Entry Points</h4>
+        <p className="text-sm text-gray-600 mb-2">
+          Connect the purple handle (right side) to agent nodes to define entry points.
+          Entry point agents receive the original user input.
+        </p>
+      </div>
+
+      <div className="border-t pt-4">
+        <h4 className="text-sm font-semibold text-purple-800 mb-2">Agent Dependencies</h4>
+        <p className="text-sm text-gray-600 mb-2">
+          Connect agent output (bottom) to another agent's input (top) to define execution dependencies.
+          Example: Agent A → Agent B means B depends on A's output.
+        </p>
+      </div>
+
+      <div>
+        <label className="flex items-center space-x-2">
+          <input
+            type="checkbox"
+            checked={data.enableDebugLogs || false}
+            onChange={(e) => handleInputChange('enableDebugLogs', e.target.checked)}
+            className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+          />
+          <span className="text-sm font-medium text-gray-700">Enable Debug Logs</span>
+        </label>
+        <p className="text-xs text-gray-500 mt-1">
+          Enable debug logging for graph execution
+        </p>
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-2">
+          Execution Timeout (seconds)
+        </label>
+        <input
+          type="number"
+          value={data.executionTimeout || ''}
+          onChange={(e) => handleInputChange('executionTimeout', e.target.value ? parseInt(e.target.value) : undefined)}
+          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500"
+          placeholder="Optional"
+          min="1"
+        />
+        <p className="text-xs text-gray-500 mt-1">
+          Leave empty for no timeout
+        </p>
+      </div>
+    </div>
+  );
+
   const renderSwarmProperties = (data: any) => (
     <div className="space-y-4">
       <div>
@@ -895,6 +964,8 @@ export function PropertyPanel({
         return renderOrchestratorAgentProperties(selectedNode.data);
       case 'swarm':
         return renderSwarmProperties(selectedNode.data);
+      case 'graph-builder':
+        return renderGraphBuilderProperties(selectedNode.data);
       case 'tool':
         return renderToolProperties(selectedNode.data);
       case 'mcp-tool':

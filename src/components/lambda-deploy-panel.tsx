@@ -8,6 +8,7 @@ import { apiClient, type DeploymentHistoryItem } from '../lib/api-client';
 interface LambdaDeployPanelProps {
   nodes: Node[];
   edges: Edge[];
+  graphMode?: boolean;
   className?: string;
 }
 
@@ -31,7 +32,7 @@ interface LambdaDeploymentState {
   error?: string;
 }
 
-export function LambdaDeployPanel({ nodes, edges, className = '' }: LambdaDeployPanelProps) {
+export function LambdaDeployPanel({ nodes, edges, graphMode = false, className = '' }: LambdaDeployPanelProps) {
   const [activeTab, setActiveTab] = useState<'configuration' | 'code-preview'>('configuration');
   const [generatedCode, setGeneratedCode] = useState('');
   const [editableCode, setEditableCode] = useState('');
@@ -71,13 +72,13 @@ export function LambdaDeployPanel({ nodes, edges, className = '' }: LambdaDeploy
   });
 
   useEffect(() => {
-    const result = generateStrandsAgentCode(nodes, edges);
+    const result = generateStrandsAgentCode(nodes, edges, graphMode);
     const fullCode = result.imports.join('\n') + '\n\n' + result.code;
     setGeneratedCode(fullCode);
     setEditableCode(fullCode);
     setErrors(result.errors);
     setIsEditing(false);
-  }, [nodes, edges]);
+  }, [nodes, edges, graphMode]);
 
   // Load deployment history on component mount
   useEffect(() => {

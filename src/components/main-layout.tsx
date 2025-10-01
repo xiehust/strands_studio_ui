@@ -17,21 +17,25 @@ import { generateStrandsAgentCode } from '../lib/code-generator';
 const AUTOSAVE_FLOW_KEY = 'strands_autosave_flow';
 
 // Helper functions for auto-save
-const saveFlowToAutoSave = (nodes: Node[], edges: Edge[]) => {
+const saveFlowToAutoSave = (nodes: Node[], edges: Edge[], graphMode: boolean) => {
   try {
-    const flowData = { nodes, edges, timestamp: Date.now() };
+    const flowData = { nodes, edges, graphMode, timestamp: Date.now() };
     localStorage.setItem(AUTOSAVE_FLOW_KEY, JSON.stringify(flowData));
   } catch (error) {
     console.error('Failed to auto-save flow:', error);
   }
 };
 
-const loadFlowFromAutoSave = (): { nodes: Node[], edges: Edge[] } | null => {
+const loadFlowFromAutoSave = (): { nodes: Node[], edges: Edge[], graphMode?: boolean } | null => {
   try {
     const stored = localStorage.getItem(AUTOSAVE_FLOW_KEY);
     if (!stored) return null;
     const flowData = JSON.parse(stored);
-    return { nodes: flowData.nodes || [], edges: flowData.edges || [] };
+    return {
+      nodes: flowData.nodes || [],
+      edges: flowData.edges || [],
+      graphMode: flowData.graphMode || false
+    };
   } catch (error) {
     console.error('Failed to load auto-saved flow:', error);
     return null;
@@ -46,6 +50,7 @@ export function MainLayout() {
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
+  const [graphMode, setGraphMode] = useState(false);
   const [showCodePanel, setShowCodePanel] = useState(true);
   const [rightPanelMode, setRightPanelMode] = useState<'code' | 'execution' | 'deploy' | 'invoke'>('code');
   const [showProjectManager, setShowProjectManager] = useState(false);
@@ -62,6 +67,7 @@ export function MainLayout() {
       setCurrentProject(current);
       setNodes(current.nodes);
       setEdges(current.edges);
+      setGraphMode(current.graphMode || false);
       setLastSaveTime(new Date(current.updatedAt)); // Set timestamp to project's last updated time
       // Clear auto-save since we have a project loaded
       clearAutoSavedFlow();
@@ -71,6 +77,7 @@ export function MainLayout() {
       if (autoSaved) {
         setNodes(autoSaved.nodes);
         setEdges(autoSaved.edges);
+        setGraphMode(autoSaved.graphMode || false);
       }
     }
   }, []);
@@ -85,17 +92,17 @@ export function MainLayout() {
     }
   }, [nodes, selectedNode]);
 
-  // Auto-save flow when nodes or edges change (only if no current project)
+  // Auto-save flow when nodes, edges, or graphMode change (only if no current project)
   useEffect(() => {
     if (!currentProject && (nodes.length > 0 || edges.length > 0)) {
       // Debounce the auto-save to avoid too frequent localStorage writes
       const timer = setTimeout(() => {
-        saveFlowToAutoSave(nodes, edges);
+        saveFlowToAutoSave(nodes, edges, graphMode);
       }, 500);
-      
+
       return () => clearTimeout(timer);
     }
-  }, [nodes, edges, currentProject]);
+  }, [nodes, edges, graphMode, currentProject]);
 
   // Listen for switch to execution panel event
   useEffect(() => {
@@ -156,6 +163,7 @@ export function MainLayout() {
   const handleLoadProject = useCallback((project: StrandsProject) => {
     setNodes(project.nodes);
     setEdges(project.edges);
+    setGraphMode(project.graphMode || false);
     setCurrentProject(project);
     setLastSaveTime(new Date(project.updatedAt)); // Set timestamp to project's last updated time
     // Clear auto-save since we now have a project loaded
@@ -169,6 +177,7 @@ export function MainLayout() {
       const updated = ProjectManager.updateProject(currentProject.id, {
         nodes,
         edges,
+        graphMode,
       });
       if (updated) {
         setCurrentProject(updated);
@@ -178,7 +187,7 @@ export function MainLayout() {
       // Save as new project
       setShowNewProjectDialog(true);
     }
-  }, [currentProject, nodes, edges]);
+  }, [currentProject, nodes, edges, graphMode]);
 
   const handleCreateNewProject = useCallback(() => {
     if (!newProjectName.trim()) {
@@ -191,6 +200,7 @@ export function MainLayout() {
       description: newProjectDescription.trim() || undefined,
       nodes,
       edges,
+      graphMode,
     });
 
     ProjectManager.setCurrentProject(newProject.id);
@@ -201,7 +211,7 @@ export function MainLayout() {
     setShowNewProjectDialog(false);
     // Clear auto-save since we now have a saved project
     clearAutoSavedFlow();
-  }, [newProjectName, newProjectDescription, nodes, edges]);
+  }, [newProjectName, newProjectDescription, nodes, edges, graphMode]);
 
   const handleNewProject = useCallback(() => {
     if (nodes.length > 0 || edges.length > 0) {
@@ -242,6 +252,7 @@ export function MainLayout() {
         setCurrentProject(imported);
         setNodes(imported.nodes);
         setEdges(imported.edges);
+        setGraphMode(imported.graphMode || false);
         setLastSaveTime(new Date(imported.updatedAt)); // Set timestamp to imported project's time
         // Clear auto-save since we now have an imported project
         clearAutoSavedFlow();
@@ -251,16 +262,16 @@ export function MainLayout() {
       }
     };
     reader.readAsText(file);
-    
+
     // Reset input
     event.target.value = '';
   }, []);
 
   // Generate current code for execution
   const getCurrentCode = useCallback(() => {
-    const result = generateStrandsAgentCode(nodes, edges);
+    const result = generateStrandsAgentCode(nodes, edges, graphMode);
     return result.imports.join('\n') + '\n\n' + result.code;
-  }, [nodes, edges]);
+  }, [nodes, edges, graphMode]);
 
   return (
     <div className="h-screen w-screen flex bg-gray-50">
@@ -437,13 +448,15 @@ export function MainLayout() {
         
         {/* Flow Editor, Property Panel, and Code Panel */}
         <div className="flex-1 flex">
-          <FlowEditor 
-            className="flex-1" 
+          <FlowEditor
+            className="flex-1"
             onNodeSelect={handleNodeSelect}
             nodes={nodes}
             onNodesChange={handleNodesChange}
             edges={edges}
             onEdgesChange={handleEdgesChange}
+            graphMode={graphMode}
+            onGraphModeChange={setGraphMode}
           />
           
           {selectedNode && (
@@ -469,6 +482,7 @@ export function MainLayout() {
                 <CodePanel
                   nodes={nodes}
                   edges={edges}
+                  graphMode={graphMode}
                 />
               ) : rightPanelMode === 'execution' ? (
                 <ExecutionPanel
@@ -482,6 +496,7 @@ export function MainLayout() {
                 <DeployPanel
                   nodes={nodes}
                   edges={edges}
+                  graphMode={graphMode}
                 />
               ) : (
                 <InvokePanel />

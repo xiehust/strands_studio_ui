@@ -29,19 +29,25 @@ A visual drag-and-drop interface for creating, configuring, and executing AI age
 ### 2. Hierarchy multi agents code generation
 ![alt text](assets/image-code.png)
 
-### 3. Interactive Chat with Agent
+### 3. Graph Mode
+![alt text](assets/graph-mode.png)
+
+### 4. Swarm Agents
+![alt text](assets/swarm-mode.png)
+
+### 5. Interactive Chat with Agent
 ![Interactive Chat Interface](assets/chat-demo.png)
 
-### 4. Hierarchy multi agents execution
+### 6. Hierarchy multi agents execution
 ![alt text](assets/image.png)
 
-### 5. Deploy to Bedrock AgentCore
+### 7. Deploy to Bedrock AgentCore
 ![alt text](assets/agentcore_deploy.png)
 
-### 6. Deploy to Lambda
+### 8. Deploy to Lambda
 ![alt text](assets/lambda_deploy.png)
 
-### 7. Invoke Cloud
+### 9. Invoke Cloud
 ![alt text](assets/invoke_cloud.png)
 
 ## Quick Start
@@ -300,14 +306,13 @@ The application consists of a React frontend for the visual editor and a FastAPI
 - [x] MCP server node
 - [x] Built tool node
 - [x] Custom tool node
-- [ ] Structural Output Node - to do 
 - [x] Swarm Agent Node - to do 
+- [ ] Structural Output Node - to do 
 
 ### Flows
 - [x] Single agent mode
 - [x] Agents as tool mode
-- [ ] Graph mode - to do 
-- [ ] Workflow mode - to do 
+- [x] Graph mode - to do 
 
 ### Execution
 - [x] Single turn execution run
