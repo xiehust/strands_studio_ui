@@ -18,6 +18,7 @@ import {
 } from '@xyflow/react';
 
 import '@xyflow/react/dist/style.css';
+import { Network } from 'lucide-react';
 
 import {
   AgentNode,
@@ -52,19 +53,23 @@ interface FlowEditorProps {
   onNodesChange?: (nodes: Node[]) => void;
   edges?: Edge[];
   onEdgesChange?: (edges: Edge[]) => void;
+  graphMode?: boolean;
+  onGraphModeChange?: (enabled: boolean) => void;
 }
 
-export function FlowEditor({ 
-  className = '', 
+export function FlowEditor({
+  className = '',
   onNodeSelect,
   nodes: externalNodes,
   onNodesChange: externalOnNodesChange,
   edges: externalEdges,
-  onEdgesChange: externalOnEdgesChange
+  onEdgesChange: externalOnEdgesChange,
+  graphMode = false,
+  onGraphModeChange
 }: FlowEditorProps) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [internalNodes, setInternalNodes, onInternalNodesChange]: [Node[], (nodes: Node[]) => void, OnNodesChange] = useNodesState(initialNodes);
-  
+
   // Use external nodes if provided, otherwise use internal state
   const nodes = externalNodes || internalNodes;
   const setNodes = externalOnNodesChange || setInternalNodes;
@@ -133,7 +138,7 @@ export function FlowEditor({
 
   const onConnect: OnConnect = useCallback(
     (params: Connection) => {
-      const validation = isValidConnection(params, nodes, edges);
+      const validation = isValidConnection(params, nodes, edges, graphMode);
       if (validation.valid) {
         setEdges(addEdge(params, edges));
       } else {
@@ -142,15 +147,15 @@ export function FlowEditor({
         alert(`Connection not allowed: ${validation.message}`);
       }
     },
-    [setEdges, nodes, edges]
+    [setEdges, nodes, edges, graphMode]
   );
 
   const isValidConnectionCallback = useCallback(
     (connection: Connection) => {
-      const validation = isValidConnection(connection, nodes, edges);
+      const validation = isValidConnection(connection, nodes, edges, graphMode);
       return validation.valid;
     },
-    [nodes, edges]
+    [nodes, edges, graphMode]
   );
 
   const onNodeClick = useCallback(
@@ -234,7 +239,28 @@ export function FlowEditor({
   );
 
   return (
-    <div className={`h-full w-full ${className}`} ref={reactFlowWrapper}>
+    <div className={`h-full w-full ${className} relative`} ref={reactFlowWrapper}>
+      {/* Graph Mode Toggle */}
+      <div className="absolute top-4 right-4 z-10 bg-white rounded-lg shadow-lg px-4 py-2 flex items-center space-x-3 border-2 border-gray-200">
+        <Network className={`w-4 h-4 ${graphMode ? 'text-purple-600' : 'text-gray-400'}`} />
+        <span className="text-sm font-medium text-gray-700">Graph Mode</span>
+        <button
+          onClick={() => onGraphModeChange?.(!graphMode)}
+          className={`
+            relative inline-flex h-6 w-11 items-center rounded-full transition-colors
+            ${graphMode ? 'bg-purple-600' : 'bg-gray-300'}
+          `}
+          title="Toggle Graph Mode: Enable DAG-based multi-agent orchestration"
+        >
+          <span
+            className={`
+              inline-block h-4 w-4 transform rounded-full bg-white transition-transform
+              ${graphMode ? 'translate-x-6' : 'translate-x-1'}
+            `}
+          />
+        </button>
+      </div>
+
       <ReactFlow
         nodes={nodes}
         edges={edges}

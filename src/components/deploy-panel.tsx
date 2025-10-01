@@ -8,10 +8,11 @@ import { AgentCoreDeployPanel } from './agentcore-deploy-panel';
 interface DeployPanelProps {
   nodes: Node[];
   edges: Edge[];
+  graphMode?: boolean;
   className?: string;
 }
 
-export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) {
+export function DeployPanel({ nodes, edges, graphMode = false, className = '' }: DeployPanelProps) {
   const [deploymentTarget, setDeploymentTarget] = useState<'agentcore' | 'lambda'>('agentcore');
 
   const handleTargetChange = (target: 'agentcore' | 'lambda') => {
@@ -61,9 +62,9 @@ export function DeployPanel({ nodes, edges, className = '' }: DeployPanelProps) 
 
       {/* Conditional Panel Content */}
       {deploymentTarget === 'lambda' ? (
-        <LambdaDeployPanel nodes={nodes} edges={edges} />
+        <LambdaDeployPanel nodes={nodes} edges={edges} graphMode={graphMode} />
       ) : (
-        <AgentCoreDeployPanel nodes={nodes} edges={edges} />
+        <AgentCoreDeployPanel nodes={nodes} edges={edges} graphMode={graphMode} />
       )}
     </div>
   );

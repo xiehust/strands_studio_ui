@@ -6,6 +6,7 @@ export interface StrandsProject {
   description?: string;
   nodes: Node[];
   edges: Edge[];
+  graphMode?: boolean;
   createdAt: string;
   updatedAt: string;
   version: string;

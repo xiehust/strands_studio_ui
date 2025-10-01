@@ -68,21 +68,29 @@ export function AgentNode({ data, selected, id }: NodeProps) {
         </div>
       </div>
 
-      {/* Input Handles */}
-      <Handle
-        type="target"
-        position={Position.Top}
-        id="user-input"
-        className="!bg-green-500 !w-3 !h-3 !absolute"
-        style={{ top: -6, left: '50%',}}
-      />
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="tools"
-        className="!bg-orange-500 !w-3 !h-3 !absolute"
-        style={{ left: -6, top: '40%' }}
-      />
+      {/* Input Handle with Label */}
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-full flex flex-col items-center">
+        <span className="text-[10px] font-medium text-green-600 bg-white px-1 rounded mb-0.5">In</span>
+        <Handle
+          type="target"
+          position={Position.Top}
+          id="user-input"
+          className="!bg-green-500 !w-3 !h-3 !relative !transform-none"
+          style={{ position: 'relative', top: 0, left: 0 }}
+        />
+      </div>
+
+      {/* Tool Handles (left side) */}
+      <div className="absolute left-0 top-[40%] -translate-x-full -translate-y-1/2 flex items-center">
+        <span className="text-[10px] font-medium text-orange-600 bg-white px-1 rounded mr-0.5">Tool</span>
+        <Handle
+          type="target"
+          position={Position.Left}
+          id="tools"
+          className="!bg-orange-500 !w-3 !h-3 !relative !transform-none"
+          style={{ position: 'relative', left: 0, top: 0 }}
+        />
+      </div>
       <Handle
         type="target"
         position={Position.Left}
@@ -91,14 +99,17 @@ export function AgentNode({ data, selected, id }: NodeProps) {
         style={{ left: -6, top: '70%' }}
       />
 
-      {/* Output Handle */}
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        id="output"
-        className="!bg-indigo-500 !w-3 !h-3 !absolute"
-        style={{ bottom: -6 }}
-      />
+      {/* Output Handle with Label */}
+      <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-full flex flex-col items-center">
+        <Handle
+          type="source"
+          position={Position.Bottom}
+          id="output"
+          className="!bg-indigo-500 !w-3 !h-3 !relative !transform-none"
+          style={{ position: 'relative', bottom: 0, left: 0 }}
+        />
+        <span className="text-[10px] font-medium text-indigo-600 bg-white px-1 rounded mt-0.5">Out</span>
+      </div>
     </div>
   );
 }

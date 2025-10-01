@@ -1,4 +1,5 @@
 import { type Node, type Edge } from '@xyflow/react';
+import { generateGraphCode } from './graph-code-generator';
 
 interface CodeGenerationResult {
   code: string;
@@ -17,8 +18,15 @@ function escapePythonTripleQuotedString(str: string): string {
 
 export function generateStrandsAgentCode(
   nodes: Node[],
-  edges: Edge[]
+  edges: Edge[],
+  graphMode: boolean = false
 ): CodeGenerationResult {
+  // Branch to graph code generator if graph mode is enabled
+  if (graphMode) {
+    return generateGraphCode(nodes, edges);
+  }
+
+  // Regular (non-graph) code generation
   const imports = new Set<string>([
     'from strands import Agent, tool',
     'from strands.models import BedrockModel',
@@ -28,7 +36,7 @@ export function generateStrandsAgentCode(
     'import asyncio',
     'import argparse'
   ]);
-  
+
   // Check if MCP tools are used
   const hasMCPTools = nodes.some(node => node.type === 'mcp-tool');
   if (hasMCPTools) {
@@ -43,7 +51,7 @@ export function generateStrandsAgentCode(
   if (hasSwarmNodes) {
     imports.add('from strands.multiagent import Swarm');
   }
-  
+
   const errors: string[] = [];
   let code = '';
 
