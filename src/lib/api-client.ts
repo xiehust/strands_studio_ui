@@ -66,23 +66,35 @@ export interface DeploymentHistoryItem {
   deployment_id: string;
   project_id?: string;
   version?: string;
-  deployment_target: string; // 'agentcore' or 'lambda'
+  deployment_target: string; // 'agentcore', 'lambda', or 'ecs-fargate'
   agent_name: string;
   region: string;
   execute_role?: string;
   api_keys?: Record<string, string>;
   code: string;
   deployment_result: {
+    // Lambda fields
     function_arn?: string;
     api_endpoint?: string;
     invoke_endpoint?: string;
     streaming_invoke_endpoint?: string;
-    streaming_capable?: boolean;
-    deployment_type?: string;
     python_function_arn?: string;
     nodejs_function_arn?: string;
     sync_function_url?: string;
     stream_function_url?: string;
+    // AgentCore fields
+    agent_runtime_arn?: string;
+    agent_runtime_name?: string;
+    // ECS fields
+    service_arn?: string;
+    service_name?: string;
+    cluster_arn?: string;
+    task_definition_arn?: string;
+    load_balancer_dns?: string;
+    service_endpoint?: string;
+    // Common fields
+    streaming_capable?: boolean;
+    deployment_type?: string;
     [key: string]: any;
   };
   deployment_logs?: string;

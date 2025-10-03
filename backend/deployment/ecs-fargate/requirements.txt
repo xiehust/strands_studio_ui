@@ -1,0 +1,30 @@
+# Core web stack (intentionally unpinned so pip resolves to latest compatibles)
+fastapi
+uvicorn[standard]
+pydantic
+
+# HTTP clients (unpin to let MCP and friends set floors)
+httpx
+aiohttp
+
+# AWS SDKs — prefer newest stable releases
+boto3>=1.40.43      # latest on PyPI as of Oct 1, 2025
+botocore>=1.40.43   # keep in step with boto3
+
+# Strands Agent SDK and tools — prefer newest stable releases
+strands-agents>=1.10.0        # latest on PyPI (Sep 29, 2025)
+strands-agents-tools>=0.2.9   # latest on PyPI (Sep 29, 2025)
+
+# Utilities (unpin)
+python-multipart
+python-json-logger
+requests
+websockets
+pyyaml
+
+# Model Context Protocol — prefer newest stable
+mcp
+
+# AI model SDKs — prefer newest stable
+openai>=2.0.1
+anthropic>=0.69.0

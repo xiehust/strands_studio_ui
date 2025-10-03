@@ -19,11 +19,14 @@ from app.models.deployment import (
     AgentCoreInvokeRequest,
     AgentCoreInvokeResponse,
     LambdaInvokeRequest,
-    LambdaInvokeResponse
+    LambdaInvokeResponse,
+    ECSInvokeRequest,
+    ECSInvokeResponse
 )
 from app.services.deployment_service import DeploymentService
 from app.services.agentcore_invoke_service import AgentCoreInvokeService
 from app.services.lambda_invoke_service import LambdaInvokeService
+from app.services.ecs_invoke_service import ECSInvokeService
 from fastapi.responses import StreamingResponse
 
 logger = logging.getLogger(__name__)
@@ -35,6 +38,7 @@ router = APIRouter(prefix="/api/deploy", tags=["deployment"])
 deployment_service = DeploymentService()
 agentcore_invoke_service = AgentCoreInvokeService()
 lambda_invoke_service = LambdaInvokeService()
+ecs_invoke_service = ECSInvokeService()
 
 @router.post("/", response_model=DeploymentResponse)
 async def deploy_agent(request: Union[LambdaDeploymentRequest, AgentCoreDeploymentRequest, ECSFargateDeploymentRequest]):
@@ -75,7 +79,7 @@ async def deploy_to_agentcore(request: AgentCoreDeploymentRequest):
 
 @router.post("/ecs-fargate", response_model=DeploymentResponse)
 async def deploy_to_ecs_fargate(request: ECSFargateDeploymentRequest):
-    """Deploy Strands agent to ECS Fargate"""
+    """Deploy Strands agent to ECS Fargate using CloudFormation"""
     logger.info(f"ECS Fargate deployment request: {request.service_name}")
 
     try:
@@ -83,6 +87,18 @@ async def deploy_to_ecs_fargate(request: ECSFargateDeploymentRequest):
         return result
     except Exception as e:
         logger.error(f"ECS Fargate deployment error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/ecs-fargate/{stack_name}")
+async def delete_ecs_fargate_deployment(stack_name: str, region: str = "us-east-1"):
+    """Delete ECS Fargate CloudFormation stack and all resources"""
+    logger.info(f"ECS Fargate deletion request: {stack_name}")
+
+    try:
+        result = await deployment_service.delete_ecs_fargate_stack(stack_name, region)
+        return result
+    except Exception as e:
+        logger.error(f"ECS Fargate deletion error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/status/{deployment_id}", response_model=DeploymentStatus)
@@ -433,4 +449,64 @@ async def invoke_lambda_function_url_stream(request: FunctionUrlInvokeRequest):
         )
     except Exception as e:
         logger.error(f"Lambda Function URL streaming invoke error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ECS invoke endpoints
+@router.post("/ecs/invoke", response_model=ECSInvokeResponse)
+async def invoke_ecs_service(request: ECSInvokeRequest):
+    """Invoke a deployed ECS Fargate service synchronously"""
+    logger.info(f"ECS service invoke request: {request.service_endpoint}")
+
+    try:
+        result = await ecs_invoke_service.invoke_service(request)
+        return result
+    except Exception as e:
+        logger.error(f"ECS service invoke error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/ecs/invoke/stream")
+async def invoke_ecs_service_stream(request: ECSInvokeRequest):
+    """Invoke a deployed ECS Fargate service with streaming response"""
+    logger.info(f"ECS service streaming invoke request: {request.service_endpoint}")
+
+    try:
+        async def generate_stream():
+            async for chunk in ecs_invoke_service.invoke_service_stream(request):
+                yield chunk
+
+        return StreamingResponse(
+            generate_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Cache-Control"
+            }
+        )
+    except Exception as e:
+        logger.error(f"ECS service streaming invoke error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/build-logs/{deployment_id}")
+async def get_build_logs(deployment_id: str, lines: int = 10):
+    """Get recent build logs for an ECS deployment"""
+    logger.info(f"Getting build logs for ECS deployment: {deployment_id}, lines: {lines}")
+
+    try:
+        # Get deployment service to access container build service
+        deployment_service = DeploymentService()
+
+        # Get build logs from ECS container build service
+        build_logs = []
+        if hasattr(deployment_service, 'ecs_deployment_service') and deployment_service.ecs_deployment_service:
+            build_logs = deployment_service.ecs_deployment_service.container_build_service.get_recent_build_logs(deployment_id, lines)
+
+        return {
+            "deployment_id": deployment_id,
+            "logs": build_logs,
+            "total_lines": len(build_logs)
+        }
+    except Exception as e:
+        logger.error(f"Error getting build logs: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

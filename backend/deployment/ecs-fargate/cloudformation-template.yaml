@@ -1,0 +1,483 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Strands Agent ECS Fargate Deployment Stack'
+
+Parameters:
+  ServiceName:
+    Type: String
+    Description: Name of the ECS service
+    AllowedPattern: '[a-zA-Z0-9\-_]+'
+    ConstraintDescription: Must contain only alphanumeric characters, hyphens, and underscores
+
+  ContainerImage:
+    Type: String
+    Description: ECR container image URI
+
+  CPU:
+    Type: Number
+    Default: 256
+    AllowedValues: [256, 512, 1024, 2048, 4096]
+    Description: CPU units for the task
+
+  Memory:
+    Type: Number
+    Default: 512
+    Description: Memory (MB) for the task
+
+  Region:
+    Type: String
+    Default: us-east-1
+    Description: AWS region for deployment
+
+  ContainerName:
+    Type: String
+    Default: strands-agent
+    Description: Name of the container
+
+  ContainerPort:
+    Type: Number
+    Default: 8000
+    Description: Port number for the container
+    MinValue: 1
+    MaxValue: 65535
+
+  DesiredCount:
+    Type: Number
+    Default: 1
+    Description: Number of desired tasks
+    MinValue: 1
+    MaxValue: 10
+
+
+  HealthCheckPath:
+    Type: String
+    Default: /health
+    Description: Health check path for the load balancer
+
+  ProjectId:
+    Type: String
+    Default: ''
+    Description: Optional project ID for tagging
+
+  Version:
+    Type: String
+    Default: v1.0.0
+    Description: Version tag for the deployment
+
+  VpcId:
+    Type: String
+    Default: ''
+    Description: VPC ID (leave empty to use default VPC)
+
+  SubnetIds:
+    Type: CommaDelimitedList
+    Default: ''
+    Description: Subnet IDs (leave empty to use default subnets)
+
+  SecurityGroupIds:
+    Type: CommaDelimitedList
+    Default: ''
+    Description: Security Group IDs (leave empty to create new one)
+
+  AssignPublicIp:
+    Type: String
+    Default: 'ENABLED'
+    AllowedValues: ['ENABLED', 'DISABLED']
+    Description: Whether to assign public IP to tasks
+
+  ExecutionRoleArn:
+    Type: String
+    Default: ''
+    Description: Optional execution role ARN (will create one if empty)
+
+  TaskRoleArn:
+    Type: String
+    Default: ''
+    Description: Optional task role ARN
+
+  StreamingCapable:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Whether the agent supports streaming
+
+  Architecture:
+    Type: String
+    Default: 'x86_64'
+    AllowedValues: ['x86_64', 'arm64']
+    Description: Target architecture for Fargate tasks
+
+Conditions:
+  UseDefaultVpc: !Equals [!Ref VpcId, '']
+  UseDefaultSubnets: !Equals [!Join ['', !Ref SubnetIds], '']
+  UseDefaultSecurityGroups: !Equals [!Join ['', !Ref SecurityGroupIds], '']
+  CreateExecutionRole: !Equals [!Ref ExecutionRoleArn, '']
+  HasTaskRole: !Not [!Equals [!Ref TaskRoleArn, '']]
+  HasProjectId: !Not [!Equals [!Ref ProjectId, '']]
+
+Resources:
+  # ECS Cluster
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub 'strands-cluster-${ServiceName}'
+      CapacityProviders:
+        - FARGATE
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 1
+      Tags:
+        - Key: Service
+          Value: !Ref ServiceName
+        - Key: ManagedBy
+          Value: Strands-Agent-Deployment
+        - !If
+          - HasProjectId
+          - Key: ProjectId
+            Value: !Ref ProjectId
+          - !Ref AWS::NoValue
+
+  # Security Group (only if not provided)
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: UseDefaultSecurityGroups
+    Properties:
+      GroupName: !Sub 'strands-agent-${ServiceName}-sg'
+      GroupDescription: !Sub 'Security group for Strands agent ${ServiceName}'
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref ContainerPort
+          ToPort: !Ref ContainerPort
+          CidrIp: 0.0.0.0/0
+          Description: Container port access
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP access
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS access
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: All outbound traffic
+      Tags:
+        - Key: Service
+          Value: !Ref ServiceName
+        - Key: ManagedBy
+          Value: Strands-Agent-Deployment
+
+  # IAM Task Execution Role (only if not provided)
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Condition: CreateExecutionRole
+    Properties:
+      RoleName: !Sub 'ecsTaskExecutionRole-${ServiceName}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Tags:
+        - Key: Service
+          Value: !Ref ServiceName
+        - Key: ManagedBy
+          Value: Strands-Agent-Deployment
+
+  # IAM Task Role for application-level permissions
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'ecsTaskRole-${ServiceName}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: BedrockAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                  - bedrock:ListFoundationModels
+                  - bedrock:GetFoundationModel
+                Resource: '*'
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                  - logs:DescribeLogGroups
+                Resource: '*'
+      Tags:
+        - Key: Service
+          Value: !Ref ServiceName
+        - Key: ManagedBy
+          Value: Strands-Agent-Deployment
+
+  # CloudWatch Log Group (always enabled)
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/ecs/strands-agent-${ServiceName}'
+      RetentionInDays: 30
+      Tags:
+        - Key: Service
+          Value: !Ref ServiceName
+        - Key: ManagedBy
+          Value: Strands-Agent-Deployment
+
+  # ECS Task Definition
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub 'strands-task-${ServiceName}'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: !Ref Architecture
+      Cpu: !Ref CPU
+      Memory: !Ref Memory
+      ExecutionRoleArn: !If
+        - CreateExecutionRole
+        - !Ref TaskExecutionRole
+        - !Ref ExecutionRoleArn
+      TaskRoleArn: !If
+        - HasTaskRole
+        - !Ref TaskRoleArn
+        - !Ref TaskRole
+      ContainerDefinitions:
+        - Name: !Ref ContainerName
+          Image: !Ref ContainerImage
+          PortMappings:
+            - ContainerPort: !Ref ContainerPort
+              Protocol: tcp
+          Essential: true
+          Environment:
+            - Name: PORT
+              Value: !Ref ContainerPort
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - !Sub 'curl -f http://localhost:${ContainerPort}${HealthCheckPath} || exit 1'
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 60
+      Tags:
+        - Key: Service
+          Value: !Ref ServiceName
+        - Key: Version
+          Value: !Ref Version
+        - Key: ManagedBy
+          Value: Strands-Agent-Deployment
+        - Key: StreamingCapable
+          Value: !Ref StreamingCapable
+
+  # Application Load Balancer (always enabled)
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub 'strands-alb-${ServiceName}'
+      Scheme: internet-facing
+      Type: application
+      Subnets: !Ref SubnetIds
+      SecurityGroups: !If
+        - UseDefaultSecurityGroups
+        - - !Ref SecurityGroup
+        - !Ref SecurityGroupIds
+      Tags:
+        - Key: Service
+          Value: !Ref ServiceName
+        - Key: ManagedBy
+          Value: Strands-Agent-Deployment
+
+  # Target Group
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      # Use stack name instead of service name to ensure uniqueness
+      Name: !Sub '${AWS::StackName}-tg'
+      Port: !Ref ContainerPort
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref VpcId
+      HealthCheckPath: !Ref HealthCheckPath
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 5
+      Tags:
+        - Key: Service
+          Value: !Ref ServiceName
+        - Key: ManagedBy
+          Value: Strands-Agent-Deployment
+
+  # ALB Listener
+  LoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  # ECS Service (always with Load Balancer)
+  ECSService:
+    Type: AWS::ECS::Service
+    DependsOn: LoadBalancerListener
+    Properties:
+      ServiceName: !Ref ServiceName
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: !Ref DesiredCount
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: !Ref AssignPublicIp
+          SecurityGroups: !If
+            - UseDefaultSecurityGroups
+            - - !Ref SecurityGroup
+            - !Ref SecurityGroupIds
+          Subnets: !Ref SubnetIds
+      LoadBalancers:
+        - ContainerName: !Ref ContainerName
+          ContainerPort: !Ref ContainerPort
+          TargetGroupArn: !Ref TargetGroup
+      HealthCheckGracePeriodSeconds: 120
+      Tags:
+        - Key: Service
+          Value: !Ref ServiceName
+        - Key: Version
+          Value: !Ref Version
+        - Key: ManagedBy
+          Value: Strands-Agent-Deployment
+        - Key: StreamingCapable
+          Value: !Ref StreamingCapable
+
+Outputs:
+  StackName:
+    Description: Name of the CloudFormation stack
+    Value: !Ref AWS::StackName
+    Export:
+      Name: !Sub '${AWS::StackName}-StackName'
+
+  ClusterName:
+    Description: Name of the ECS cluster
+    Value: !Ref ECSCluster
+    Export:
+      Name: !Sub '${AWS::StackName}-ClusterName'
+
+  ClusterArn:
+    Description: ARN of the ECS cluster
+    Value: !GetAtt ECSCluster.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-ClusterArn'
+
+  ServiceName:
+    Description: Name of the ECS service
+    Value: !Ref ECSService
+    Export:
+      Name: !Sub '${AWS::StackName}-ServiceName'
+
+  ServiceArn:
+    Description: ARN of the ECS service
+    Value: !Ref ECSService
+    Export:
+      Name: !Sub '${AWS::StackName}-ServiceArn'
+
+  TaskDefinitionArn:
+    Description: ARN of the task definition
+    Value: !Ref TaskDefinition
+    Export:
+      Name: !Sub '${AWS::StackName}-TaskDefinitionArn'
+
+  LoadBalancerDNS:
+    Description: DNS name of the load balancer
+    Value: !GetAtt ApplicationLoadBalancer.DNSName
+    Export:
+      Name: !Sub '${AWS::StackName}-LoadBalancerDNS'
+
+  ServiceEndpoint:
+    Description: HTTP endpoint of the service
+    Value: !Sub 'http://${ApplicationLoadBalancer.DNSName}'
+    Export:
+      Name: !Sub '${AWS::StackName}-ServiceEndpoint'
+
+  SecurityGroupId:
+    Condition: UseDefaultSecurityGroups
+    Description: ID of the created security group
+    Value: !Ref SecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-SecurityGroupId'
+
+  LogGroupName:
+    Description: Name of the CloudWatch log group
+    Value: !Ref LogGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-LogGroupName'
+
+  ExecutionRoleArn:
+    Condition: CreateExecutionRole
+    Description: ARN of the created execution role
+    Value: !GetAtt TaskExecutionRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-ExecutionRoleArn'
+
+  StreamingCapable:
+    Description: Whether the service supports streaming
+    Value: !Ref StreamingCapable
+    Export:
+      Name: !Sub '${AWS::StackName}-StreamingCapable'
+
+  Region:
+    Description: AWS region of the deployment
+    Value: !Ref Region
+    Export:
+      Name: !Sub '${AWS::StackName}-Region'
+
+  ContainerPort:
+    Description: Container port
+    Value: !Ref ContainerPort
+    Export:
+      Name: !Sub '${AWS::StackName}-ContainerPort'
+
+  HealthCheckPath:
+    Description: Health check path
+    Value: !Ref HealthCheckPath
+    Export:
+      Name: !Sub '${AWS::StackName}-HealthCheckPath'
+
+  TaskRoleArn:
+    Description: ARN of the created task role
+    Value: !GetAtt TaskRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-TaskRoleArn'
