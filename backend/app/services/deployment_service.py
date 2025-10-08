@@ -271,6 +271,41 @@ class DeploymentService:
         logger.info(f"Cleaned up {len(to_delete)} old deployment records")
         return len(to_delete)
 
+    async def delete_ecs_fargate_stack(self, stack_name: str, region: str = "us-east-1") -> Dict[str, Any]:
+        """Delete ECS Fargate CloudFormation stack"""
+        logger.info(f"Starting ECS Fargate stack deletion: {stack_name}")
+
+        try:
+            # Import CloudFormation deployment service dynamically
+            import sys
+            from pathlib import Path
+
+            # Add deployment module to path
+            deployment_path = Path(__file__).parent.parent.parent / "deployment" / "ecs-fargate"
+            if str(deployment_path) not in sys.path:
+                sys.path.insert(0, str(deployment_path))
+
+            from ecs_deployment_service import ECSDeploymentService
+
+            # Create deployment service
+            deployment_service = ECSDeploymentService()
+
+            # Execute stack deletion
+            deletion_result = await deployment_service.delete_stack(stack_name, region)
+
+            logger.info(f"ECS Fargate stack deletion result: {deletion_result['success']}")
+            return deletion_result
+
+        except Exception as e:
+            error_msg = f"ECS Fargate stack deletion failed: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return {
+                "success": False,
+                "message": error_msg,
+                "stack_name": stack_name,
+                "logs": [error_msg]
+            }
+
     async def deploy_to_agentcore(self, request: AgentCoreDeploymentRequest) -> DeploymentResponse:
         """Deploy Strands agent to AWS Bedrock AgentCore"""
         deployment_id = str(uuid.uuid4())
@@ -387,30 +422,135 @@ class DeploymentService:
             )
 
     async def deploy_to_ecs_fargate(self, request: ECSFargateDeploymentRequest) -> DeploymentResponse:
-        """Deploy Strands agent to ECS Fargate (placeholder implementation)"""
-        deployment_id = str(uuid.uuid4())
+        """Deploy Strands agent to ECS Fargate"""
+        deployment_id = request.deployment_id if request.deployment_id else str(uuid.uuid4())
 
         # Create initial deployment status
         status = DeploymentStatus(
             deployment_id=deployment_id,
             deployment_type=DeploymentType.ECS_FARGATE,
-            status="failed",
-            message="ECS Fargate deployment not yet implemented",
-            created_at=datetime.now().isoformat(),
-            completed_at=datetime.now().isoformat()
+            status="pending",
+            message="ECS Fargate deployment initiated",
+            created_at=datetime.now().isoformat()
         )
 
         self.deployments[deployment_id] = status
 
-        logger.warning(f"ECS Fargate deployment not implemented: {deployment_id}")
+        logger.info(f"Starting ECS Fargate deployment: {deployment_id}")
 
-        return DeploymentResponse(
-            success=False,
-            deployment_id=deployment_id,
-            message="ECS Fargate deployment is not yet implemented",
-            deployment_type=DeploymentType.ECS_FARGATE,
-            status=status
-        )
+        # Notify WebSocket clients about deployment start immediately
+        try:
+            from main import notify_deployment_progress
+            await notify_deployment_progress(deployment_id, "Initializing ECS deployment", "running",
+                                           f"Starting deployment for service: {request.service_name}")
+        except Exception as e:
+            logger.warning(f"Failed to send WebSocket notification: {e}")
+
+        try:
+            # Import ECS deployment service dynamically
+            import sys
+            from pathlib import Path
+
+            # Add deployment module to path
+            deployment_path = Path(__file__).parent.parent.parent / "deployment" / "ecs-fargate"
+            if str(deployment_path) not in sys.path:
+                sys.path.insert(0, str(deployment_path))
+
+            from ecs_deployment_service import (
+                ECSDeploymentService,
+                ECSDeploymentConfig
+            )
+
+            # Create deployment config
+            config = ECSDeploymentConfig(
+                service_name=request.service_name,
+                cpu=request.cpu,
+                memory=request.memory,
+                architecture=request.architecture,
+                region=request.region,
+                container_name=request.container_name,
+                container_port=request.container_port,
+                vpc_id=request.vpc_id,
+                subnet_ids=request.subnet_ids,
+                security_group_ids=request.security_group_ids,
+                assign_public_ip=request.assign_public_ip,
+                desired_count=request.desired_count,
+                health_check_path=request.health_check_path,
+                project_id=request.project_id,
+                version=request.version,
+                execution_role_arn=request.execution_role_arn,
+                task_role_arn=request.task_role_arn,
+                api_keys=request.api_keys  # Pass API keys to ECS config
+            )
+
+            # Create ECS deployment service
+            deployment_service = ECSDeploymentService()
+
+            # Execute deployment
+            deployment_result = await deployment_service.deploy_agent(
+                generated_code=request.code,
+                config=config,
+                deployment_id=deployment_id
+            )
+
+            # Update deployment status
+            if deployment_result.success:
+                status.status = "completed"
+                status.message = deployment_result.message
+                status.endpoint_url = deployment_result.service_endpoint
+                status.resource_arn = deployment_result.service_arn
+                status.deployment_outputs = deployment_result.deployment_outputs
+                status.logs = deployment_result.logs
+                status.deployment_time = deployment_result.deployment_time
+                status.completed_at = datetime.now().isoformat()
+
+                logger.info(f"ECS Fargate deployment successful: {deployment_id}")
+
+                return DeploymentResponse(
+                    success=True,
+                    deployment_id=deployment_id,
+                    message=deployment_result.message,
+                    deployment_type=DeploymentType.ECS_FARGATE,
+                    status=status
+                )
+            else:
+                status.status = "failed"
+                status.message = deployment_result.message
+                status.logs = deployment_result.logs
+                status.completed_at = datetime.now().isoformat()
+
+                logger.error(f"ECS Fargate deployment failed: {deployment_id}: {deployment_result.message}")
+
+                return DeploymentResponse(
+                    success=False,
+                    deployment_id=deployment_id,
+                    message=deployment_result.message,
+                    deployment_type=DeploymentType.ECS_FARGATE,
+                    status=status
+                )
+
+        except Exception as e:
+            error_msg = f"ECS Fargate deployment failed: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+
+            status.status = "failed"
+            status.message = error_msg
+            status.completed_at = datetime.now().isoformat()
+
+            # Notify failure
+            try:
+                from main import notify_deployment_progress
+                await notify_deployment_progress(deployment_id, "Deployment failed", "error", str(e))
+            except:
+                pass
+
+            return DeploymentResponse(
+                success=False,
+                deployment_id=deployment_id,
+                message=error_msg,
+                deployment_type=DeploymentType.ECS_FARGATE,
+                status=status
+            )
 
     async def get_health_status(self) -> DeploymentHealthStatus:
         """Get deployment service health status"""

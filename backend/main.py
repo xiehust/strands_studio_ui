@@ -1289,22 +1289,28 @@ async def notify_deployment_progress(deployment_id: str, step: str, status: str,
 
 async def broadcast_websocket_message(message: dict):
     """Broadcast message to all active WebSocket connections"""
+    logger.info(f"Broadcasting to {len(active_connections)} total connections")
+
     # Remove disconnected connections
     disconnected = []
     sent_count = 0
 
-    for connection in active_connections:
+    for i, connection in enumerate(active_connections):
         try:
             await connection.send_text(json.dumps(message))
             sent_count += 1
+            logger.debug(f"Message sent to connection {i+1}")
         except Exception as e:
-            logger.warning(f"Failed to send WebSocket message: {e}")
+            logger.warning(f"Failed to send WebSocket message to connection {i+1}: {e}")
             disconnected.append(connection)
 
     # Remove disconnected connections
     for conn in disconnected:
         if conn in active_connections:
             active_connections.remove(conn)
+
+    if disconnected:
+        logger.info(f"Removed {len(disconnected)} disconnected connections")
 
     logger.info(f"WebSocket notification sent to {sent_count} connections")
 

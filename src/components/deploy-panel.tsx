@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { type Node, type Edge } from '@xyflow/react';
-import { Rocket, Cloud, Server } from 'lucide-react';
+import { Rocket, Cloud, Server, Container } from 'lucide-react';
 import { LambdaDeployPanel } from './lambda-deploy-panel';
 import { AgentCoreDeployPanel } from './agentcore-deploy-panel';
+import { ECSDeployPanel } from './ecs-deploy-panel';
 
 
 interface DeployPanelProps {
@@ -13,9 +14,9 @@ interface DeployPanelProps {
 }
 
 export function DeployPanel({ nodes, edges, graphMode = false, className = '' }: DeployPanelProps) {
-  const [deploymentTarget, setDeploymentTarget] = useState<'agentcore' | 'lambda'>('agentcore');
+  const [deploymentTarget, setDeploymentTarget] = useState<'agentcore' | 'lambda' | 'ecs-fargate'>('agentcore');
 
-  const handleTargetChange = (target: 'agentcore' | 'lambda') => {
+  const handleTargetChange = (target: 'agentcore' | 'lambda' | 'ecs-fargate') => {
     setDeploymentTarget(target);
   };
 
@@ -33,7 +34,7 @@ export function DeployPanel({ nodes, edges, graphMode = false, className = '' }:
       <div className="p-4 border-b border-gray-200">
         <div className="space-y-3">
           <label className="text-sm font-medium text-gray-900">Deployment Target</label>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <button
               onClick={() => handleTargetChange('agentcore')}
               className={`flex items-center p-3 border rounded-lg transition-colors ${
@@ -56,6 +57,17 @@ export function DeployPanel({ nodes, edges, graphMode = false, className = '' }:
               <Cloud className="w-4 h-4 mr-2" />
               <span className="text-sm font-medium">AWS Lambda</span>
             </button>
+            <button
+              onClick={() => handleTargetChange('ecs-fargate')}
+              className={`flex items-center p-3 border rounded-lg transition-colors ${
+                deploymentTarget === 'ecs-fargate'
+                  ? 'border-blue-500 bg-blue-50 text-blue-700'
+                  : 'border-gray-200 hover:border-gray-300'
+              }`}
+            >
+              <Container className="w-4 h-4 mr-2" />
+              <span className="text-sm font-medium">ECS Fargate</span>
+            </button>
           </div>
         </div>
       </div>
@@ -63,6 +75,8 @@ export function DeployPanel({ nodes, edges, graphMode = false, className = '' }:
       {/* Conditional Panel Content */}
       {deploymentTarget === 'lambda' ? (
         <LambdaDeployPanel nodes={nodes} edges={edges} graphMode={graphMode} />
+      ) : deploymentTarget === 'ecs-fargate' ? (
+        <ECSDeployPanel nodes={nodes} edges={edges} graphMode={graphMode} />
       ) : (
         <AgentCoreDeployPanel nodes={nodes} edges={edges} graphMode={graphMode} />
       )}

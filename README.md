@@ -16,7 +16,7 @@ A visual drag-and-drop interface for creating, configuring, and executing AI age
 - **Real-time Execution**: Execute agents with streaming support and live updates
 - **Project Management**: Save, load, and manage multiple agent projects with persistent local storage
 - **Execution History**: Track and replay previous agent runs
-- **One-Click Deployment**: Deploy agents to AWS Bedrock AgentCore or AWS Lambda Function with a single click
+- **One-Click Deployment**: Deploy agents to AWS Bedrock AgentCore / AWS Lambda Function/ ECS Fargate with a single click
 
 ## Demos
 ### Video
@@ -47,8 +47,12 @@ A visual drag-and-drop interface for creating, configuring, and executing AI age
 ### 8. Deploy to Lambda
 ![alt text](assets/lambda_deploy.png)
 
+### 9. Deploy to ECS Fargate
+![alt text](assets/ecs_deploy.png)
+
 ### 9. Invoke Cloud
 ![alt text](assets/invoke_cloud.png)
+![alt text](assets/invoke_cloud2.png)
 
 ## Quick Start
 
@@ -321,4 +325,4 @@ The application consists of a React frontend for the visual editor and a FastAPI
 ### Deployment
 - [x] One-click deploy to Bedrock AgentCore - done 
 - [x] One-click deploy to Lambda - done 
-- [ ] One-click deploy to ECS Fargate - in-progress  
+- [x] One-click deploy to ECS Fargate - done

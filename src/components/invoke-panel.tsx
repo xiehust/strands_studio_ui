@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Play, RefreshCw, X, Trash2, AlertTriangle, Cloud, Zap, Waves } from 'lucide-react';
+import { Play, RefreshCw, X, Trash2, AlertTriangle, Cloud, Zap, Waves, Server } from 'lucide-react';
 
 interface AgentCoreDeployment {
   agent_runtime_arn: string;
@@ -34,7 +34,26 @@ interface LambdaDeployment {
   deployment_type: 'lambda';
 }
 
-type DeploymentHistory = AgentCoreDeployment | LambdaDeployment;
+interface ECSDeployment {
+  deployment_id: string;
+  agent_name: string;
+  region: string;
+  deployment_result: {
+    service_arn: string;
+    service_name: string;
+    cluster_arn: string;
+    task_definition_arn: string;
+    load_balancer_dns?: string;
+    service_endpoint: string;
+    streaming_capable?: boolean;
+    container_port: number;
+    health_check_path: string;
+  };
+  created_at: string;
+  deployment_type: 'ecs-fargate';
+}
+
+type DeploymentHistory = AgentCoreDeployment | LambdaDeployment | ECSDeployment;
 
 interface InvokePanelProps {
   className?: string;
@@ -43,9 +62,9 @@ interface InvokePanelProps {
 interface DeleteConfirmationModalProps {
   isOpen: boolean;
   agentName: string;
-  deploymentType: 'agentcore' | 'lambda';
-  identifier: string; // ARN for AgentCore, function name for Lambda
-  region?: string; // For Lambda deployments
+  deploymentType: 'agentcore' | 'lambda' | 'ecs-fargate';
+  identifier: string; // ARN for AgentCore, function name for Lambda, stack name for ECS
+  region?: string; // For Lambda and ECS deployments
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -54,8 +73,12 @@ function DeleteConfirmationModal({ isOpen, agentName, deploymentType, identifier
   if (!isOpen) return null;
 
   const isAgentCore = deploymentType === 'agentcore';
-  const title = isAgentCore ? 'Delete AgentCore Runtime' : 'Delete Lambda Deployment';
-  const typeLabel = isAgentCore ? 'AgentCore runtime' : 'Lambda deployment';
+  const isLambda = deploymentType === 'lambda';
+  const isECS = deploymentType === 'ecs-fargate';
+  const title = isAgentCore ? 'Delete AgentCore Runtime' :
+               isLambda ? 'Delete Lambda Deployment' : 'Delete ECS Deployment';
+  const typeLabel = isAgentCore ? 'AgentCore runtime' :
+                   isLambda ? 'Lambda deployment' : 'ECS Fargate deployment';
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -86,14 +109,19 @@ function DeleteConfirmationModal({ isOpen, agentName, deploymentType, identifier
                 <div className="text-sm text-red-800">
                   <p className="font-medium mb-1">This action cannot be undone!</p>
                   <p>This will permanently delete the AWS resources and all associated data.</p>
-                  {!isAgentCore && (
+                  {isLambda && (
                     <p className="mt-1">This includes the CloudFormation stack, Lambda functions, and ECR repositories.</p>
+                  )}
+                  {isECS && (
+                    <p className="mt-1">This includes the CloudFormation stack, ECS service, load balancer, and ECR repositories.</p>
                   )}
                 </div>
               </div>
             </div>
             <div className="bg-gray-50 rounded-md p-3">
-              <p className="text-xs text-gray-600 mb-1">{isAgentCore ? 'ARN:' : 'Function Name:'}</p>
+              <p className="text-xs text-gray-600 mb-1">
+                {isAgentCore ? 'ARN:' : isLambda ? 'Function Name:' : 'Service Name:'}
+              </p>
               <p className="text-xs font-mono text-gray-800 break-all">{identifier}</p>
               {region && !isAgentCore && (
                 <>
@@ -170,6 +198,19 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
       // Final fallback: assume streaming for AgentCore (most AgentCore agents support streaming)
       console.log('AgentCore defaulting to streaming capability (most AgentCore agents support streaming)');
       return true;
+    } else if (agent.deployment_type === 'ecs-fargate') {
+      // For ECS: check if deployment has streaming capability
+      const ecsAgent = agent as ECSDeployment;
+
+      // Check streaming_capable from deployment result
+      if (ecsAgent.deployment_result.streaming_capable !== undefined) {
+        console.log('ECS streaming capability from deployment result:', ecsAgent.deployment_result.streaming_capable);
+        return ecsAgent.deployment_result.streaming_capable;
+      }
+
+      // Default assumption: ECS services support streaming
+      console.log('ECS defaulting to streaming capability');
+      return true;
     }
 
     return false;
@@ -182,10 +223,10 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
   const [deleteModal, setDeleteModal] = useState<{
     isOpen: boolean;
     agentName: string;
-    deploymentType: 'agentcore' | 'lambda';
-    identifier: string; // ARN for AgentCore, function name for Lambda
-    region?: string; // For Lambda deployments
-    deploymentId?: string; // For Lambda deployment history cleanup
+    deploymentType: 'agentcore' | 'lambda' | 'ecs-fargate';
+    identifier: string; // ARN for AgentCore, function name for Lambda, stack name for ECS
+    region?: string; // For Lambda and ECS deployments
+    deploymentId?: string; // For Lambda and ECS deployment history cleanup
   }>({
     isOpen: false,
     agentName: '',
@@ -252,6 +293,51 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
               } else {
                 console.warn('Skipping AgentCore deployment without ARN:', dep);
               }
+            } else if (dep.deployment_target === 'ecs-fargate') {
+              // ECS Fargate deployment
+              const ecsDeployment: ECSDeployment = {
+                deployment_id: dep.deployment_id,
+                agent_name: dep.agent_name,
+                region: dep.region,
+                deployment_result: {
+                  service_arn: dep.deployment_result?.service_arn ||
+                              dep.deployment_result?.ServiceArn || '',
+                  service_name: dep.deployment_result?.service_name ||
+                               dep.deployment_result?.ServiceName ||
+                               dep.agent_name,
+                  cluster_arn: dep.deployment_result?.cluster_arn ||
+                              dep.deployment_result?.ClusterArn || '',
+                  task_definition_arn: dep.deployment_result?.task_definition_arn ||
+                                      dep.deployment_result?.TaskDefinitionArn || '',
+                  load_balancer_dns: dep.deployment_result?.load_balancer_dns ||
+                                     dep.deployment_result?.LoadBalancerDNS,
+                  service_endpoint: dep.deployment_result?.service_endpoint ||
+                                   dep.deployment_result?.ServiceEndpoint ||
+                                   dep.deployment_result?.deployment_outputs?.ServiceEndpoint ||
+                                   (dep.deployment_result?.LoadBalancerDNS ? `http://${dep.deployment_result.LoadBalancerDNS}` : '') ||
+                                   (dep.deployment_result?.load_balancer_dns ? `http://${dep.deployment_result.load_balancer_dns}` : '') ||
+                                   '',
+                  streaming_capable: dep.deployment_result?.streaming_capable ||
+                                    dep.deployment_result?.StreamingCapable ||
+                                    dep.deployment_result?.deployment_outputs?.streaming_capable ||
+                                    dep.deployment_result?.deployment_outputs?.StreamingCapable,
+                  container_port: dep.deployment_result?.container_port ||
+                                 dep.deployment_result?.ContainerPort ||
+                                 8000,
+                  health_check_path: dep.deployment_result?.health_check_path ||
+                                    dep.deployment_result?.HealthCheckPath ||
+                                    '/health'
+                },
+                created_at: dep.created_at,
+                deployment_type: 'ecs-fargate' as const
+              };
+
+              // Only add if we have a valid service endpoint
+              if (ecsDeployment.deployment_result.service_endpoint) {
+                allDeployments.push(ecsDeployment);
+              } else {
+                console.warn('Skipping ECS deployment without service endpoint:', dep);
+              }
             }
           }
         }
@@ -314,7 +400,7 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
   // Show delete confirmation modal
   const showDeleteConfirmation = (
     agentName: string,
-    deploymentType: 'agentcore' | 'lambda',
+    deploymentType: 'agentcore' | 'lambda' | 'ecs-fargate',
     identifier: string,
     region?: string,
     deploymentId?: string
@@ -342,17 +428,75 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
     });
 
     try {
-      let response: Response;
-
       if (deploymentType === 'agentcore') {
         // Delete AgentCore deployment
-        response = await fetch(`/api/deploy/agentcore/${encodeURIComponent(identifier)}`, {
+        const response = await fetch(`/api/deploy/agentcore/${encodeURIComponent(identifier)}`, {
           method: 'DELETE',
           headers: {
             'Content-Type': 'application/json',
           },
         });
-      } else {
+
+        // Handle AgentCore response
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+        }
+
+        const result = await response.json();
+        console.log('AgentCore deletion result:', result);
+
+        // Remove from localStorage after successful deletion
+        try {
+          const saved = localStorage.getItem('agentcore_deployments');
+          if (saved) {
+            const agentCoreDeployments = JSON.parse(saved);
+            const filteredDeployments = agentCoreDeployments.filter(
+              (dep: any) => dep.agent_runtime_arn !== identifier
+            );
+            localStorage.setItem('agentcore_deployments', JSON.stringify(filteredDeployments));
+            console.log('Removed AgentCore deployment from localStorage:', identifier);
+          }
+        } catch (error) {
+          console.error('Failed to remove AgentCore deployment from localStorage:', error);
+        }
+
+        // Also delete from deployment history backend if available
+        try {
+          // Load fresh deployment history from backend to find the deployment_id
+          const historyResponse = await fetch('/api/deployment-history?limit=50');
+          if (historyResponse.ok) {
+            const historyData = await historyResponse.json();
+            const deploymentToDelete = historyData.deployments?.find((dep: any) =>
+              dep.deployment_target === 'agentcore' &&
+              dep.success &&
+              (dep.deployment_result?.status?.deployment_outputs?.agent_runtime_arn === identifier ||
+               dep.deployment_result?.deployment_outputs?.agent_runtime_arn === identifier ||
+               dep.deployment_result?.agent_runtime_arn === identifier)
+            );
+
+            if (deploymentToDelete) {
+              const apiClient = (await import('../lib/api-client')).apiClient;
+              await apiClient.deleteDeploymentHistoryItem(deploymentToDelete.deployment_id);
+              console.log('AgentCore deployment history record deleted:', deploymentToDelete.deployment_id);
+            }
+          }
+        } catch (historyError) {
+          console.warn('Failed to delete AgentCore deployment history record:', historyError);
+          // Don't fail the entire operation if history deletion fails
+        }
+
+        // Reload deployment history after successful deletion
+        await loadDeploymentHistory();
+
+        // Clear selection if the deleted agent was selected
+        if (selectedAgent && selectedAgent.deployment_type === 'agentcore' &&
+            (selectedAgent as AgentCoreDeployment).agent_runtime_arn === identifier) {
+          setSelectedAgent(null);
+        }
+
+        return; // Exit early for AgentCore
+      } else if (deploymentType === 'lambda') {
         // Delete Lambda deployment using the new API client method
         const apiClient = (await import('../lib/api-client')).apiClient;
         const result = await apiClient.deleteLambdaDeployment(identifier, region);
@@ -384,45 +528,65 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
         }
 
         return; // Exit early for Lambda since apiClient handles everything
-      }
-
-      // Handle AgentCore response
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
-      }
-
-      const result = await response.json();
-      console.log('AgentCore deletion result:', result);
-
-      // Remove from localStorage after successful deletion
-      try {
-        const saved = localStorage.getItem('agentcore_deployments');
-        if (saved) {
-          const agentCoreDeployments = JSON.parse(saved);
-          const filteredDeployments = agentCoreDeployments.filter(
-            (dep: any) => dep.agent_runtime_arn !== identifier
-          );
-          localStorage.setItem('agentcore_deployments', JSON.stringify(filteredDeployments));
-          console.log('Removed AgentCore deployment from localStorage:', identifier);
+      } else if (deploymentType === 'ecs-fargate') {
+        // Delete ECS deployment using ECS stack deletion
+        // Extract service name from ARN if identifier is an ARN, then construct stack name
+        let stackName = identifier;
+        if (identifier.startsWith('arn:aws:ecs:')) {
+          // ARN format: arn:aws:ecs:region:account:service/cluster-name/service-name
+          const parts = identifier.split('/');
+          const serviceName = parts[parts.length - 1]; // Get last part (service name)
+          stackName = `sae-${serviceName}`; // Construct stack name using same pattern as backend
+        } else if (!identifier.startsWith('sae-')) {
+          // If it's just a service name without the prefix, add it
+          stackName = `sae-${identifier}`;
         }
-      } catch (error) {
-        console.error('Failed to remove AgentCore deployment from localStorage:', error);
-      }
 
-      // Reload deployment history after successful deletion
-      await loadDeploymentHistory();
+        const response = await fetch(`/api/deploy/ecs-fargate/${encodeURIComponent(stackName)}?region=${encodeURIComponent(region || 'us-east-1')}`, {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
 
-      // Clear selection if the deleted agent was selected
-      if (selectedAgent && selectedAgent.deployment_type === 'agentcore' &&
-          (selectedAgent as AgentCoreDeployment).agent_runtime_arn === identifier) {
-        setSelectedAgent(null);
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+        }
+
+        const result = await response.json();
+        console.log('ECS deletion result:', result);
+
+        // Also delete from deployment history if we have a deployment ID
+        if (deploymentId) {
+          try {
+            const apiClient = (await import('../lib/api-client')).apiClient;
+            await apiClient.deleteDeploymentHistoryItem(deploymentId);
+            console.log('ECS deployment history record deleted:', deploymentId);
+          } catch (historyError) {
+            console.warn('Failed to delete deployment history record:', historyError);
+            // Don't fail the entire operation if history deletion fails
+          }
+        }
+
+        // Reload deployment history after successful deletion
+        await loadDeploymentHistory();
+
+        // Clear selection if the deleted deployment was selected
+        if (selectedAgent && selectedAgent.deployment_type === 'ecs-fargate' &&
+            (selectedAgent as ECSDeployment).deployment_result.service_name === identifier) {
+          setSelectedAgent(null);
+        }
+
+        return; // Exit early for ECS since we handled everything
       }
 
     } catch (error) {
       console.error('Failed to delete agent:', error);
       // Show error to user
-      alert(`Failed to delete ${deploymentType === 'agentcore' ? 'AgentCore runtime' : 'Lambda deployment'}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      const typeLabel = deploymentType === 'agentcore' ? 'AgentCore runtime' :
+                       deploymentType === 'lambda' ? 'Lambda deployment' : 'ECS Fargate deployment';
+      alert(`Failed to delete ${typeLabel}: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
@@ -447,6 +611,17 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
           lambdaDeployment.agent_name, // Use agent_name as function name
           lambdaDeployment.region,
           lambdaDeployment.deployment_id // Pass deployment_id for history cleanup
+        );
+        return;
+      } else if (deployment.deployment_type === 'ecs-fargate') {
+        // For ECS, show confirmation modal with stack name for deletion
+        const ecsDeployment = deployment as ECSDeployment;
+        showDeleteConfirmation(
+          ecsDeployment.agent_name,
+          'ecs-fargate',
+          ecsDeployment.deployment_result.service_name, // Use service name as identifier
+          ecsDeployment.region,
+          ecsDeployment.deployment_id // Pass deployment_id for history cleanup
         );
         return;
       }
@@ -733,6 +908,150 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
             throw new Error('No sync function URL available for this deployment');
           }
         }
+      } else if (selectedAgent.deployment_type === 'ecs-fargate') {
+        // ECS Fargate invocation
+        const ecsDeployment = selectedAgent as ECSDeployment;
+
+        if (!ecsDeployment.deployment_result.service_endpoint) {
+          throw new Error('No service endpoint available for this ECS deployment');
+        }
+
+        // Prepare ECS payload
+        const ecsPayload = {
+          prompt: parsedPayload.user_input || parsedPayload.prompt || JSON.stringify(parsedPayload),
+          user_input: parsedPayload.user_input || parsedPayload.prompt || JSON.stringify(parsedPayload),
+          input_data: parsedPayload.input_data,
+          api_keys: parsedPayload.api_keys || {},
+          messages: parsedPayload.messages
+        };
+
+        if (isStreamingCapable) {
+          // Use streaming endpoint
+          const response = await fetch('/api/deploy/ecs/invoke/stream', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              service_endpoint: ecsDeployment.deployment_result.service_endpoint,
+              payload: ecsPayload,
+              region: ecsDeployment.region,
+              enable_stream: true
+            }),
+          });
+
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+
+          // Check if this is a streaming response
+          const contentType = response.headers.get('content-type');
+          if (contentType && contentType.includes('text/event-stream')) {
+            // Handle SSE streaming response from ECS service
+            const reader = response.body?.getReader();
+            if (!reader) {
+              throw new Error('No response body reader available');
+            }
+
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let hasReceivedData = false;
+
+            try {
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+
+                for (const line of lines) {
+                  if (line.startsWith('data: ')) {
+                    const data = line.slice(6);
+
+                    if (data.trim()) {
+                      hasReceivedData = true;
+                      try {
+                        const sseData = JSON.parse(data);
+                        if (sseData.type === 'delta' && sseData.text) {
+                          setStreamingResult(prev => prev + sseData.text);
+                        } else if (sseData.type === 'done') {
+                          // Streaming complete
+                          setInvokeResult({
+                            success: true,
+                            response_data: streamingResult,
+                            execution_time: null,
+                            streaming_via: 'ECS Service SSE'
+                          });
+                          return;
+                        } else if (sseData.type === 'error') {
+                          throw new Error(sseData.message || 'ECS streaming error');
+                        }
+                      } catch (parseError) {
+                        // Handle non-JSON SSE data
+                        if (data === '[DONE]') {
+                          setInvokeResult({
+                            success: true,
+                            response_data: streamingResult,
+                            execution_time: null,
+                            streaming_via: 'ECS Service SSE'
+                          });
+                          return;
+                        } else if (data.startsWith('Error: ')) {
+                          throw new Error(data.slice(7));
+                        } else if (data.trim()) {
+                          hasReceivedData = true;
+                          setStreamingResult(prev => prev + data);
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+
+              // Handle case where streaming ended without explicit completion
+              if (hasReceivedData) {
+                setInvokeResult({
+                  success: true,
+                  response_data: streamingResult,
+                  execution_time: null,
+                  streaming_via: 'ECS Service SSE'
+                });
+              }
+            } finally {
+              reader.releaseLock();
+            }
+          } else {
+            // Non-streaming response
+            const result = await response.json();
+            setInvokeResult(result);
+          }
+        } else {
+          // Use synchronous endpoint
+          const response = await fetch('/api/deploy/ecs/invoke', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              service_endpoint: ecsDeployment.deployment_result.service_endpoint,
+              payload: ecsPayload,
+              region: ecsDeployment.region,
+              enable_stream: false
+            }),
+          });
+
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+
+          const result = await response.json();
+          setInvokeResult({
+            ...result,
+            invocation_via: 'ECS Service HTTP'
+          });
+        }
       }
     } catch (error) {
       console.error('Agent invocation failed:', error);
@@ -787,16 +1106,22 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
                   (selectedAgent.deployment_type === 'agentcore' && deployment.deployment_type === 'agentcore' &&
                    (selectedAgent as AgentCoreDeployment).agent_runtime_arn === (deployment as AgentCoreDeployment).agent_runtime_arn) ||
                   (selectedAgent.deployment_type === 'lambda' && deployment.deployment_type === 'lambda' &&
-                   (selectedAgent as LambdaDeployment).deployment_id === (deployment as LambdaDeployment).deployment_id)
+                   (selectedAgent as LambdaDeployment).deployment_id === (deployment as LambdaDeployment).deployment_id) ||
+                  (selectedAgent.deployment_type === 'ecs-fargate' && deployment.deployment_type === 'ecs-fargate' &&
+                   (selectedAgent as ECSDeployment).deployment_id === (deployment as ECSDeployment).deployment_id)
                 );
 
                 const agentName = deployment.deployment_type === 'agentcore'
                   ? (deployment as AgentCoreDeployment).agent_runtime_name
-                  : (deployment as LambdaDeployment).agent_name;
+                  : deployment.deployment_type === 'lambda'
+                  ? (deployment as LambdaDeployment).agent_name
+                  : (deployment as ECSDeployment).agent_name;
 
                 const uniqueKey = deployment.deployment_type === 'agentcore'
                   ? (deployment as AgentCoreDeployment).agent_runtime_arn
-                  : (deployment as LambdaDeployment).deployment_id;
+                  : deployment.deployment_type === 'lambda'
+                  ? (deployment as LambdaDeployment).deployment_id
+                  : (deployment as ECSDeployment).deployment_id;
 
                 // For Lambda deployments, we need to show both sync and stream details
                 const lambdaDeployment = deployment.deployment_type === 'lambda' ? (deployment as LambdaDeployment) : null;
@@ -816,8 +1141,10 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
                         <div className="flex items-center gap-2 flex-wrap">
                           {deployment.deployment_type === 'agentcore' ? (
                             <Zap className="h-4 w-4 text-purple-600 flex-shrink-0" />
-                          ) : (
+                          ) : deployment.deployment_type === 'lambda' ? (
                             <Cloud className="h-4 w-4 text-orange-600 flex-shrink-0" />
+                          ) : (
+                            <Server className="h-4 w-4 text-teal-600 flex-shrink-0" />
                           )}
                           <h3 className="text-sm font-medium text-gray-900 truncate">
                             {agentName}
@@ -828,9 +1155,12 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
                           <span className={`text-xs px-2 py-1 rounded flex-shrink-0 ${
                             deployment.deployment_type === 'agentcore'
                               ? 'bg-purple-100 text-purple-700'
-                              : 'bg-orange-100 text-orange-700'
+                              : deployment.deployment_type === 'lambda'
+                              ? 'bg-orange-100 text-orange-700'
+                              : 'bg-teal-100 text-teal-700'
                           }`}>
-                            {deployment.deployment_type === 'agentcore' ? 'AgentCore' : 'Lambda'}
+                            {deployment.deployment_type === 'agentcore' ? 'AgentCore' :
+                             deployment.deployment_type === 'lambda' ? 'Lambda' : 'ECS Fargate'}
                           </span>
                         </div>
                         {/* Show deployment details */}
@@ -885,6 +1215,25 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
                               </div>
                             )}
                           </div>
+                        ) : deployment.deployment_type === 'ecs-fargate' ? (
+                          <div className="text-xs text-gray-500 mt-1 space-y-1 min-w-0">
+                            {/* ECS Service Details - Display only sync or stream based on capability */}
+                            {(deployment as ECSDeployment).deployment_result.streaming_capable ? (
+                              <div className="min-w-0">
+                                <span className="font-medium text-green-600">Stream:</span>
+                                <div className="ml-2 min-w-0">
+                                  <div className="truncate">{(deployment as ECSDeployment).deployment_result.service_endpoint}/invoke-stream</div>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="min-w-0">
+                                <span className="font-medium text-blue-600">Sync:</span>
+                                <div className="ml-2 min-w-0">
+                                  <div className="truncate">{(deployment as ECSDeployment).deployment_result.service_endpoint}/invoke</div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         ) : null}
                       </div>
                       <button
@@ -910,19 +1259,26 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
           <div className={`p-3 border rounded-md ${
             selectedAgent.deployment_type === 'agentcore'
               ? 'bg-purple-50 border-purple-200'
-              : 'bg-orange-50 border-orange-200'
+              : selectedAgent.deployment_type === 'lambda'
+              ? 'bg-orange-50 border-orange-200'
+              : 'bg-teal-50 border-teal-200'
           }`}>
             <h4 className={`text-sm font-medium mb-2 ${
               selectedAgent.deployment_type === 'agentcore'
                 ? 'text-purple-900'
-                : 'text-orange-900'
+                : selectedAgent.deployment_type === 'lambda'
+                ? 'text-orange-900'
+                : 'text-teal-900'
             }`}>
-              {selectedAgent.deployment_type === 'agentcore' ? 'AgentCore' : 'Lambda'} Details
+              {selectedAgent.deployment_type === 'agentcore' ? 'AgentCore' :
+               selectedAgent.deployment_type === 'lambda' ? 'Lambda' : 'ECS Fargate'} Details
             </h4>
             <div className={`space-y-1 text-xs ${
               selectedAgent.deployment_type === 'agentcore'
                 ? 'text-purple-800'
-                : 'text-orange-800'
+                : selectedAgent.deployment_type === 'lambda'
+                ? 'text-orange-800'
+                : 'text-teal-800'
             }`}>
               {selectedAgent.deployment_type === 'agentcore' ? (
                 <>
@@ -932,7 +1288,7 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
                   <p><strong>Network:</strong> {(selectedAgent as AgentCoreDeployment).network_mode}</p>
                   <p><strong>Deployed:</strong> {new Date((selectedAgent as AgentCoreDeployment).saved_at).toLocaleString()}</p>
                 </>
-              ) : (
+              ) : selectedAgent.deployment_type === 'lambda' ? (
                 <>
                   <p><strong>Name:</strong> {(selectedAgent as LambdaDeployment).agent_name}</p>
                   <p><strong>Region:</strong> {selectedAgent.region}</p>
@@ -947,6 +1303,27 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
                     <p><strong>Deployment:</strong> {(selectedAgent as LambdaDeployment).deployment_result.deployment_type === 'streaming' ? 'HTTP API (Streaming)' : 'REST API (Regular)'}</p>
                   )}
                   <p><strong>Deployed:</strong> {new Date((selectedAgent as LambdaDeployment).created_at).toLocaleString()}</p>
+                </>
+              ) : (
+                <>
+                  <p><strong>Name:</strong> {(selectedAgent as ECSDeployment).agent_name}</p>
+                  <p><strong>Region:</strong> {selectedAgent.region}</p>
+                  <p><strong>Type:</strong> ECS Fargate Service</p>
+                  <p><strong>Service:</strong> {(selectedAgent as ECSDeployment).deployment_result.service_name}</p>
+                  <div className="mt-2 space-y-1">
+                    <p><strong>📡 Endpoint:</strong></p>
+                    <div className="ml-2 space-y-1">
+                      {(selectedAgent as ECSDeployment).deployment_result.streaming_capable ? (
+                        <p className="font-medium text-green-600">Stream: <code className="bg-teal-100 px-1 rounded text-xs">{(selectedAgent as ECSDeployment).deployment_result.service_endpoint}/invoke-stream</code></p>
+                      ) : (
+                        <p className="font-medium text-blue-600">Sync: <code className="bg-teal-100 px-1 rounded text-xs">{(selectedAgent as ECSDeployment).deployment_result.service_endpoint}/invoke</code></p>
+                      )}
+                    </div>
+                  </div>
+                  {(selectedAgent as ECSDeployment).deployment_result.streaming_capable !== undefined && (
+                    <p><strong>Mode:</strong> {(selectedAgent as ECSDeployment).deployment_result.streaming_capable ? 'Streaming' : 'Synchronous'}</p>
+                  )}
+                  <p><strong>Deployed:</strong> {new Date((selectedAgent as ECSDeployment).created_at).toLocaleString()}</p>
                 </>
               )}
             </div>
@@ -988,6 +1365,7 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
           </div>
         )}
 
+
         {/* Invoke Button */}
         <div>
           <button
@@ -1001,13 +1379,21 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
             className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isInvoking
-              ? isStreamingCapable
+              ? selectedAgent?.deployment_type === 'ecs-fargate'
+                ? isStreamingCapable
+                  ? 'Streaming...'
+                  : 'Invoking...'
+                : selectedAgent?.deployment_type === 'lambda'
+                ? 'Invoking...'
+                : isStreamingCapable
                 ? 'Streaming...'
                 : 'Invoking...'
               : selectedAgent?.deployment_type === 'lambda'
+                ? 'Invoke Lambda Function'
+                : selectedAgent?.deployment_type === 'ecs-fargate'
                 ? isStreamingCapable
-                  ? 'Invoke Lambda Function'
-                  : 'Invoke Lambda Function'
+                  ? 'Invoke ECS Service (Stream)'
+                  : 'Invoke ECS Service (Sync)'
                 : isStreamingCapable
                   ? 'Invoke AgentCore Agent'
                   : 'Invoke AgentCore Agent'
@@ -1021,6 +1407,24 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
             <h4 className="text-sm font-medium text-gray-900 mb-2 flex items-center gap-2">
               <Waves className="h-4 w-4 text-blue-600 animate-pulse" />
               Streaming Response
+            </h4>
+            <div className="bg-black text-green-400 p-3 rounded text-xs font-mono overflow-auto max-h-64">
+              <div className="whitespace-pre-wrap">
+                {streamingResult}
+                {isInvoking && (
+                  <span className="animate-pulse">▋</span>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Streaming Result (ECS) - shown during and after streaming */}
+        {streamingResult && selectedAgent?.deployment_type === 'ecs-fargate' && isStreamingCapable && (
+          <div>
+            <h4 className="text-sm font-medium text-gray-900 mb-2 flex items-center gap-2">
+              <Waves className="h-4 w-4 text-teal-600 animate-pulse" />
+              ECS Streaming Response
             </h4>
             <div className="bg-black text-green-400 p-3 rounded text-xs font-mono overflow-auto max-h-64">
               <div className="whitespace-pre-wrap">
@@ -1061,7 +1465,8 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
         {/* Invoke Result */}
         {invokeResult && (
           (selectedAgent?.deployment_type === 'agentcore' && !((isInvoking && isStreamingCapable) || streamContent.length > 0)) ||
-          (selectedAgent?.deployment_type === 'lambda' && !streamingResult)
+          (selectedAgent?.deployment_type === 'lambda' && !streamingResult) ||
+          (selectedAgent?.deployment_type === 'ecs-fargate' && !(isStreamingCapable && streamingResult))
         ) && (
           <div>
             <h4 className="text-sm font-medium text-gray-900 mb-2">

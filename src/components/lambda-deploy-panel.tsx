@@ -632,10 +632,13 @@ export function LambdaDeployPanel({ nodes, edges, graphMode = false, className =
                       onChange={(e) => handleConfigChange('region', e.target.value)}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
                     >
-                      <option value="us-east-1">us-east-1</option>
-                      <option value="us-west-2">us-west-2</option>
-                      <option value="eu-central-1">eu-central-1</option>
-                      <option value="ap-southeast-1">ap-southeast-1</option>
+                      <option value="us-east-1">us-east-1 (N. Virginia)</option>
+                      <option value="us-west-2">us-west-2 (Oregon)</option>
+                      <option value="eu-central-1">eu-central-1 (Frankfurt)</option>
+                      <option value="ap-northeast-1">ap-northeast-1 (Tokyo)</option>
+                      <option value="ap-southeast-2">ap-southeast-1 (Sydney)</option>
+                      <option value="cn-north-1">cn-north-1 (Beijing)</option>
+                      <option value="cn-northwest-1">ap-northwest-1 (Ningxia)</option>
                     </select>
                   </div>
                 </div>
