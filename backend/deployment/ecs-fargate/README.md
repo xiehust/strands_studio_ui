@@ -35,7 +35,7 @@ result = await service.deploy_agent(generated_code, config, deployment_id)
 ### Stack Management
 
 ```python
-# Deploy creates CloudFormation stack: strands-agent-{service_name}
+# Deploy creates CloudFormation stack: sae-{service_name} (abbreviated to ensure 32-char AWS limit)
 result = await service.deploy_agent(code, config)
 
 # Delete removes all resources

@@ -106,6 +106,18 @@ Parameters:
     AllowedValues: ['x86_64', 'arm64']
     Description: Target architecture for Fargate tasks
 
+  OpenAIApiKey:
+    Type: String
+    Default: ''
+    NoEcho: true
+    Description: OpenAI API Key (optional)
+
+  AnthropicApiKey:
+    Type: String
+    Default: ''
+    NoEcho: true
+    Description: Anthropic API Key (optional)
+
 Conditions:
   UseDefaultVpc: !Equals [!Ref VpcId, '']
   UseDefaultSubnets: !Equals [!Join ['', !Ref SubnetIds], '']
@@ -113,6 +125,8 @@ Conditions:
   CreateExecutionRole: !Equals [!Ref ExecutionRoleArn, '']
   HasTaskRole: !Not [!Equals [!Ref TaskRoleArn, '']]
   HasProjectId: !Not [!Equals [!Ref ProjectId, '']]
+  HasOpenAIApiKey: !Not [!Equals [!Ref OpenAIApiKey, '']]
+  HasAnthropicApiKey: !Not [!Equals [!Ref AnthropicApiKey, '']]
 
 Resources:
   # ECS Cluster
@@ -184,7 +198,7 @@ Resources:
               Service: ecs-tasks.amazonaws.com
             Action: sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
       Tags:
         - Key: Service
           Value: !Ref ServiceName
@@ -275,6 +289,16 @@ Resources:
           Environment:
             - Name: PORT
               Value: !Ref ContainerPort
+            - !If
+              - HasOpenAIApiKey
+              - Name: OPENAI_API_KEY
+                Value: !Ref OpenAIApiKey
+              - !Ref "AWS::NoValue"
+            - !If
+              - HasAnthropicApiKey
+              - Name: ANTHROPIC_API_KEY
+                Value: !Ref AnthropicApiKey
+              - !Ref "AWS::NoValue"
           LogConfiguration:
             LogDriver: awslogs
             Options:

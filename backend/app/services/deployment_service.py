@@ -479,7 +479,8 @@ class DeploymentService:
                 project_id=request.project_id,
                 version=request.version,
                 execution_role_arn=request.execution_role_arn,
-                task_role_arn=request.task_role_arn
+                task_role_arn=request.task_role_arn,
+                api_keys=request.api_keys  # Pass API keys to ECS config
             )
 
             # Create ECS deployment service

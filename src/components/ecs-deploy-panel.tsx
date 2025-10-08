@@ -1,13 +1,65 @@
 import { useEffect, useState, useCallback } from 'react';
 import Editor from '@monaco-editor/react';
 import { type Node, type Edge } from '@xyflow/react';
-import { Download, Copy, CheckCircle, Container, AlertCircle, Edit3, Save, RotateCcw, History, ChevronDown, ChevronUp, Trash2, Server } from 'lucide-react';
+import { Download, Copy, CheckCircle, Container, AlertCircle, Edit3, RotateCcw, History, ChevronDown, ChevronUp, Trash2, Plus, X, Eye, EyeOff } from 'lucide-react';
 import { generateStrandsAgentCode } from '../lib/code-generator';
-import { apiClient, type DeploymentHistoryItem } from '../lib/api-client';
+import { type DeploymentHistoryItem } from '../lib/api-client';
+
+// Utility function to extract API key references from generated code
+function extractApiKeysFromCode(generatedCode: string): Record<string, string> {
+  const apiKeyMatches: Record<string, string> = {};
+
+  // Pattern to match os.environ.get("API_KEY_NAME") calls
+  const envGetPattern = /os\.environ\.get\(["']([A-Z_]*API_KEY[A-Z_]*)['"]\)/g;
+
+  let match;
+  while ((match = envGetPattern.exec(generatedCode)) !== null) {
+    const keyName = match[1];
+    // Use the actual environment variable name as the key
+    apiKeyMatches[keyName] = '';
+  }
+
+  return apiKeyMatches;
+}
+
+// Utility function to extract API keys from agent nodes
+function extractApiKeysFromNodes(nodes: Node[]): Record<string, string> {
+  const nodeApiKeys: Record<string, string> = {};
+
+  nodes.forEach(node => {
+    if (node.type === 'agent' || node.type === 'orchestratorAgent') {
+      const apiKey = node.data?.apiKey;
+      if (apiKey && typeof apiKey === 'string' && apiKey.trim()) {
+        // Determine the provider type and map to appropriate environment variable name
+        const modelProvider = node.data?.modelProvider;
+        if (modelProvider === 'OpenAI') {
+          nodeApiKeys['OPENAI_API_KEY'] = apiKey.trim();
+        } else if (modelProvider === 'Anthropic') {
+          nodeApiKeys['ANTHROPIC_API_KEY'] = apiKey.trim();
+        } else {
+          // Generic fallback - construct proper env var name
+          const keyName = (typeof modelProvider === 'string' && modelProvider)
+            ? `${modelProvider.toUpperCase()}_API_KEY`
+            : 'OPENAI_API_KEY';
+          nodeApiKeys[keyName] = apiKey.trim();
+        }
+      }
+    }
+  });
+
+  return nodeApiKeys;
+}
+
+interface ApiKeyEntry {
+  key: string;
+  value: string;
+  visible: boolean;
+}
 
 interface ECSDeployPanelProps {
   nodes: Node[];
   edges: Edge[];
+  graphMode: boolean;
   className?: string;
 }
 
@@ -43,35 +95,24 @@ interface ECSDeploymentState {
   error?: string;
 }
 
-// CPU/Memory preset configurations for Fargate
-const CPU_MEMORY_PRESETS = [
-  { cpu: 256, memory: 512, label: '0.25 vCPU, 512 MB' },
-  { cpu: 256, memory: 1024, label: '0.25 vCPU, 1 GB' },
-  { cpu: 512, memory: 1024, label: '0.5 vCPU, 1 GB' },
-  { cpu: 512, memory: 2048, label: '0.5 vCPU, 2 GB' },
-  { cpu: 1024, memory: 2048, label: '1 vCPU, 2 GB' },
-  { cpu: 1024, memory: 4096, label: '1 vCPU, 4 GB' },
-  { cpu: 2048, memory: 4096, label: '2 vCPU, 4 GB' },
-  { cpu: 2048, memory: 8192, label: '2 vCPU, 8 GB' },
-  { cpu: 4096, memory: 8192, label: '4 vCPU, 8 GB' },
-  { cpu: 4096, memory: 16384, label: '4 vCPU, 16 GB' },
-];
-
 const AWS_REGIONS = [
-  { value: 'us-east-1', label: 'US East (N. Virginia)' },
-  { value: 'us-west-2', label: 'US West (Oregon)' },
-  { value: 'eu-west-1', label: 'Europe (Ireland)' },
-  { value: 'ap-southeast-1', label: 'Asia Pacific (Singapore)' },
-  { value: 'ap-northeast-1', label: 'Asia Pacific (Tokyo)' },
+  { value: 'us-east-1', label: 'us-east-1 (N. Virginia)' },
+  { value: 'us-west-2', label: 'us-west-2 (Oregon)' },
+  { value: 'eu-central-1', label: 'eu-central-1 (Frankfurt)' },
+  { value: 'ap-southeast-1', label: 'ap-southeast-1 (Singapore)' },
+  { value: 'ap-northeast-1', label: 'ap-northeast-1 (Tokyo)' },
+  { value: 'cn-north-1', label: 'cn-north-1 (Beijing)' },
+  { value: 'cn-northwest-1', label: 'cn-northwest-1 (Ningxia)' },
 ];
 
-export function ECSDeployPanel({ nodes, edges, className = '' }: ECSDeployPanelProps) {
+export function ECSDeployPanel({ nodes, edges, graphMode: _graphMode, className = '' }: ECSDeployPanelProps) {
   const [activeTab, setActiveTab] = useState<'configuration' | 'code-preview'>('configuration');
   const [generatedCode, setGeneratedCode] = useState('');
   const [editableCode, setEditableCode] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [copied, setCopied] = useState(false);
+  const [apiKeys, setApiKeys] = useState<ApiKeyEntry[]>([]);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [showDeploymentLogs, setShowDeploymentLogs] = useState(false);
   const [deploymentHistory, setDeploymentHistory] = useState<DeploymentHistoryItem[]>([]);
@@ -126,6 +167,36 @@ export function ECSDeployPanel({ nodes, edges, className = '' }: ECSDeployPanelP
     loadServiceNameOptions();
   }, []);
 
+  // Extract API keys from generated code and nodes
+  useEffect(() => {
+    if (generatedCode) {
+      const extractedApiKeys = extractApiKeysFromCode(generatedCode);
+      const nodeApiKeys = extractApiKeysFromNodes(nodes);
+
+      // Merge extracted and node API keys
+      const allDetectedKeys = { ...extractedApiKeys, ...nodeApiKeys };
+
+      // Only add new API keys that aren't already in the form
+      const existingKeys = new Set(apiKeys.map(k => k.key));
+      const newApiKeys: ApiKeyEntry[] = [];
+
+      Object.entries(allDetectedKeys).forEach(([key, value]) => {
+        if (!existingKeys.has(key)) {
+          newApiKeys.push({
+            key,
+            value: value || '', // Use node value if available, otherwise empty
+            visible: false
+          });
+        }
+      });
+
+      if (newApiKeys.length > 0) {
+        setApiKeys(prev => [...prev, ...newApiKeys]);
+        console.log('Auto-added API keys - from code:', Object.keys(extractedApiKeys), 'from nodes:', Object.keys(nodeApiKeys));
+      }
+    }
+  }, [generatedCode, nodes, apiKeys]);
+
   const loadServiceNameOptions = async () => {
     try {
       const response = await fetch('/api/deployment-history?deployment_type=ecs-fargate&limit=50');
@@ -138,7 +209,7 @@ export function ECSDeployPanel({ nodes, edges, className = '' }: ECSDeployPanelP
         // Extract unique service names
         const uniqueServiceNames = Array.from(
           new Set(ecsDeployments.map((d: DeploymentHistoryItem) => d.agent_name).filter(Boolean))
-        ).sort();
+        ).sort() as string[];
 
         setServiceNameOptions(uniqueServiceNames);
       }
@@ -313,17 +384,6 @@ export function ECSDeployPanel({ nodes, edges, className = '' }: ECSDeployPanelP
     setIsEditing(false);
   };
 
-  const handleCpuMemoryPresetChange = (preset: typeof CPU_MEMORY_PRESETS[0]) => {
-    setDeploymentState(prev => ({
-      ...prev,
-      config: {
-        ...prev.config,
-        cpu: preset.cpu,
-        memory: preset.memory
-      }
-    }));
-  };
-
   const handleServiceNameChange = (serviceName: string) => {
     // Update state
     setDeploymentState(prev => ({
@@ -383,8 +443,13 @@ export function ECSDeployPanel({ nodes, edges, className = '' }: ECSDeployPanelP
           assign_public_ip: deploymentState.config.assignPublicIp,
           execution_role_arn: deploymentState.config.executionRoleArn,
           task_role_arn: deploymentState.config.taskRoleArn,
-          // API keys extraction (simplified for now)
-          api_keys: {}
+          // Convert API keys array to object format
+          api_keys: apiKeys.reduce((acc, { key, value }) => {
+            if (key && value) {
+              acc[key] = value;
+            }
+            return acc;
+          }, {} as Record<string, string>)
         }),
       });
 
@@ -444,9 +509,25 @@ export function ECSDeployPanel({ nodes, edges, className = '' }: ECSDeployPanelP
     }
   };
 
-  const getPresetLabel = (cpu: number, memory: number) => {
-    const preset = CPU_MEMORY_PRESETS.find(p => p.cpu === cpu && p.memory === memory);
-    return preset ? preset.label : `${cpu} CPU, ${memory} MB`;
+  // API Key management functions
+  const addApiKey = () => {
+    setApiKeys(prev => [...prev, { key: '', value: '', visible: false }]);
+  };
+
+  const removeApiKey = (index: number) => {
+    setApiKeys(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const updateApiKey = (index: number, field: 'key' | 'value', value: string) => {
+    setApiKeys(prev => prev.map((item, i) =>
+      i === index ? { ...item, [field]: value } : item
+    ));
+  };
+
+  const toggleApiKeyVisibility = (index: number) => {
+    setApiKeys(prev => prev.map((item, i) =>
+      i === index ? { ...item, visible: !item.visible } : item
+    ));
   };
 
   const deleteDeployment = async (deploymentId: string) => {
@@ -521,7 +602,7 @@ export function ECSDeployPanel({ nodes, edges, className = '' }: ECSDeployPanelP
                       value={deploymentState.config.serviceName}
                       onChange={(e) => handleServiceNameChange(e.target.value)}
                       onFocus={() => setShowServiceNameDropdown(true)}
-                      onBlur={(e) => {
+                      onBlur={() => {
                         // Delay hiding dropdown to allow for clicks
                         setTimeout(() => setShowServiceNameDropdown(false), 150);
                       }}
@@ -599,6 +680,10 @@ export function ECSDeployPanel({ nodes, edges, className = '' }: ECSDeployPanelP
                       <option value="x86_64">x86_64</option>
                       <option value="arm64">ARM64</option>
                     </select>
+                       <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
+                        <span className="text-orange-400">💡</span>
+                        <span className="text-orange-400">Choose the same architecture as your deployment host for consistancy</span>
+                      </p>
                   </div>
 
 
@@ -642,8 +727,6 @@ export function ECSDeployPanel({ nodes, edges, className = '' }: ECSDeployPanelP
                       <option value="3072">3 GB</option>
                       <option value="4096">4 GB</option>
                       <option value="8192">8 GB</option>
-                      <option value="16384">16 GB</option>
-                      <option value="30720">30 GB</option>
                     </select>
                   </div>
                 </div>
@@ -831,6 +914,53 @@ export function ECSDeployPanel({ nodes, edges, className = '' }: ECSDeployPanelP
                 )}
               </div>
 
+              {/* API Keys */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium text-gray-900">API Keys (Optional)</label>
+                  <button
+                    onClick={addApiKey}
+                    className="flex items-center px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
+                  >
+                    <Plus className="w-3 h-3 mr-1" />
+                    Add Key
+                  </button>
+                </div>
+
+                {apiKeys.map((apiKey, index) => (
+                  <div key={index} className="flex items-center space-x-2">
+                    <input
+                      placeholder="Key name (e.g., OPENAI_API_KEY)"
+                      value={apiKey.key}
+                      onChange={(e) => updateApiKey(index, 'key', e.target.value)}
+                      className="flex-1 px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                    <div className="relative flex-1">
+                      <input
+                        type={apiKey.visible ? 'text' : 'password'}
+                        placeholder="API key value"
+                        value={apiKey.value}
+                        onChange={(e) => updateApiKey(index, 'value', e.target.value)}
+                        className="w-full px-2 py-1 pr-8 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => toggleApiKeyVisibility(index)}
+                        className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                      >
+                        {apiKey.visible ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                      </button>
+                    </div>
+                    <button
+                      onClick={() => removeApiKey(index)}
+                      className="p-1 text-gray-400 hover:text-red-600"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
               {/* Deploy Button */}
               <div className="border-t pt-4">
                 <button
@@ -895,25 +1025,25 @@ export function ECSDeployPanel({ nodes, edges, className = '' }: ECSDeployPanelP
                       </div>
                     )}
 
-                    {/* ALB Endpoints */}
+                    {/* Service Endpoint - Display only sync or stream based on capability */}
                     {deploymentState.deploymentResult.deployment_outputs?.ServiceEndpoint && (
                       <div className="mt-3 space-y-2">
                         <div className="p-2 bg-blue-50 border border-blue-200 rounded">
-                          <p className="text-sm font-medium text-blue-800 mb-1">📡 Service Endpoints:</p>
-                          <div className="space-y-1">
-                            <p className="text-sm text-blue-700">
-                              <span className="font-bold">Sync:</span>{' '}
-                              <code className="bg-blue-100 px-2 py-1 rounded text-xs font-mono border">
-                                {deploymentState.deploymentResult.deployment_outputs.ServiceEndpoint}/invoke
-                              </code>
-                            </p>
-                            <p className="text-sm text-blue-700">
-                              <span className="font-bold">Stream:</span>{' '}
-                              <code className="bg-blue-100 px-2 py-1 rounded text-xs font-mono border">
+                          {deploymentState.deploymentResult.streaming_capable ? (
+                            <>
+                              <p className="text-sm font-medium text-blue-800 mb-1">📡 Stream Endpoint:</p>
+                              <code className="bg-blue-100 px-2 py-1 rounded text-xs font-mono border block">
                                 {deploymentState.deploymentResult.deployment_outputs.ServiceEndpoint}/invoke-stream
                               </code>
-                            </p>
-                          </div>
+                            </>
+                          ) : (
+                            <>
+                              <p className="text-sm font-medium text-blue-800 mb-1">📡 Sync Endpoint:</p>
+                              <code className="bg-blue-100 px-2 py-1 rounded text-xs font-mono border block">
+                                {deploymentState.deploymentResult.deployment_outputs.ServiceEndpoint}/invoke
+                              </code>
+                            </>
+                          )}
                         </div>
                       </div>
                     )}
@@ -1109,20 +1239,9 @@ export function ECSDeployPanel({ nodes, edges, className = '' }: ECSDeployPanelP
                                   {entry.deployment_result?.ServiceEndpoint && (
                                     <div className="mt-2 space-y-1">
                                       <div>
-                                        <strong>Service Endpoint:</strong>
-                                        <div className="mt-1 font-mono text-xs bg-gray-50 p-1 rounded break-all">
-                                          {entry.deployment_result.ServiceEndpoint}
-                                        </div>
-                                      </div>
-                                      <div>
-                                        <strong>Invoke URLs:</strong>
-                                        <div className="mt-1 space-y-1">
-                                          <div className="font-mono text-xs bg-blue-50 p-1 rounded">
-                                            <span className="text-blue-700">Sync:</span> {entry.deployment_result.ServiceEndpoint}/invoke
-                                          </div>
-                                          <div className="font-mono text-xs bg-purple-50 p-1 rounded">
-                                            <span className="text-purple-700">Stream:</span> {entry.deployment_result.ServiceEndpoint}/invoke-stream
-                                          </div>
+                                        <strong>{entry.deployment_result?.streaming_capable ? 'Stream Endpoint:' : 'Sync Endpoint:'}</strong>
+                                        <div className="mt-1 font-mono text-xs bg-blue-50 p-1 rounded break-all">
+                                          {entry.deployment_result.ServiceEndpoint}{entry.deployment_result?.streaming_capable ? '/invoke-stream' : '/invoke'}
                                         </div>
                                       </div>
                                     </div>

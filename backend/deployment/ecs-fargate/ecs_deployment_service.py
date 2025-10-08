@@ -59,6 +59,9 @@ class ECSDeploymentConfig:
     stack_name: Optional[str] = None
     streaming_capable: bool = False
 
+    # API Keys
+    api_keys: Optional[Dict[str, str]] = None
+
 @dataclass
 class ECSDeploymentResult:
     """Result of an ECS deployment operation"""
@@ -175,7 +178,12 @@ class ECSDeploymentService:
         """
         # Generate stack name
         if not config.stack_name:
-            config.stack_name = f"strands-agent-ecs-{config.service_name}"
+            # Use shorter prefix and ensure target group name (stack_name + "-tg") is <= 32 chars
+            # Max stack name length = 32 - 3 ("-tg") = 29 characters
+            short_prefix = "sae"  # strands-agent-ecs abbreviated
+            max_service_name_length = 29 - len(short_prefix) - 1  # -1 for the dash
+            service_name = config.service_name[:max_service_name_length] if len(config.service_name) > max_service_name_length else config.service_name
+            config.stack_name = f"{short_prefix}-{service_name}"
 
         # Detect streaming capability
         config.streaming_capable = self.detect_streaming_capability(generated_code)
@@ -266,16 +274,23 @@ class ECSDeploymentService:
 
             logger.info(f"CloudFormation ECS Fargate deployment successful: {config.service_name}")
 
-            # Create enhanced success message with cluster name and endpoints
+            # Create enhanced success message with cluster name and endpoint (sync or stream based on capability)
             cluster_name = stack_outputs.get('ClusterName', config.service_name)
             service_endpoint = stack_outputs.get('ServiceEndpoint', '')
 
             if service_endpoint:
-                success_message = f"""🚀 ECS Cluster: {cluster_name}
+                if config.streaming_capable:
+                    # Stream-only mode: main endpoint is the stream URL
+                    endpoint_url = f"{service_endpoint}/invoke-stream"
+                    success_message = f"""🚀 ECS Cluster: {cluster_name}
 
-📡 Endpoints:
-• Sync:   {service_endpoint}/invoke
-• Stream: {service_endpoint}/invoke-stream"""
+📡 Stream Endpoint: {endpoint_url}"""
+                else:
+                    # Sync-only mode: main endpoint is the sync URL
+                    endpoint_url = f"{service_endpoint}/invoke"
+                    success_message = f"""🚀 ECS Cluster: {cluster_name}
+
+📡 Sync Endpoint: {endpoint_url}"""
             else:
                 success_message = f"🚀 ECS Cluster: {cluster_name} - Deployment completed successfully"
 
@@ -522,6 +537,20 @@ class ECSDeploymentService:
                 parameters.append({'ParameterKey': 'TaskRoleArn', 'ParameterValue': config.task_role_arn})
                 optional_params.append(f"TaskRoleArn={config.task_role_arn}")
 
+            # Add API key parameters if provided
+            if config.api_keys:
+                # Check for OpenAI API key (support both formats: OPENAI_API_KEY and openai_api_key)
+                openai_key = config.api_keys.get('OPENAI_API_KEY') or config.api_keys.get('openai_api_key')
+                if openai_key and openai_key.strip():
+                    parameters.append({'ParameterKey': 'OpenAIApiKey', 'ParameterValue': openai_key})
+                    optional_params.append("OpenAIApiKey=***REDACTED***")  # Don't log the actual key
+
+                # Check for Anthropic API key (support both formats: ANTHROPIC_API_KEY and anthropic_api_key)
+                anthropic_key = config.api_keys.get('ANTHROPIC_API_KEY') or config.api_keys.get('anthropic_api_key')
+                if anthropic_key and anthropic_key.strip():
+                    parameters.append({'ParameterKey': 'AnthropicApiKey', 'ParameterValue': anthropic_key})
+                    optional_params.append("AnthropicApiKey=***REDACTED***")  # Don't log the actual key
+
             if optional_params:
                 await notify_progress(deploy_step_name, "running", f"Added {len(optional_params)} optional parameters")
                 logger.info(f"Optional parameters: {', '.join(optional_params)}")
@@ -563,6 +592,9 @@ class ECSDeploymentService:
                     raise RuntimeError("No default subnets found in the VPC")
 
             logger.info(f"CloudFormation parameters prepared: {len(parameters)} total parameters")
+            # Log parameter keys (but not sensitive values)
+            param_keys = [p['ParameterKey'] for p in parameters]
+            logger.info(f"Parameter keys being passed to CloudFormation: {param_keys}")
 
             # Check if stack exists and handle failed stacks
             await notify_progress(deploy_step_name, "running", f"Checking if stack '{config.stack_name}' exists...")
@@ -899,12 +931,12 @@ class ECSDeploymentService:
     ):
         """
         Save deployment to structured storage following Lambda's pattern:
-        backend/storage/deploy_history/ecs-fargate/<service_name>/<deployment_id>/
+        storage/deploy_history/ecs-fargate/<service_name>/v1.0.0/<deployment_id>/
         """
         try:
             # Create storage directory structure (like Lambda)
-            storage_base = Path("backend/storage/deploy_history/ecs-fargate")
-            deployment_dir = storage_base / config.service_name / deployment_id
+            storage_base = Path("storage/deploy_history/ecs-fargate")
+            deployment_dir = storage_base / config.service_name / "v1.0.0" / deployment_id
             deployment_dir.mkdir(parents=True, exist_ok=True)
 
             # Save deployment metadata (like Lambda's deployment_metadata.json)

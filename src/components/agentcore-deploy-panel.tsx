@@ -383,12 +383,24 @@ export function AgentCoreDeployPanel({ nodes, edges, graphMode = false, classNam
   // Load deployment history from persistent storage
   const loadDeploymentHistory = async () => {
     try {
+      console.log('🔄 Loading AgentCore deployment history...');
       const response = await apiClient.getDeploymentHistory(
         undefined, // project_id - load all projects
         undefined, // version - load all versions
         20 // limit to recent 20 deployments
       );
-      setDeploymentHistory(response.deployments || []);
+      console.log('📊 Raw deployment history response:', response);
+
+      // Filter for AgentCore deployments only
+      const agentCoreDeployments = response.deployments?.filter(
+        deployment => {
+          console.log(`🔍 Checking deployment: ${deployment.deployment_id}, target: ${deployment.deployment_target}`);
+          return deployment.deployment_target === 'agentcore';
+        }
+      ) || [];
+
+      console.log('✅ Filtered AgentCore deployments:', agentCoreDeployments);
+      setDeploymentHistory(agentCoreDeployments);
     } catch (error) {
       console.error('Failed to load deployment history:', error);
       // Fallback to localStorage for backward compatibility
@@ -989,10 +1001,10 @@ async def entry(payload):
                       onChange={(e) => handleConfigChange('region', e.target.value)}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
                     >
-                      <option value="us-east-1">us-east-1</option>
-                      <option value="us-west-2">us-west-2</option>
-                      <option value="eu-central-1">eu-central-1</option>
-                      <option value="ap-southeast-1">ap-southeast-1</option>
+                      <option value="us-east-1">us-east-1 (N. Virginia)</option>
+                      <option value="us-west-2">us-west-2 (Oregon)</option>
+                      <option value="eu-central-1">eu-central-1 (Frankfurt)</option>
+                      <option value="ap-southeast-2">ap-southeast-1 (Sydney)</option>
                     </select>
                   </div>
 

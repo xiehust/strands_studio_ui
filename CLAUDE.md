@@ -256,9 +256,10 @@ result = graph(user_input)  # Returns GraphResult with execution details
 ### Deployment Features
 - **AWS Bedrock AgentCore Deployment**: Deploy agents to AWS Bedrock AgentCore for managed, serverless AI agent execution
 - **AWS Lambda Deployment**: Deploy agents to AWS Lambda with CloudFormation stack management
-- **Deployment History**: Unified storage system for both AgentCore and Lambda deployments in backend (`/api/deployment-history`)
+- **AWS ECS Fargate Deployment**: Deploy agents to AWS ECS Fargate for containerized, scalable agent execution with CloudFormation-based infrastructure
+- **Deployment History**: Unified storage system for AgentCore, Lambda, and ECS deployments in backend (`/api/deployment-history`)
 - **Cross-Browser Persistence**: All deployments stored in backend API, with localStorage as fallback
-- **Deployment Invoke Panel**: Unified interface in `invoke-panel.tsx` for invoking both AgentCore and Lambda agents
+- **Deployment Invoke Panel**: Unified interface in `invoke-panel.tsx` for invoking AgentCore, Lambda, and ECS agents
 
 ### Critical Architecture Rules
 1. **MCP Connection Constraints**: Each MCP server node can only connect to one agent node. This prevents resource conflicts and ensures proper context management in generated code.
@@ -281,11 +282,12 @@ result = graph(user_input)  # Returns GraphResult with execution details
    - Chat modal provides interactive conversation interface with semi-transparent backdrop
 
 5. **Deployment Storage Architecture**:
-   - Both AgentCore and Lambda deployments are saved to backend via `/api/deployment-history`
+   - AgentCore, Lambda, and ECS deployments are saved to backend via `/api/deployment-history`
    - Frontend `invoke-panel.tsx` loads all deployments from backend API (not localStorage)
    - localStorage is used only as fallback if backend API fails or returns no data
    - Deployment history save operations are non-blocking and use `Promise.resolve().then()` to prevent save failures from affecting deployment success
    - AgentCore deployment outputs are extracted from `deployment_result.status.deployment_outputs`
+   - ECS deployments use CloudFormation for infrastructure provisioning (VPC, ALB, ECS cluster, Fargate service)
 
 ### Development Rules
 1. Always use context7 when I need code generation, setup or configuration steps, or library/API documentation. This means you should automatically use the Context7 MCP tools to resolve library id and get library docs without me having to explicitly ask.
