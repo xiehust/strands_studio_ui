@@ -54,13 +54,45 @@ export function PropertyPanel({
 
   const bedrockModels = [
     {
-      model_id: "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
-      model_name: "Claude 3.7 Sonnet"
+      model_id: "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+      model_name: "Claude 4.5 Sonnet (global)"
+    },
+    {
+      model_id: "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+      model_name: "Claude 4.5 Sonnet (US)"
+    },
+    {
+      model_id: "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
+      model_name: "Claude 4.5 Sonnet (EU)"
+    },
+    {
+      model_id: "global.anthropic.claude-sonnet-4-20250514-v1:0",
+      model_name: "Claude 4 Sonnet (global)"
     },
     {
       model_id: "us.anthropic.claude-sonnet-4-20250514-v1:0",
-      model_name: "Claude 4 Sonnet"
+      model_name: "Claude 4 Sonnet (US)"
     },
+    {
+      model_id: "eu.anthropic.claude-sonnet-4-20250514-v1:0",
+      model_name: "Claude 4 Sonnet (EU)"
+    },
+    {
+      model_id: "apac.anthropic.claude-sonnet-4-20250514-v1:0",
+      model_name: "Claude 4 Sonnet (APAC)"
+    },
+    {
+      model_id: "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+      model_name: "Claude 3.7 Sonnet (US)"
+    },
+    {
+      model_id: "eu.anthropic.claude-3-7-sonnet-20250219-v1:0",
+      model_name: "Claude 3.7 Sonnet (EU)"
+    },  
+    {
+      model_id: "apac.anthropic.claude-3-7-sonnet-20250219-v1:0",
+      model_name: "Claude 3.7 Sonnet (APAC)"
+    },  
     {
       model_id: "openai.gpt-oss-120b-1:0",
       model_name: "GPT-OSS-120B"

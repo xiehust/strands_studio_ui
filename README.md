@@ -103,7 +103,7 @@ npm run dev:full
 3. Have a natural conversation with your agent using streaming responses and full conversation history
 
 ### Play with sample flow
-Download this sample [Flow](assets/sample_image.png) and import to the UI, and experience it.
+Download this sample [Flow](https://github.com/xiehust/strands_studio_ui/blob/main/assets/aws_knowledge_mcp_agent.json) and import to the UI, and experience it.
 ![alt text](assets/sample_image.png)
 
 ### Production Deployment
