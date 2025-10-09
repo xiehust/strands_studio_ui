@@ -116,7 +116,10 @@ class ContainerBuildService:
     async def _ensure_ecr_repository(self, repository_name: str, region: str, account_id: str) -> str:
         """Ensure ECR repository exists and return URI"""
         ecr_client = self._get_ecr_client(region)
-        ecr_uri = f"{account_id}.dkr.ecr.{region}.amazonaws.com/{repository_name}"
+
+        # Use correct domain suffix for China regions
+        domain_suffix = "amazonaws.com.cn" if region.startswith("cn-") else "amazonaws.com"
+        ecr_uri = f"{account_id}.dkr.ecr.{region}.{domain_suffix}/{repository_name}"
 
         try:
             # Check if repository exists

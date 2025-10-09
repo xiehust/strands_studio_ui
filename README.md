@@ -312,6 +312,7 @@ The application consists of a React frontend for the visual editor and a FastAPI
 - [x] Custom tool node
 - [x] Swarm Agent Node
 - [ ] Structural Output Node - to do 
+- [ ] Condition Node - to do 
 
 ### Flows
 - [x] Single agent mode

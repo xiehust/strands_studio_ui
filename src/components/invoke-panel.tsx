@@ -532,8 +532,10 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
         // Delete ECS deployment using ECS stack deletion
         // Extract service name from ARN if identifier is an ARN, then construct stack name
         let stackName = identifier;
-        if (identifier.startsWith('arn:aws:ecs:')) {
+        // Support both standard AWS ARNs (arn:aws:ecs:) and China region ARNs (arn:aws-cn:ecs:)
+        if (identifier.startsWith('arn:aws:ecs:') || identifier.startsWith('arn:aws-cn:ecs:')) {
           // ARN format: arn:aws:ecs:region:account:service/cluster-name/service-name
+          // or: arn:aws-cn:ecs:region:account:service/cluster-name/service-name
           const parts = identifier.split('/');
           const serviceName = parts[parts.length - 1]; // Get last part (service name)
           stackName = `sae-${serviceName}`; // Construct stack name using same pattern as backend
