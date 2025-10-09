@@ -1004,7 +1004,7 @@ async def entry(payload):
                       <option value="us-east-1">us-east-1 (N. Virginia)</option>
                       <option value="us-west-2">us-west-2 (Oregon)</option>
                       <option value="eu-central-1">eu-central-1 (Frankfurt)</option>
-                      <option value="ap-southeast-2">ap-southeast-1 (Sydney)</option>
+                      <option value="ap-southeast-2">ap-southeast-2 (Sydney)</option>
                     </select>
                   </div>
 

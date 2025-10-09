@@ -636,7 +636,7 @@ export function LambdaDeployPanel({ nodes, edges, graphMode = false, className =
                       <option value="us-west-2">us-west-2 (Oregon)</option>
                       <option value="eu-central-1">eu-central-1 (Frankfurt)</option>
                       <option value="ap-northeast-1">ap-northeast-1 (Tokyo)</option>
-                      <option value="ap-southeast-2">ap-southeast-1 (Sydney)</option>
+                      <option value="ap-southeast-2">ap-southeast-2 (Sydney)</option>
                       <option value="cn-north-1">cn-north-1 (Beijing)</option>
                       <option value="cn-northwest-1">ap-northwest-1 (Ningxia)</option>
                     </select>
