@@ -180,10 +180,9 @@ class ECSDeploymentService:
         if not config.stack_name:
             # Use shorter prefix and ensure target group name (stack_name + "-tg") is <= 32 chars
             # Max stack name length = 32 - 3 ("-tg") = 29 characters
-            short_prefix = "sae"  # strands-agent-ecs abbreviated
-            max_service_name_length = 29 - len(short_prefix) - 1  # -1 for the dash
+            max_service_name_length = 28  # -1 for the dash
             service_name = config.service_name[:max_service_name_length] if len(config.service_name) > max_service_name_length else config.service_name
-            config.stack_name = f"{short_prefix}-{service_name}"
+            config.stack_name = f"{service_name}"
 
         # Detect streaming capability
         config.streaming_capable = self.detect_streaming_capability(generated_code)
@@ -863,10 +862,29 @@ class ECSDeploymentService:
 
         try:
             cf_client = self._get_client('cloudformation', region)
+            ecr_client = self._get_client('ecr', region)
 
-            # Check if stack exists
+            # Check if stack exists and get stack outputs for ECR repository name
+            ecr_repository_name = None
             try:
-                cf_client.describe_stacks(StackName=stack_name)
+                stack_response = cf_client.describe_stacks(StackName=stack_name)
+                stack = stack_response['Stacks'][0]
+
+                # Try to find ECR repository name from stack tags or resources
+                try:
+                    # Get stack resources to find ECR repository
+                    resources_response = cf_client.describe_stack_resources(StackName=stack_name)
+                    for resource in resources_response['StackResources']:
+                        if resource['ResourceType'] == 'AWS::ECR::Repository':
+                            ecr_repository_name = resource['PhysicalResourceId']
+                            deletion_results["logs"].append(f"Found ECR repository: {ecr_repository_name}")
+                            break
+                except Exception as e:
+                    logger.warning(f"Could not retrieve stack resources: {e}")
+                    # Try to infer ECR repository name from stack name
+                    ecr_repository_name = f"strands-agent-{service_name}"
+                    deletion_results["logs"].append(f"Inferred ECR repository name: {ecr_repository_name}")
+
             except ClientError as e:
                 if 'does not exist' in str(e):
                     deletion_results["message"] = f"Stack {stack_name} does not exist"
@@ -874,6 +892,39 @@ class ECSDeploymentService:
                     return deletion_results
                 else:
                     raise
+
+            # Delete ECR repository first (before stack deletion) to avoid orphaned images
+            if ecr_repository_name:
+                try:
+                    # Delete all images first
+                    try:
+                        images_response = ecr_client.list_images(repositoryName=ecr_repository_name)
+                        if images_response['imageIds']:
+                            ecr_client.batch_delete_image(
+                                repositoryName=ecr_repository_name,
+                                imageIds=images_response['imageIds']
+                            )
+                            deletion_results["logs"].append(f"Deleted {len(images_response['imageIds'])} images from ECR repository")
+                    except ClientError as e:
+                        if 'RepositoryNotFoundException' not in str(e):
+                            logger.warning(f"Failed to delete ECR images: {e}")
+
+                    # Delete repository
+                    try:
+                        ecr_client.delete_repository(
+                            repositoryName=ecr_repository_name,
+                            force=True  # Force deletion even if images exist
+                        )
+                        deletion_results["logs"].append(f"Deleted ECR repository: {ecr_repository_name}")
+                    except ClientError as e:
+                        if 'RepositoryNotFoundException' in str(e):
+                            deletion_results["logs"].append(f"ECR repository {ecr_repository_name} not found (may have been manually deleted)")
+                        else:
+                            logger.warning(f"Failed to delete ECR repository: {e}")
+                            deletion_results["logs"].append(f"Warning: Could not delete ECR repository: {str(e)}")
+                except Exception as e:
+                    logger.warning(f"Error during ECR cleanup: {e}")
+                    deletion_results["logs"].append(f"Warning: ECR cleanup encountered issues: {str(e)}")
 
             # Delete stack
             cf_client.delete_stack(StackName=stack_name)
