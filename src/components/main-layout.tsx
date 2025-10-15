@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { type Node, type Edge } from '@xyflow/react';
-import { Code, Eye, EyeOff, FolderOpen, Terminal, Save, Plus, Download, Upload, Rocket, Play } from 'lucide-react';
+import { Code, Eye, EyeOff, FolderOpen, Terminal, Save, Plus, Download, Upload, Rocket, Play, GithubIcon, Star } from 'lucide-react';
 import { FlowEditor } from './flow-editor';
 import { NodePalette } from './node-palette';
 import { PropertyPanel } from './property-panel';
@@ -357,6 +357,18 @@ export function MainLayout() {
                 <FolderOpen className="w-4 h-4 mr-2" />
                 Open
               </button>
+
+              <a
+                href="https://github.com/xiehust/strands_studio_ui"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center px-3 py-2 rounded-md text-sm font-medium bg-gray-900 text-white hover:bg-gray-800 transition-colors"
+                title="Star us on GitHub"
+              >
+                <GithubIcon className="w-4 h-4 mr-1" />
+                <Star className="w-4 h-4 mr-2" />
+                Star
+              </a>
             </div>
           </div>
 
