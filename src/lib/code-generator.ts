@@ -30,7 +30,7 @@ export function generateStrandsAgentCode(
   const imports = new Set<string>([
     'from strands import Agent, tool',
     'from strands.models import BedrockModel',
-    'from strands_tools import calculator, file_read, shell, current_time',
+    'from strands_tools import calculator, file_read, shell, current_time, http_request, editor, retrieve, mem0_memory',
     'import json',
     'import os',
     'import asyncio',
@@ -248,6 +248,9 @@ function generateAgentModelOnly(
     temperature = 0.7,
     maxTokens = 4000,
     baseUrl = '',
+    thinkingEnabled = false,
+    thinkingBudgetTokens = 2048,
+    reasoningEffort = 'medium',
   } = data;
 
   // Use modelId for Bedrock, modelName for others
@@ -257,7 +260,7 @@ function generateAgentModelOnly(
   const agentVarName = sanitizePythonVariableName(label as string);
 
   // Generate model configuration based on provider
-  const modelConfig = generateModelConfigForCode(agentVarName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string);
+  const modelConfig = generateModelConfigForCode(agentVarName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, thinkingBudgetTokens as number, reasoningEffort as string);
 
   return `# ${label} Configuration
 ${modelConfig}`;
@@ -279,17 +282,20 @@ function generateAgentCode(
     temperature = 0.7,
     maxTokens = 4000,
     baseUrl = '',
+    thinkingEnabled = false,
+    thinkingBudgetTokens = 2048,
+    reasoningEffort = 'medium',
   } = data;
 
   // Use modelId for Bedrock, modelName for others
   const modelIdentifier = modelProvider === 'AWS Bedrock' ? modelId : modelName;
-  
+
   // Sanitize agent name to be Python-compatible
   const agentVarName = sanitizePythonVariableName(label as string);
 
   // Find connected tools
   const connectedTools = findConnectedTools(agentNode, allNodes, edges);
-  const toolsCode = connectedTools.length > 0 
+  const toolsCode = connectedTools.length > 0
     ? `,\n    tools=[${connectedTools.map(tool => tool.code).join(', ')}]`
     : '';
 
@@ -297,7 +303,7 @@ function generateAgentCode(
   const systemPromptValue = String(systemPrompt || 'You are a helpful AI assistant.');
 
   // Generate model configuration based on provider
-  const modelConfig = generateModelConfigForCode(agentVarName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string);
+  const modelConfig = generateModelConfigForCode(agentVarName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, thinkingBudgetTokens as number, reasoningEffort as string);
 
   return `# ${label} Configuration
 ${modelConfig}
@@ -325,6 +331,9 @@ function generateSwarmAgentCode(
     temperature = 0.7,
     maxTokens = 4000,
     baseUrl = '',
+    thinkingEnabled = false,
+    thinkingBudgetTokens = 2048,
+    reasoningEffort = 'medium',
   } = data;
 
   // Use modelId for Bedrock, modelName for others
@@ -343,7 +352,7 @@ function generateSwarmAgentCode(
   const systemPromptValue = String(systemPrompt || 'You are a helpful AI assistant.');
 
   // Generate model configuration based on provider
-  const modelConfig = generateModelConfigForCode(agentVarName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string);
+  const modelConfig = generateModelConfigForCode(agentVarName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, thinkingBudgetTokens as number, reasoningEffort as string);
 
   return `# ${label} Configuration
 ${modelConfig}
@@ -437,10 +446,10 @@ function findConnectedTools(
         'file_reader': 'file_read', // alias for file_read
         'shell': 'shell',
         'current_time': 'current_time',
-        'web_search': 'calculator', // fallback to calculator for demo
-        'api_caller': 'calculator', // fallback to calculator for demo
-        'database_query': 'calculator', // fallback to calculator for demo
-        'email_sender': 'calculator', // fallback to calculator for demo
+        'http_request': 'http_request',
+        'editor': 'editor', 
+        'retrieve': 'retrieve', 
+        'mem0_memory': 'mem0_memory', 
       };
       const mappedTool = toolMapping[toolName] || 'calculator';
       return {
@@ -999,6 +1008,9 @@ function generateAgentAsToolCode(
     temperature = 0.7,
     maxTokens = 4000,
     baseUrl = '',
+    thinkingEnabled = false,
+    thinkingBudgetTokens = 2048,
+    reasoningEffort = 'medium',
   } = data;
 
   const modelIdentifier = modelProvider === 'AWS Bedrock' ? modelId : modelName;
@@ -1036,8 +1048,8 @@ def ${functionName}(user_input: str) -> str:
         ${mcpClientVars.map(clientVar => `mcp_tools.extend(${clientVar}.list_tools_sync())`).join('\n        ')}
         
         # Create model for ${label}
-        ${generateModelConfigForTool(functionName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string)}
-        
+        ${generateModelConfigForTool(functionName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, thinkingBudgetTokens as number, reasoningEffort as string)}
+
         # Create agent with MCP tools
         agent = Agent(
             model=${functionName}_model,
@@ -1060,15 +1072,15 @@ def ${functionName}(user_input: str) -> str:
     """${label} - ${(systemPrompt as string).substring(0, 100)}${(systemPrompt as string).length > 100 ? '...' : ''}"""
     
     # Create model for ${label}
-    ${generateModelConfigForTool(functionName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string)}
-    
+    ${generateModelConfigForTool(functionName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, thinkingBudgetTokens as number, reasoningEffort as string)}
+
     # Create agent
     agent = Agent(
         model=${functionName}_model,
         system_prompt="""${escapePythonTripleQuotedString(String(systemPrompt || 'You are a helpful AI agent.'))}"""${toolsCode},
         callback_handler=None
     )
-    
+
     # Execute and return result
     response = agent(user_input)
     return str(response)`;
@@ -1095,6 +1107,9 @@ function generateOrchestratorAsToolCode(
     maxTokens = 4000,
     coordinationPrompt = '',
     baseUrl = '',
+    thinkingEnabled = false,
+    thinkingBudgetTokens = 2048,
+    reasoningEffort = 'medium',
   } = data;
 
   const modelIdentifier = modelProvider === 'AWS Bedrock' ? modelId : modelName;
@@ -1151,8 +1166,8 @@ def ${functionName}(user_input: str) -> str:
         ${mcpClientVars.map(clientVar => `mcp_tools.extend(${clientVar}.list_tools_sync())`).join('\n        ')}
         
         # Create model for ${label}
-        ${generateModelConfigForTool(functionName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string)}
-        
+        ${generateModelConfigForTool(functionName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, thinkingBudgetTokens as number, reasoningEffort as string)}
+
         # Create orchestrator agent with MCP tools
         agent = Agent(
             model=${functionName}_model,
@@ -1175,15 +1190,15 @@ def ${functionName}(user_input: str) -> str:
     """${label} - ${(systemPrompt as string).substring(0, 100)}${(systemPrompt as string).length > 100 ? '...' : ''}"""
     
     # Create model for ${label}
-    ${generateModelConfigForTool(functionName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string)}
-    
+    ${generateModelConfigForTool(functionName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, thinkingBudgetTokens as number, reasoningEffort as string)}
+
     # Create orchestrator agent
     agent = Agent(
         model=${functionName}_model,
         system_prompt="""${escapePythonTripleQuotedString(fullSystemPrompt)}"""${toolsCode},
         callback_handler=None
     )
-    
+
     # Execute and return result
     response = agent(user_input)
     return str(response)`;
@@ -1205,6 +1220,9 @@ function generateOrchestratorModelOnly(
     temperature = 0.7,
     maxTokens = 4000,
     baseUrl = '',
+    thinkingEnabled = false,
+    thinkingBudgetTokens = 2048,
+    reasoningEffort = 'medium',
   } = data;
 
   const modelIdentifier = modelProvider === 'AWS Bedrock' ? modelId : modelName;
@@ -1212,7 +1230,7 @@ function generateOrchestratorModelOnly(
   const orchestratorName = sanitizePythonVariableName(label as string);
 
   // Generate model configuration based on provider
-  const modelConfig = generateModelConfigForCode(orchestratorName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string);
+  const modelConfig = generateModelConfigForCode(orchestratorName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, thinkingBudgetTokens as number, reasoningEffort as string);
 
   return `# ${label} Configuration
 ${modelConfig}`;
@@ -1235,6 +1253,9 @@ function generateOrchestratorCode(
     maxTokens = 4000,
     coordinationPrompt = '',
     baseUrl = '',
+    thinkingEnabled = false,
+    thinkingBudgetTokens = 2048,
+    reasoningEffort = 'medium',
   } = data;
 
   const modelIdentifier = modelProvider === 'AWS Bedrock' ? modelId : modelName;
@@ -1290,14 +1311,14 @@ function generateOrchestratorCode(
 
   if (hasMCPTools) {
     // When MCP tools are present, only define the model - agent creation happens in main()
-    const modelConfig = generateModelConfigForCode(orchestratorName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string);
+    const modelConfig = generateModelConfigForCode(orchestratorName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, thinkingBudgetTokens as number, reasoningEffort as string);
     return `# ${label} Configuration
 ${modelConfig}
 
 # ${orchestratorName} will be created in main() with MCP tools`;
   } else {
     // Regular orchestrator without MCP tools
-    const modelConfig = generateModelConfigForCode(orchestratorName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string);
+    const modelConfig = generateModelConfigForCode(orchestratorName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, thinkingBudgetTokens as number, reasoningEffort as string);
     return `# ${label} Configuration
 ${modelConfig}
 
@@ -1315,8 +1336,15 @@ function generateModelConfigForCode(
   modelIdentifier: string,
   temperature: number,
   maxTokens: number,
-  baseUrl: string
+  baseUrl: string,
+  thinkingEnabled?: boolean,
+  thinkingBudgetTokens?: number,
+  reasoningEffort?: string
 ): string {
+  // When thinking is enabled for Bedrock, temperature must be 1
+  const isBedrock = modelProvider === 'AWS Bedrock' || modelProvider === undefined;
+  const finalTemperature = thinkingEnabled && isBedrock ? 1 : temperature;
+
   if (modelProvider === 'OpenAI') {
     const clientArgs = [];
     // Always use environment variable for API key for security - never hardcode
@@ -1324,23 +1352,39 @@ function generateModelConfigForCode(
     if (baseUrl) {
       clientArgs.push(`"base_url": "${baseUrl}"`);
     }
-    
+
     const clientArgsStr = `\n    client_args={\n        ${clientArgs.join(',\n        ')}\n    },`;
-    
+
+    const params = [`"max_tokens": ${maxTokens}`, `"temperature": ${finalTemperature}`];
+    if (thinkingEnabled && reasoningEffort) {
+      params.push(`"reasoning_effort": "${reasoningEffort}"`);
+    }
+
     return `${varName}_model = OpenAIModel(${clientArgsStr}
     model_id="${modelIdentifier}",
     params={
-        "max_tokens": ${maxTokens},
-        "temperature": ${temperature},
+        ${params.join(',\n        ')},
     }
 )`;
   } else {
     // Default to Bedrock
-    return `${varName}_model = BedrockModel(
+    let bedrockCode = `${varName}_model = BedrockModel(
     model_id="${modelIdentifier}",
-    temperature=${temperature},
-    max_tokens=${maxTokens}
-)`;
+    temperature=${finalTemperature},
+    max_tokens=${maxTokens}`;
+
+    if (thinkingEnabled && thinkingBudgetTokens) {
+      bedrockCode += `,
+    additional_request_fields={
+        "thinking": {
+            "type": "enabled",
+            "budget_tokens": ${thinkingBudgetTokens}
+        }
+    }`;
+    }
+
+    bedrockCode += '\n)';
+    return bedrockCode;
   }
 }
 
@@ -1350,8 +1394,15 @@ function generateModelConfigForTool(
   modelIdentifier: string,
   temperature: number,
   maxTokens: number,
-  baseUrl: string
+  baseUrl: string,
+  thinkingEnabled?: boolean,
+  thinkingBudgetTokens?: number,
+  reasoningEffort?: string
 ): string {
+  // When thinking is enabled for Bedrock, temperature must be 1
+  const isBedrock = modelProvider === 'AWS Bedrock' || modelProvider === undefined;
+  const finalTemperature = thinkingEnabled && isBedrock ? 1 : temperature;
+
   if (modelProvider === 'OpenAI') {
     const clientArgs = [];
     // Always use environment variable for API key for security - never hardcode
@@ -1359,23 +1410,39 @@ function generateModelConfigForTool(
     if (baseUrl) {
       clientArgs.push(`\"base_url\": \"${baseUrl}\"`);
     }
-    
+
     const clientArgsStr = `\n            client_args={\n                ${clientArgs.join(',\n                ')}\n            },`;
-    
+
+    const params = [`"max_tokens": ${maxTokens}`, `"temperature": ${finalTemperature}`];
+    if (thinkingEnabled && reasoningEffort) {
+      params.push(`"reasoning_effort": "${reasoningEffort}"`);
+    }
+
     return `${varName}_model = OpenAIModel(${clientArgsStr}
             model_id="${modelIdentifier}",
             params={
-                "max_tokens": ${maxTokens},
-                "temperature": ${temperature},
+                ${params.join(',\n                ')},
             }
         )`;
   } else {
     // Default to Bedrock
-    return `${varName}_model = BedrockModel(
+    let bedrockCode = `${varName}_model = BedrockModel(
             model_id="${modelIdentifier}",
-            temperature=${temperature},
-            max_tokens=${maxTokens}
-        )`;
+            temperature=${finalTemperature},
+            max_tokens=${maxTokens}`;
+
+    if (thinkingEnabled && thinkingBudgetTokens) {
+      bedrockCode += `,
+            additional_request_fields={
+                "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": ${thinkingBudgetTokens}
+                }
+            }`;
+    }
+
+    bedrockCode += '\n        )';
+    return bedrockCode;
   }
 }
 

@@ -15,6 +15,10 @@ interface OrchestratorAgentNodeData {
   // OpenAI-specific fields
   apiKey?: string;
   baseUrl?: string;
+  // Thinking settings
+  thinkingEnabled?: boolean;
+  thinkingBudgetTokens?: number;
+  reasoningEffort?: 'low' | 'medium' | 'high';
 }
 
 export function OrchestratorAgentNode({ data, selected, id }: NodeProps) {

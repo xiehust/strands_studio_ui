@@ -40,8 +40,15 @@ function generateModelConfig(
   modelIdentifier: string,
   temperature: number,
   maxTokens: number,
-  baseUrl: string
+  baseUrl: string,
+  thinkingEnabled?: boolean,
+  thinkingBudgetTokens?: number,
+  reasoningEffort?: string
 ): string {
+  // When thinking is enabled for Bedrock, temperature must be 1
+  const isBedrock = modelProvider === 'AWS Bedrock' || modelProvider === undefined;
+  const finalTemperature = thinkingEnabled && isBedrock ? 1 : temperature;
+
   if (modelProvider === 'OpenAI') {
     const clientArgs = [];
     clientArgs.push(`"api_key": os.environ.get("OPENAI_API_KEY")`);
@@ -49,20 +56,37 @@ function generateModelConfig(
       clientArgs.push(`"base_url": "${baseUrl}"`);
     }
     const clientArgsStr = `\n    client_args={\n        ${clientArgs.join(',\n        ')}\n    },`;
+
+    const params = [`"max_tokens": ${maxTokens}`, `"temperature": ${finalTemperature}`];
+    if (thinkingEnabled && reasoningEffort) {
+      params.push(`"reasoning_effort": "${reasoningEffort}"`);
+    }
+
     return `${varName}_model = OpenAIModel(${clientArgsStr}
     model_id="${modelIdentifier}",
     params={
-        "max_tokens": ${maxTokens},
-        "temperature": ${temperature},
+        ${params.join(',\n        ')},
     }
 )`;
   } else {
     // Default to Bedrock
-    return `${varName}_model = BedrockModel(
+    let bedrockCode = `${varName}_model = BedrockModel(
     model_id="${modelIdentifier}",
-    temperature=${temperature},
-    max_tokens=${maxTokens}
-)`;
+    temperature=${finalTemperature},
+    max_tokens=${maxTokens}`;
+
+    if (thinkingEnabled && thinkingBudgetTokens) {
+      bedrockCode += `,
+    additional_request_fields={
+        "thinking": {
+            "type": "enabled",
+            "budget_tokens": ${thinkingBudgetTokens}
+        }
+    }`;
+    }
+
+    bedrockCode += '\n)';
+    return bedrockCode;
   }
 }
 
@@ -301,6 +325,9 @@ export function generateGraphCode(
       const temperature = data.temperature !== undefined ? data.temperature : 0.7;
       const maxTokens = data.maxTokens || 4000;
       const baseUrl = data.baseUrl || '';
+      const thinkingEnabled = data.thinkingEnabled || false;
+      const thinkingBudgetTokens = data.thinkingBudgetTokens || 2048;
+      const reasoningEffort = data.reasoningEffort || 'medium';
 
       const modelIdentifier = modelProvider === 'AWS Bedrock' ? modelId : modelName;
       const agentVarName = sanitizePythonVariableName(label as string);
@@ -312,7 +339,7 @@ export function generateGraphCode(
         : '';
 
       // Generate model config
-      const modelConfig = generateModelConfig(agentVarName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string);
+      const modelConfig = generateModelConfig(agentVarName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, thinkingBudgetTokens as number, reasoningEffort as string);
 
       code += `# ${label} Configuration\n`;
       code += modelConfig + '\n\n';

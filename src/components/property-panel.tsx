@@ -237,7 +237,7 @@ export function PropertyPanel({
               API key will be stored securely as OPENAI_API_KEY environment variable
             </p>
           </div>
-          
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Base URL (Optional)
@@ -258,30 +258,28 @@ export function PropertyPanel({
 
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">
-          System Prompt
-        </label>
-        <textarea
-          value={data.systemPrompt || ''}
-          onChange={(e) => handleInputChange('systemPrompt', e.target.value)}
-          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
-          placeholder="You are a helpful AI assistant..."
-          rows={4}
-        />
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-2">
-          Temperature: {data.temperature || 0.7}
+          Temperature: {(data.modelProvider === 'AWS Bedrock' || !data.modelProvider) && data.thinkingEnabled ? 1 : (data.temperature || 0.7)}
         </label>
         <input
           type="range"
           min="0"
           max="1"
           step="0.1"
-          value={data.temperature || 0.7}
-          onChange={(e) => handleInputChange('temperature', parseFloat(e.target.value))}
-          className="w-full"
+          value={(data.modelProvider === 'AWS Bedrock' || !data.modelProvider) && data.thinkingEnabled ? 1 : (data.temperature || 0.7)}
+          onChange={(e) => {
+            const isBedrockThinking = (data.modelProvider === 'AWS Bedrock' || !data.modelProvider) && data.thinkingEnabled;
+            if (!isBedrockThinking) {
+              handleInputChange('temperature', parseFloat(e.target.value));
+            }
+          }}
+          disabled={(data.modelProvider === 'AWS Bedrock' || !data.modelProvider) && data.thinkingEnabled}
+          className="w-full disabled:opacity-50 disabled:cursor-not-allowed"
         />
+        {(data.modelProvider === 'AWS Bedrock' || !data.modelProvider) && data.thinkingEnabled && (
+          <p className="text-xs text-amber-600 mt-1">
+            Temperature is locked to 1.0 when thinking is enabled (Bedrock only)
+          </p>
+        )}
       </div>
 
       <div>
@@ -290,7 +288,7 @@ export function PropertyPanel({
         </label>
         <input
           type="number"
-          value={data.maxTokens || 8000}
+          value={data.maxTokens || 10000}
           onChange={(e) => handleInputChange('maxTokens', parseInt(e.target.value))}
           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
           min="1"
@@ -315,6 +313,65 @@ export function PropertyPanel({
             : "Connect an Output node to enable streaming mode"
           }
         </p>
+      </div>
+
+      <div className="border-t pt-4">
+        <h4 className="text-sm font-semibold text-blue-800 mb-3">Advanced Settings</h4>
+
+        <div>
+          <label className="flex items-center space-x-2">
+            <input
+              type="checkbox"
+              checked={data.thinkingEnabled || false}
+              onChange={(e) => handleInputChange('thinkingEnabled', e.target.checked)}
+              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            <span className="text-sm font-medium text-gray-700">Enable Thinking</span>
+          </label>
+          <p className="text-xs text-gray-500 mt-1">
+            Enable extended thinking for more complex reasoning
+          </p>
+        </div>
+
+        {data.thinkingEnabled && (
+          <>
+            {data.modelProvider === 'AWS Bedrock' || !data.modelProvider ? (
+              <div className="mt-3">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Thinking Budget Tokens: {data.thinkingBudgetTokens || 2048}
+                </label>
+                <input
+                  type="range"
+                  min="1024"
+                  max="8192"
+                  step="512"
+                  value={data.thinkingBudgetTokens || 2048}
+                  onChange={(e) => handleInputChange('thinkingBudgetTokens', parseInt(e.target.value))}
+                  className="w-full"
+                />
+                <div className="flex justify-between text-xs text-gray-500 mt-1">
+                  <span>1,024</span>
+                  <span>8,192</span>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-3">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Reasoning Effort
+                </label>
+                <select
+                  value={data.reasoningEffort || 'medium'}
+                  onChange={(e) => handleInputChange('reasoningEffort', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+            )}
+          </>
+        )}
       </div>
     </div>
   );
@@ -760,17 +817,28 @@ export function PropertyPanel({
 
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">
-          Temperature: {data.temperature || 0.7}
+          Temperature: {(data.modelProvider === 'AWS Bedrock' || !data.modelProvider) && data.thinkingEnabled ? 1 : (data.temperature || 0.7)}
         </label>
         <input
           type="range"
           min="0"
           max="1"
           step="0.1"
-          value={data.temperature || 0.7}
-          onChange={(e) => handleInputChange('temperature', parseFloat(e.target.value))}
-          className="w-full"
+          value={(data.modelProvider === 'AWS Bedrock' || !data.modelProvider) && data.thinkingEnabled ? 1 : (data.temperature || 0.7)}
+          onChange={(e) => {
+            const isBedrockThinking = (data.modelProvider === 'AWS Bedrock' || !data.modelProvider) && data.thinkingEnabled;
+            if (!isBedrockThinking) {
+              handleInputChange('temperature', parseFloat(e.target.value));
+            }
+          }}
+          disabled={(data.modelProvider === 'AWS Bedrock' || !data.modelProvider) && data.thinkingEnabled}
+          className="w-full disabled:opacity-50 disabled:cursor-not-allowed"
         />
+        {(data.modelProvider === 'AWS Bedrock' || !data.modelProvider) && data.thinkingEnabled && (
+          <p className="text-xs text-amber-600 mt-1">
+            Temperature is locked to 1.0 when thinking is enabled (Bedrock only)
+          </p>
+        )}
       </div>
 
       <div>
@@ -779,7 +847,7 @@ export function PropertyPanel({
         </label>
         <input
           type="number"
-          value={data.maxTokens || 4000}
+          value={data.maxTokens || 10000}
           onChange={(e) => handleInputChange('maxTokens', parseInt(e.target.value))}
           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500"
           min="100"
@@ -804,6 +872,65 @@ export function PropertyPanel({
             : "Connect an Output node to enable streaming mode"
           }
         </p>
+      </div>
+
+      <div className="border-t pt-4">
+        <h4 className="text-sm font-semibold text-purple-800 mb-3">Advanced Settings</h4>
+
+        <div>
+          <label className="flex items-center space-x-2">
+            <input
+              type="checkbox"
+              checked={data.thinkingEnabled || false}
+              onChange={(e) => handleInputChange('thinkingEnabled', e.target.checked)}
+              className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+            />
+            <span className="text-sm font-medium text-gray-700">Enable Thinking</span>
+          </label>
+          <p className="text-xs text-gray-500 mt-1">
+            Enable extended thinking for more complex reasoning
+          </p>
+        </div>
+
+        {data.thinkingEnabled && (
+          <>
+            {data.modelProvider === 'AWS Bedrock' || !data.modelProvider ? (
+              <div className="mt-3">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Thinking Budget Tokens: {data.thinkingBudgetTokens || 2048}
+                </label>
+                <input
+                  type="range"
+                  min="1024"
+                  max="8192"
+                  step="512"
+                  value={data.thinkingBudgetTokens || 2048}
+                  onChange={(e) => handleInputChange('thinkingBudgetTokens', parseInt(e.target.value))}
+                  className="w-full"
+                />
+                <div className="flex justify-between text-xs text-gray-500 mt-1">
+                  <span>1,024</span>
+                  <span>8,192</span>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-3">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Reasoning Effort
+                </label>
+                <select
+                  value={data.reasoningEffort || 'medium'}
+                  onChange={(e) => handleInputChange('reasoningEffort', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500"
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+            )}
+          </>
+        )}
       </div>
     </div>
   );
