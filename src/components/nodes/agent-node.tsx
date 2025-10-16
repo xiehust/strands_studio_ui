@@ -13,6 +13,10 @@ interface AgentNodeData {
   // OpenAI-specific fields
   apiKey?: string;
   baseUrl?: string;
+  // Thinking settings
+  thinkingEnabled?: boolean;
+  thinkingBudgetTokens?: number;
+  reasoningEffort?: 'low' | 'medium' | 'high';
 }
 
 export function AgentNode({ data, selected, id }: NodeProps) {
