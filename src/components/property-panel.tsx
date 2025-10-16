@@ -54,6 +54,18 @@ export function PropertyPanel({
 
   const bedrockModels = [
     {
+      model_id: "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+      model_name: "Claude 4.5 Haiku (global)"
+    },
+    {
+      model_id: "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+      model_name: "Claude 4.5 Haiku (US)"
+    },
+    {
+      model_id: "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+      model_name: "Claude 4.5 Haiku (EU)"
+    },
+    {
       model_id: "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
       model_name: "Claude 4.5 Sonnet (global)"
     },
