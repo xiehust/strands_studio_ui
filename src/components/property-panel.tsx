@@ -258,6 +258,19 @@ export function PropertyPanel({
 
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">
+          System Prompt
+        </label>
+        <textarea
+          value={data.systemPrompt || ''}
+          onChange={(e) => handleInputChange('systemPrompt', e.target.value)}
+          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+          placeholder="You are a helpful AI assistant..."
+          rows={4}
+        />
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-2">
           Temperature: {(data.modelProvider === 'AWS Bedrock' || !data.modelProvider) && data.thinkingEnabled ? 1 : (data.temperature || 0.7)}
         </label>
         <input

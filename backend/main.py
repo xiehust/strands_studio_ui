@@ -394,7 +394,7 @@ async def execute_code_stream(request: ExecutionRequest):
             logger.info("Importing Strands Agent SDK for streaming")
             from strands import Agent, tool
             from strands.models import BedrockModel
-            from strands_tools import calculator, file_read, shell, current_time
+            from strands_tools import calculator, file_read, shell, current_time,http_request, editor, retrieve, mem0_memory
             
             # Import OpenAI model if needed
             openai_imports = {}
@@ -436,6 +436,10 @@ async def execute_code_stream(request: ExecutionRequest):
                 'file_read': file_read,
                 'shell': shell,
                 'current_time': current_time,
+                'http_request':http_request,
+                'editor':editor,
+                'retrieve':retrieve,
+                'mem0_memory':mem0_memory,
                 'print': print,
                 'str': str,
                 'int': int,
