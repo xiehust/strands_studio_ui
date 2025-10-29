@@ -56,7 +56,7 @@ A visual drag-and-drop interface for creating, configuring, and executing AI age
 
 ## Quick Start
 
-### Docker (Recommended for Quick Setup)
+### Docker
 
 The fastest way to get started is using Docker Compose:
 
