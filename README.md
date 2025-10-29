@@ -56,16 +56,26 @@ A visual drag-and-drop interface for creating, configuring, and executing AI age
 
 ## Quick Start
 
-### Envrionment Setup
+### Docker (Recommended for Quick Setup)
 
-1. Install [Node Js 22](https://nodejs.org/en/download) 
+The fastest way to get started is using Docker Compose:
+
+```bash
+docker compose up
+```
+
+Access the application at http://localhost:5173
+
+### Environment Setup
+
+1. Install [Node Js 22](https://nodejs.org/en/download)
 2. Install [uv](https://docs.astral.sh/uv/getting-started/installation/)
-3. Install all frontent dependencies in the project folder
+3. Install all frontend dependencies in the project folder
 ```bash
 npm install
 ```
 4.  Install all backend dependencies in the project folder
-```bash 
+```bash
 cd backend
 uv sync
 ```
@@ -78,7 +88,7 @@ https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
 uv pip install aws-sam-cli
 ```
 
-install Docker  
+install Docker
 ```bash
 curl -fsSL https://get.docker.com -o get-docker.sh
 sudo sh get-docker.sh
@@ -311,8 +321,8 @@ The application consists of a React frontend for the visual editor and a FastAPI
 - [x] Built tool node
 - [x] Custom tool node
 - [x] Swarm Agent Node
-- [ ] Structural Output Node - to do 
-- [ ] Condition Node - to do 
+- [ ] Structural Output Node - to do
+- [ ] Condition Node - to do
 
 ### Flows
 - [x] Single agent mode

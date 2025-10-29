@@ -3,6 +3,10 @@ import react from '@vitejs/plugin-react'
 import path from 'node:path';
 import tailwindcss from '@tailwindcss/vite'
 
+// Backend target can be overridden via VITE_BACKEND_URL environment variable
+// Defaults to localhost:8000 for local development, but can be set to 'backend:8000' for Docker
+const backendTarget = process.env.VITE_BACKEND_URL || 'localhost:8000';
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -19,18 +23,18 @@ export default defineConfig({
     proxy: {
       // Proxy all /api and /health requests to backend
       '/api': {
-        target: 'http://localhost:8000',
+        target: `http://${backendTarget}`,
         changeOrigin: true,
         secure: false
       },
       '/health': {
-        target: 'http://localhost:8000',
+        target: `http://${backendTarget}`,
         changeOrigin: true,
         secure: false
       },
       // Proxy WebSocket connections for real-time updates
       '/ws': {
-        target: 'ws://localhost:8000',
+        target: `ws://${backendTarget}`,
         ws: true,
         changeOrigin: true
       }
@@ -43,17 +47,17 @@ export default defineConfig({
     proxy: {
       // Same proxy configuration for development server
       '/api': {
-        target: 'http://localhost:8000',
+        target: `http://${backendTarget}`,
         changeOrigin: true,
         secure: false
       },
       '/health': {
-        target: 'http://localhost:8000',
+        target: `http://${backendTarget}`,
         changeOrigin: true,
         secure: false
       },
       '/ws': {
-        target: 'ws://localhost:8000',
+        target: `ws://${backendTarget}`,
         ws: true,
         changeOrigin: true
       }
