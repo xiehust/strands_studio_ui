@@ -1,8 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import Editor from '@monaco-editor/react';
-import { type Node, type Edge } from '@xyflow/react';
-import { Rocket, Download, Copy, CheckCircle, AlertCircle, Edit3, Save, RotateCcw, History, ChevronDown, ChevronUp, Trash2, Plus, X, Eye, EyeOff } from 'lucide-react';
-import { generateStrandsAgentCode } from '../lib/code-generator';
+import { type Node } from '@xyflow/react';
+import { Rocket, Download, Copy, CheckCircle, Edit3, Save, RotateCcw, History, ChevronDown, ChevronUp, Trash2, Plus, X, Eye, EyeOff } from 'lucide-react';
 import { apiClient, type DeploymentHistoryItem } from '../lib/api-client';
 import { defineLaunchpadMonacoTheme, LAUNCHPAD_MONACO_THEME } from '../lib/monaco-theme';
 
@@ -53,8 +52,8 @@ function extractApiKeysFromNodes(nodes: Node[]): Record<string, string> {
 
 interface AgentCoreDeployPanelProps {
   nodes: Node[];
-  edges: Edge[];
-  graphMode?: boolean;
+  // Current effective code from the lifted CodeState (template / AI / manual)
+  code: string;
   className?: string;
 }
 
@@ -97,12 +96,11 @@ interface DeploymentHistoryEntry {
   status: 'success' | 'error' | 'pending';
 }
 
-export function AgentCoreDeployPanel({ nodes, edges, graphMode = false, className = '' }: AgentCoreDeployPanelProps) {
+export function AgentCoreDeployPanel({ nodes, code, className = '' }: AgentCoreDeployPanelProps) {
   const [activeTab, setActiveTab] = useState<'configuration' | 'code-preview'>('configuration');
-  const [generatedCode, setGeneratedCode] = useState('');
-  const [editableCode, setEditableCode] = useState('');
+  const [generatedCode, setGeneratedCode] = useState(code);
+  const [editableCode, setEditableCode] = useState(code);
   const [isEditing, setIsEditing] = useState(false);
-  const [errors, setErrors] = useState<string[]>([]);
   const [copied, setCopied] = useState(false);
   const [apiKeys, setApiKeys] = useState<ApiKeyEntry[]>([]);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
@@ -188,16 +186,13 @@ export function AgentCoreDeployPanel({ nodes, edges, graphMode = false, classNam
     isDeploying: false,
   });
 
+  // Sync with the effective code from the lifted CodeState (no local generation)
   useEffect(() => {
-    const result = generateStrandsAgentCode(nodes, edges, graphMode);
-    const fullCode = result.imports.join('\n') + '\n\n' + result.code;
-    setGeneratedCode(fullCode);
-    setEditableCode(fullCode);
-    setErrors(result.errors);
-    // Reset editing state when code regenerates
+    setGeneratedCode(code);
+    setEditableCode(code);
+    // Reset editing state when the effective code changes
     setIsEditing(false);
-    // Reset state when flow changes
-  }, [nodes, edges, graphMode]);
+  }, [code]);
 
   // Load deployment history on component mount
   useEffect(() => {
@@ -935,21 +930,6 @@ async def entry(payload):
           Code
         </button>
       </div>
-
-      {/* Errors */}
-      {errors.length > 0 && (
-        <div className="p-4 bg-crit/10 border-b border-crit/40">
-          <div className="flex items-center mb-2">
-            <AlertCircle className="w-4 h-4 text-crit mr-2" />
-            <span className="font-mono text-[10px] uppercase tracking-wider text-crit">Code Generation Errors</span>
-          </div>
-          <ul className="text-sm text-red-700">
-            {errors.map((error, index) => (
-              <li key={index} className="mb-1">• {error}</li>
-            ))}
-          </ul>
-        </div>
-      )}
 
       {/* Tab Content */}
       <div className="flex-1 min-h-0">

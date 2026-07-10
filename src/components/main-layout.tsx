@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { type Node, type Edge } from '@xyflow/react';
 import { Code, Eye, EyeOff, FolderOpen, Terminal, Save, Plus, Download, Upload, Rocket, Play, GithubIcon, Star } from 'lucide-react';
 import { FlowEditor } from './flow-editor';
@@ -10,23 +10,23 @@ import { DeployPanel } from './deploy-panel';
 import { InvokePanel } from './invoke-panel';
 import { ProjectManagerComponent } from './project-manager';
 import { ResizablePanel } from './resizable-panel';
-import { type StrandsProject, ProjectManager } from '../lib/project-manager';
+import { type StrandsProject, type ProjectCodeState, type CodeState, ProjectManager } from '../lib/project-manager';
 import { generateStrandsAgentCode } from '../lib/code-generator';
 
 // Auto-save key for localStorage
 const AUTOSAVE_FLOW_KEY = 'strands_autosave_flow';
 
 // Helper functions for auto-save
-const saveFlowToAutoSave = (nodes: Node[], edges: Edge[], graphMode: boolean) => {
+const saveFlowToAutoSave = (nodes: Node[], edges: Edge[], graphMode: boolean, codeState: ProjectCodeState) => {
   try {
-    const flowData = { nodes, edges, graphMode, timestamp: Date.now() };
+    const flowData = { nodes, edges, graphMode, codeState, timestamp: Date.now() };
     localStorage.setItem(AUTOSAVE_FLOW_KEY, JSON.stringify(flowData));
   } catch (error) {
     console.error('Failed to auto-save flow:', error);
   }
 };
 
-const loadFlowFromAutoSave = (): { nodes: Node[], edges: Edge[], graphMode?: boolean } | null => {
+const loadFlowFromAutoSave = (): { nodes: Node[], edges: Edge[], graphMode?: boolean, codeState?: ProjectCodeState } | null => {
   try {
     const stored = localStorage.getItem(AUTOSAVE_FLOW_KEY);
     if (!stored) return null;
@@ -34,7 +34,8 @@ const loadFlowFromAutoSave = (): { nodes: Node[], edges: Edge[], graphMode?: boo
     return {
       nodes: flowData.nodes || [],
       edges: flowData.edges || [],
-      graphMode: flowData.graphMode || false
+      graphMode: flowData.graphMode || false,
+      codeState: flowData.codeState
     };
   } catch (error) {
     console.error('Failed to load auto-saved flow:', error);
@@ -46,41 +47,160 @@ const clearAutoSavedFlow = () => {
   localStorage.removeItem(AUTOSAVE_FLOW_KEY);
 };
 
+// Run the template generator and join imports + code (fast path)
+const buildTemplateCode = (nodes: Node[], edges: Edge[], graphMode: boolean): { code: string; errors: string[] } => {
+  const result = generateStrandsAgentCode(nodes, edges, graphMode);
+  return {
+    code: result.imports.join('\n') + '\n\n' + result.code,
+    errors: result.errors,
+  };
+};
+
+// Restore a persisted code state; legacy projects without codeState (or with
+// template source) fall back to live template generation - identical to old behavior.
+const restoreCodeState = (
+  saved: ProjectCodeState | undefined,
+  nodes: Node[],
+  edges: Edge[],
+  graphMode: boolean
+): { codeState: CodeState; codeErrors: string[] } => {
+  if (saved && saved.source !== 'template' && typeof saved.code === 'string' &&
+      (saved.source === 'ai' || saved.source === 'manual')) {
+    return {
+      codeState: { code: saved.code, source: saved.source, flowStale: false },
+      codeErrors: [],
+    };
+  }
+  const { code, errors } = buildTemplateCode(nodes, edges, graphMode);
+  return {
+    codeState: { code, source: 'template', flowStale: false },
+    codeErrors: errors,
+  };
+};
+
+interface InitialAppState {
+  nodes: Node[];
+  edges: Edge[];
+  graphMode: boolean;
+  project: StrandsProject | null;
+  codeState: CodeState;
+  codeErrors: string[];
+}
+
+// Compute initial state synchronously so the flow-change effect never observes
+// a half-restored project (nodes loaded but code state still default).
+const computeInitialState = (): InitialAppState => {
+  const current = ProjectManager.getCurrentProject();
+  if (current) {
+    const graphMode = current.graphMode || false;
+    const restored = restoreCodeState(current.codeState, current.nodes, current.edges, graphMode);
+    return { nodes: current.nodes, edges: current.edges, graphMode, project: current, ...restored };
+  }
+  const autoSaved = loadFlowFromAutoSave();
+  if (autoSaved) {
+    const graphMode = autoSaved.graphMode || false;
+    const restored = restoreCodeState(autoSaved.codeState, autoSaved.nodes, autoSaved.edges, graphMode);
+    return { nodes: autoSaved.nodes, edges: autoSaved.edges, graphMode, project: null, ...restored };
+  }
+  const { code, errors } = buildTemplateCode([], [], false);
+  return {
+    nodes: [],
+    edges: [],
+    graphMode: false,
+    project: null,
+    codeState: { code, source: 'template', flowStale: false },
+    codeErrors: errors,
+  };
+};
+
 export function MainLayout() {
+  const [initialState] = useState<InitialAppState>(computeInitialState);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
-  const [nodes, setNodes] = useState<Node[]>([]);
-  const [edges, setEdges] = useState<Edge[]>([]);
-  const [graphMode, setGraphMode] = useState(false);
+  const [nodes, setNodes] = useState<Node[]>(initialState.nodes);
+  const [edges, setEdges] = useState<Edge[]>(initialState.edges);
+  const [graphMode, setGraphMode] = useState(initialState.graphMode);
   const [showCodePanel, setShowCodePanel] = useState(true);
   const [rightPanelMode, setRightPanelMode] = useState<'code' | 'execution' | 'deploy' | 'invoke'>('code');
   const [showProjectManager, setShowProjectManager] = useState(false);
-  const [currentProject, setCurrentProject] = useState<StrandsProject | null>(null);
+  const [currentProject, setCurrentProject] = useState<StrandsProject | null>(initialState.project);
   const [showNewProjectDialog, setShowNewProjectDialog] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectDescription, setNewProjectDescription] = useState('');
-  const [lastSaveTime, setLastSaveTime] = useState<Date | null>(null);
+  const [lastSaveTime, setLastSaveTime] = useState<Date | null>(
+    initialState.project ? new Date(initialState.project.updatedAt) : null
+  );
 
-  // Load current project on mount, or load auto-saved flow if no project
+  // Single source of truth for the code shown/executed/deployed (design 3.1)
+  const [codeState, setCodeState] = useState<CodeState>(initialState.codeState);
+  const [codeErrors, setCodeErrors] = useState<string[]>(initialState.codeErrors);
+  // Read the current source inside the flow-change effect without re-triggering
+  // it when the source changes (e.g. a manual edit must not mark the flow stale).
+  const codeSourceRef = useRef(codeState.source);
+  codeSourceRef.current = codeState.source;
+  // The flow (by reference) that the current non-template code corresponds to.
+  // Canvas edits always produce new arrays, so reference comparison detects real
+  // changes while surviving mount re-runs (StrictMode) and programmatic loads.
+  const codeFlowBaselineRef = useRef<{ nodes: Node[]; edges: Edge[]; graphMode: boolean }>({
+    nodes: initialState.nodes,
+    edges: initialState.edges,
+    graphMode: initialState.graphMode,
+  });
+
+  // Clear auto-save on mount if a project was restored
   useEffect(() => {
-    const current = ProjectManager.getCurrentProject();
-    if (current) {
-      setCurrentProject(current);
-      setNodes(current.nodes);
-      setEdges(current.edges);
-      setGraphMode(current.graphMode || false);
-      setLastSaveTime(new Date(current.updatedAt)); // Set timestamp to project's last updated time
-      // Clear auto-save since we have a project loaded
+    if (initialState.project) {
       clearAutoSavedFlow();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // React to canvas changes according to the code source:
+  // - template: regenerate immediately (existing fast-path behavior)
+  // - ai/manual: never overwrite the code, only flag it as stale
+  useEffect(() => {
+    if (codeSourceRef.current === 'template') {
+      const { code, errors } = buildTemplateCode(nodes, edges, graphMode);
+      setCodeState({ code, source: 'template', flowStale: false });
+      setCodeErrors(errors);
+      codeFlowBaselineRef.current = { nodes, edges, graphMode };
     } else {
-      // No current project, try to load auto-saved flow
-      const autoSaved = loadFlowFromAutoSave();
-      if (autoSaved) {
-        setNodes(autoSaved.nodes);
-        setEdges(autoSaved.edges);
-        setGraphMode(autoSaved.graphMode || false);
+      const baseline = codeFlowBaselineRef.current;
+      if (baseline.nodes !== nodes || baseline.edges !== edges || baseline.graphMode !== graphMode) {
+        setCodeState(prev =>
+          prev.source === 'template' || prev.flowStale ? prev : { ...prev, flowStale: true }
+        );
       }
     }
-  }, []);
+  }, [nodes, edges, graphMode]);
+
+  // Code state transitions
+  const handleManualCodeEdit = useCallback((code: string) => {
+    setCodeState(prev => {
+      if (prev.source === 'template' && !prev.flowStale) {
+        // Entering manual mode from a template that matches the current canvas
+        codeFlowBaselineRef.current = { nodes, edges, graphMode };
+      }
+      return { ...prev, code, source: 'manual' };
+    });
+  }, [nodes, edges, graphMode]);
+
+  const handleAiCodeGenerated = useCallback((code: string) => {
+    codeFlowBaselineRef.current = { nodes, edges, graphMode };
+    setCodeState({ code, source: 'ai', flowStale: false });
+    setCodeErrors([]);
+  }, [nodes, edges, graphMode]);
+
+  const handleRegenerateTemplate = useCallback(() => {
+    const { code, errors } = buildTemplateCode(nodes, edges, graphMode);
+    codeFlowBaselineRef.current = { nodes, edges, graphMode };
+    setCodeState({ code, source: 'template', flowStale: false });
+    setCodeErrors(errors);
+  }, [nodes, edges, graphMode]);
+
+  // Template code for the current canvas (used as AI fallback reference)
+  const getTemplateCode = useCallback(() => {
+    return buildTemplateCode(nodes, edges, graphMode).code;
+  }, [nodes, edges, graphMode]);
 
   // Keep selectedNode synchronized with nodes array
   useEffect(() => {
@@ -92,17 +212,17 @@ export function MainLayout() {
     }
   }, [nodes, selectedNode]);
 
-  // Auto-save flow when nodes, edges, or graphMode change (only if no current project)
+  // Auto-save flow when nodes, edges, graphMode, or code state change (only if no current project)
   useEffect(() => {
     if (!currentProject && (nodes.length > 0 || edges.length > 0)) {
       // Debounce the auto-save to avoid too frequent localStorage writes
       const timer = setTimeout(() => {
-        saveFlowToAutoSave(nodes, edges, graphMode);
+        saveFlowToAutoSave(nodes, edges, graphMode, { code: codeState.code, source: codeState.source });
       }, 500);
 
       return () => clearTimeout(timer);
     }
-  }, [nodes, edges, graphMode, currentProject]);
+  }, [nodes, edges, graphMode, currentProject, codeState.code, codeState.source]);
 
   // Listen for switch to execution panel event
   useEffect(() => {
@@ -164,6 +284,10 @@ export function MainLayout() {
     setNodes(project.nodes);
     setEdges(project.edges);
     setGraphMode(project.graphMode || false);
+    const restored = restoreCodeState(project.codeState, project.nodes, project.edges, project.graphMode || false);
+    codeFlowBaselineRef.current = { nodes: project.nodes, edges: project.edges, graphMode: project.graphMode || false };
+    setCodeState(restored.codeState);
+    setCodeErrors(restored.codeErrors);
     setCurrentProject(project);
     setLastSaveTime(new Date(project.updatedAt)); // Set timestamp to project's last updated time
     // Clear auto-save since we now have a project loaded
@@ -178,6 +302,7 @@ export function MainLayout() {
         nodes,
         edges,
         graphMode,
+        codeState: { code: codeState.code, source: codeState.source },
       });
       if (updated) {
         setCurrentProject(updated);
@@ -187,7 +312,7 @@ export function MainLayout() {
       // Save as new project
       setShowNewProjectDialog(true);
     }
-  }, [currentProject, nodes, edges, graphMode]);
+  }, [currentProject, nodes, edges, graphMode, codeState.code, codeState.source]);
 
   const handleCreateNewProject = useCallback(() => {
     if (!newProjectName.trim()) {
@@ -201,6 +326,7 @@ export function MainLayout() {
       nodes,
       edges,
       graphMode,
+      codeState: { code: codeState.code, source: codeState.source },
     });
 
     ProjectManager.setCurrentProject(newProject.id);
@@ -211,18 +337,24 @@ export function MainLayout() {
     setShowNewProjectDialog(false);
     // Clear auto-save since we now have a saved project
     clearAutoSavedFlow();
-  }, [newProjectName, newProjectDescription, nodes, edges, graphMode]);
+  }, [newProjectName, newProjectDescription, nodes, edges, graphMode, codeState.code, codeState.source]);
 
   const handleNewProject = useCallback(() => {
     if (nodes.length > 0 || edges.length > 0) {
       if (confirm('Creating a new project will clear the current flow. Continue?')) {
-        setNodes([]);
-        setEdges([]);
+        const emptyNodes: Node[] = [];
+        const emptyEdges: Edge[] = [];
+        setNodes(emptyNodes);
+        setEdges(emptyEdges);
+        const { code, errors } = buildTemplateCode(emptyNodes, emptyEdges, graphMode);
+        codeFlowBaselineRef.current = { nodes: emptyNodes, edges: emptyEdges, graphMode };
+        setCodeState({ code, source: 'template', flowStale: false });
+        setCodeErrors(errors);
         setCurrentProject(null);
         ProjectManager.clearCurrentProject();
       }
     }
-  }, [nodes, edges]);
+  }, [nodes, edges, graphMode]);
 
   const handleExportCurrentProject = useCallback(() => {
     if (currentProject) {
@@ -253,6 +385,10 @@ export function MainLayout() {
         setNodes(imported.nodes);
         setEdges(imported.edges);
         setGraphMode(imported.graphMode || false);
+        const restored = restoreCodeState(imported.codeState, imported.nodes, imported.edges, imported.graphMode || false);
+        codeFlowBaselineRef.current = { nodes: imported.nodes, edges: imported.edges, graphMode: imported.graphMode || false };
+        setCodeState(restored.codeState);
+        setCodeErrors(restored.codeErrors);
         setLastSaveTime(new Date(imported.updatedAt)); // Set timestamp to imported project's time
         // Clear auto-save since we now have an imported project
         clearAutoSavedFlow();
@@ -266,12 +402,6 @@ export function MainLayout() {
     // Reset input
     event.target.value = '';
   }, []);
-
-  // Generate current code for execution
-  const getCurrentCode = useCallback(() => {
-    const result = generateStrandsAgentCode(nodes, edges, graphMode);
-    return result.imports.join('\n') + '\n\n' + result.code;
-  }, [nodes, edges, graphMode]);
 
   return (
     <div className="h-screen w-screen flex bg-bg text-ink">
@@ -455,10 +585,16 @@ export function MainLayout() {
                   nodes={nodes}
                   edges={edges}
                   graphMode={graphMode}
+                  codeState={codeState}
+                  codeErrors={codeErrors}
+                  onManualEdit={handleManualCodeEdit}
+                  onAiGenerated={handleAiCodeGenerated}
+                  onRegenerateTemplate={handleRegenerateTemplate}
+                  getTemplateCode={getTemplateCode}
                 />
               ) : rightPanelMode === 'execution' ? (
                 <ExecutionPanel
-                  code={getCurrentCode()}
+                  code={codeState.code}
                   projectId={currentProject?.id || 'default-project'}
                   projectName={currentProject?.name || 'Untitled Project'}
                   projectVersion={currentProject?.version || '1.0.0'}
@@ -467,8 +603,7 @@ export function MainLayout() {
               ) : rightPanelMode === 'deploy' ? (
                 <DeployPanel
                   nodes={nodes}
-                  edges={edges}
-                  graphMode={graphMode}
+                  code={codeState.code}
                 />
               ) : (
                 <InvokePanel />

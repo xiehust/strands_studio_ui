@@ -1,4 +1,4 @@
-import { type Node, type Edge } from '@xyflow/react';
+import { type Node } from '@xyflow/react';
 import { Rocket } from 'lucide-react';
 import { AgentCoreDeployPanel } from './agentcore-deploy-panel';
 
@@ -9,12 +9,11 @@ import { AgentCoreDeployPanel } from './agentcore-deploy-panel';
 
 interface DeployPanelProps {
   nodes: Node[];
-  edges: Edge[];
-  graphMode?: boolean;
+  code: string;
   className?: string;
 }
 
-export function DeployPanel({ nodes, edges, graphMode = false, className = '' }: DeployPanelProps) {
+export function DeployPanel({ nodes, code, className = '' }: DeployPanelProps) {
   return (
     <div className={`bg-panel border-l border-line flex flex-col h-full ${className}`}>
       {/* Header */}
@@ -25,7 +24,7 @@ export function DeployPanel({ nodes, edges, graphMode = false, className = '' }:
       </div>
 
       {/* AgentCore Deployment Panel */}
-      <AgentCoreDeployPanel nodes={nodes} edges={edges} graphMode={graphMode} />
+      <AgentCoreDeployPanel nodes={nodes} code={code} />
     </div>
   );
 }
