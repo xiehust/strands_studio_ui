@@ -45,6 +45,30 @@ REPAIR_PROMPT_TEMPLATE = (
     "implementing flow.json and satisfying every rule in contract_spec.md."
 )
 
+FIX_SYSTEM_PROMPT = (
+    "You are a repair agent for Strands Agent SDK Python programs. The current "
+    "working directory contains a program (generated_agent.py) that failed at "
+    "runtime, its error output (error.txt), and the visual flow it was generated "
+    "from (flow.json). Read CLAUDE.md first: it defines the diagnosis categories, "
+    "the mandatory diagnosis.json deliverable, and when you are allowed to edit "
+    "generated_agent.py. You must always write diagnosis.json. Edit "
+    "generated_agent.py in place only when the diagnosis category permits it, and "
+    "any edit must keep satisfying every rule in contract_spec.md. Never write "
+    "secrets into code. Do not create any file other than diagnosis.json (and "
+    "edits to generated_agent.py). Do not explain at length; do the work."
+)
+
+FIX_INITIAL_PROMPT = (
+    "Diagnose and fix the failed program now.\n\n"
+    "1. Read CLAUDE.md, then error.txt (the root cause is usually at the end), "
+    "generated_agent.py, flow.json, contract_spec.md and flow_semantics.md.\n"
+    "2. Classify the root cause (code / config / environment as defined in "
+    "CLAUDE.md) and write diagnosis.json — this is mandatory even if you change "
+    "no code.\n"
+    "3. If and only if the category permits it, edit generated_agent.py in place "
+    "to fix the root cause while keeping every rule in contract_spec.md intact."
+)
+
 
 def _summarize_tool_use(name: str, tool_input: dict) -> str:
     """One-line human-readable summary of a tool invocation."""
@@ -94,12 +118,12 @@ class ClaudeSdkBackend(CodingAgentBackend):
 
         return True, ""
 
-    def _build_options(self, workspace: Path):
+    def _build_options(self, workspace: Path, mode: str = "generate"):
         from claude_agent_sdk import ClaudeAgentOptions
 
         return ClaudeAgentOptions(
             cwd=str(workspace),
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=FIX_SYSTEM_PROMPT if mode == "fix" else SYSTEM_PROMPT,
             allowed_tools=["Read", "Write", "Edit", "Grep", "Glob"],
             permission_mode="acceptEdits",
             max_turns=config.CODEGEN_MAX_TURNS,
@@ -134,12 +158,16 @@ class ClaudeSdkBackend(CodingAgentBackend):
 
         if self._client is None:
             # First round: open a session that stays alive for repair rounds
-            self._client = ClaudeSDKClient(options=self._build_options(workspace))
+            self._client = ClaudeSDKClient(
+                options=self._build_options(workspace, task.mode)
+            )
             await self._client.connect()
 
         if is_repair_round:
             errors_text = "\n".join(f"- {e}" for e in task.validation_errors)
             prompt = REPAIR_PROMPT_TEMPLATE.format(errors=errors_text)
+        elif task.mode == "fix":
+            prompt = FIX_INITIAL_PROMPT
         else:
             prompt = INITIAL_PROMPT
 

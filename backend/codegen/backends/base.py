@@ -15,6 +15,7 @@ class GenerationTask:
     template_code: Optional[str] = None              # frontend template output (fallback + reference)
     previous_code: Optional[str] = None              # current code during repair rounds
     validation_errors: List[str] = field(default_factory=list)  # errors during repair rounds
+    mode: str = "generate"                           # "generate" | "fix" (selects backend prompts)
 
 
 class GenerationError(Exception):
