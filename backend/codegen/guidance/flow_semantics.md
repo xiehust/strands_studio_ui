@@ -39,6 +39,8 @@ Unset fields fall back to the defaults shown in parentheses.
 | `streaming` | bool (false). If true AND this agent is the execution agent → use `stream_async` (contract rule 5) |
 | `thinkingEnabled` | bool (false). Enables extended thinking / reasoning |
 | `reasoningEffort` | `"low"|"medium"|"high"|"xhigh"|"max"` (`"medium"`; legacy `"minimal"` normalizes to `"low"`); only meaningful with `thinkingEnabled` on non-Bedrock providers |
+| `cacheMessages` | bool (false). AWS Bedrock Claude only → add `cache_config=CacheConfig(strategy="auto")` to `BedrockModel(...)` and import `CacheConfig` from `strands.models` |
+| `cacheTools` | bool (false). AWS Bedrock Claude only → add `cache_tools="default"` to `BedrockModel(...)` |
 | `apiKey` | Never emit its value — always read keys from env (contract rule 8) |
 | `baseUrl` | Optional custom endpoint (OpenAI); auto-set regional endpoint for Mantle |
 | `region` | Mantle only; informational (already baked into `baseUrl`) |
@@ -46,6 +48,8 @@ Unset fields fall back to the defaults shown in parentheses.
 Model construction per provider:
 
 - **AWS Bedrock** → `BedrockModel(model_id=<modelId>, temperature=..., max_tokens=...)`.
+  With `cacheMessages` / `cacheTools`: append `cache_config=CacheConfig(strategy="auto")` /
+  `cache_tools="default"` respectively (Bedrock prompt caching for Claude).
   With `thinkingEnabled`: add
   `additional_request_fields={"thinking": {"type": "adaptive"}}` and pin
   `temperature=1`.

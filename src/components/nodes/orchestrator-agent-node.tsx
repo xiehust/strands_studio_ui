@@ -19,6 +19,8 @@ interface OrchestratorAgentNodeData {
   thinkingEnabled?: boolean;
   thinkingBudgetTokens?: number;
   reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  cacheMessages?: boolean;
+  cacheTools?: boolean;
 }
 
 export function OrchestratorAgentNode({ data, selected, id }: NodeProps) {

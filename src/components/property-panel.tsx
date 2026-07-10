@@ -421,6 +421,33 @@ export function PropertyPanel({
             )}
           </>
         )}
+
+        {(data.modelProvider === 'AWS Bedrock' || !data.modelProvider) && (
+          <div className="mt-4">
+            <label className="lp-label">Prompt Caching (Claude)</label>
+            <label className="flex items-center space-x-2 mt-1.5">
+              <input
+                type="checkbox"
+                checked={data.cacheMessages || false}
+                onChange={(e) => handleInputChange('cacheMessages', e.target.checked)}
+                className="accent-[#FFB000]"
+              />
+              <span className="text-[12px] font-medium text-ink-2">Cache conversation (auto)</span>
+            </label>
+            <label className="flex items-center space-x-2 mt-1.5">
+              <input
+                type="checkbox"
+                checked={data.cacheTools || false}
+                onChange={(e) => handleInputChange('cacheTools', e.target.checked)}
+                className="accent-[#FFB000]"
+              />
+              <span className="text-[12px] font-medium text-ink-2">Cache tools</span>
+            </label>
+            <p className="font-mono text-[10px] text-ink-3 mt-1.5 leading-relaxed">
+              Reuses cached prompt context across requests to cut cost and latency. Cache expires after ~5 min idle; content under the model's minimum token threshold is not cached.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -981,6 +1008,33 @@ export function PropertyPanel({
               </div>
             )}
           </>
+        )}
+
+        {(data.modelProvider === 'AWS Bedrock' || !data.modelProvider) && (
+          <div className="mt-4">
+            <label className="lp-label">Prompt Caching (Claude)</label>
+            <label className="flex items-center space-x-2 mt-1.5">
+              <input
+                type="checkbox"
+                checked={data.cacheMessages || false}
+                onChange={(e) => handleInputChange('cacheMessages', e.target.checked)}
+                className="accent-[#FFB000]"
+              />
+              <span className="text-[12px] font-medium text-ink-2">Cache conversation (auto)</span>
+            </label>
+            <label className="flex items-center space-x-2 mt-1.5">
+              <input
+                type="checkbox"
+                checked={data.cacheTools || false}
+                onChange={(e) => handleInputChange('cacheTools', e.target.checked)}
+                className="accent-[#FFB000]"
+              />
+              <span className="text-[12px] font-medium text-ink-2">Cache tools</span>
+            </label>
+            <p className="font-mono text-[10px] text-ink-3 mt-1.5 leading-relaxed">
+              Reuses cached prompt context across requests to cut cost and latency. Cache expires after ~5 min idle; content under the model's minimum token threshold is not cached.
+            </p>
+          </div>
         )}
       </div>
     </div>

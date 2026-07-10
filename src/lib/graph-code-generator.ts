@@ -43,7 +43,9 @@ function generateModelConfig(
   maxTokens: number,
   baseUrl: string,
   thinkingEnabled?: boolean,
-  reasoningEffort?: string
+  reasoningEffort?: string,
+  cacheMessages?: boolean,
+  cacheTools?: boolean
 ): string {
   // Legacy projects may still carry 'minimal' (removed from the effort scale)
   if (reasoningEffort === 'minimal') reasoningEffort = 'low';
@@ -103,6 +105,16 @@ function generateModelConfig(
             "type": "adaptive"
         }
     }`;
+    }
+
+    // Bedrock prompt caching (Claude): auto message caching / tool caching
+    if (cacheMessages) {
+      bedrockCode += `,
+    cache_config=CacheConfig(strategy="auto")`;
+    }
+    if (cacheTools) {
+      bedrockCode += `,
+    cache_tools="default"`;
     }
 
     bedrockCode += '\n)';
@@ -264,7 +276,7 @@ export function generateGraphCode(
 ): CodeGenerationResult {
   const imports = new Set<string>([
     'from strands import Agent, tool',
-    'from strands.models import BedrockModel',
+    'from strands.models import BedrockModel, CacheConfig',
     'from strands.multiagent import GraphBuilder',
     'from strands_tools import calculator, file_read, shell, current_time',
     'import json',
@@ -351,6 +363,8 @@ export function generateGraphCode(
       const baseUrl = data.baseUrl || '';
       const thinkingEnabled = data.thinkingEnabled || false;
       const reasoningEffort = data.reasoningEffort || 'medium';
+      const cacheMessages = (data.cacheMessages as boolean) || false;
+      const cacheTools = (data.cacheTools as boolean) || false;
 
       const modelIdentifier = modelProvider === 'AWS Bedrock' ? modelId : modelName;
       const agentVarName = sanitizePythonVariableName(label as string);
@@ -362,7 +376,7 @@ export function generateGraphCode(
         : '';
 
       // Generate model config
-      const modelConfig = generateModelConfig(agentVarName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, reasoningEffort as string);
+      const modelConfig = generateModelConfig(agentVarName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, reasoningEffort as string, cacheMessages, cacheTools);
 
       code += `# ${label} Configuration\n`;
       code += modelConfig + '\n\n';
