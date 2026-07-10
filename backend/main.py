@@ -179,6 +179,7 @@ class ExecutionRequest(BaseModel):
     flow_data: Optional[dict] = None
     # API Keys for secure environment variable handling
     openai_api_key: Optional[str] = None
+    bedrock_api_key: Optional[str] = None
 
 class ExecutionResult(BaseModel):
     success: bool
@@ -320,7 +321,7 @@ async def execute_code(request: ExecutionRequest):
     try:
         # Create execution environment
         logger.info(f"Executing Strands code - ID: {execution_id}")
-        execution_result = await execute_strands_code(request.code, request.input_data, request.openai_api_key)
+        execution_result = await execute_strands_code(request.code, request.input_data, request.openai_api_key, request.bedrock_api_key)
         
         end_time = datetime.now()
         execution_time = (end_time - start_time).total_seconds()
@@ -388,6 +389,9 @@ async def execute_code_stream(request: ExecutionRequest):
             if request.openai_api_key:
                 os.environ["OPENAI_API_KEY"] = request.openai_api_key
                 logger.info("OpenAI API key set in environment for streaming")
+            if request.bedrock_api_key:
+                os.environ["BEDROCK_API_KEY"] = request.bedrock_api_key
+                logger.info("Bedrock (Mantle) API key set in environment for streaming")
             # Env for strands tools: skip consent prompts (would hang headless runs)
             os.environ['BYPASS_TOOL_CONSENT'] = "true"
             os.environ['STRANDS_NON_INTERACTIVE'] = "true"
@@ -395,9 +399,9 @@ async def execute_code_stream(request: ExecutionRequest):
             logger.info("Importing Strands Agent SDK for streaming")
             from strands import Agent, tool
             from strands.models import BedrockModel
-            from strands_tools import calculator, file_read, shell, current_time,http_request, editor, retrieve, mem0_memory
-            
-            # Import OpenAI model if needed
+            from strands_tools import calculator, file_read, shell, current_time,http_request, editor, retrieve
+
+            # Import OpenAI model(s) if needed
             openai_imports = {}
             if 'OpenAIModel' in request.code:
                 logger.info("OpenAI model detected in streaming code, importing OpenAI dependencies")
@@ -406,6 +410,13 @@ async def execute_code_stream(request: ExecutionRequest):
                     openai_imports['OpenAIModel'] = OpenAIModel
                 except ImportError as e:
                     logger.warning(f"OpenAI model not available: {e}")
+            if 'OpenAIResponsesModel' in request.code:
+                logger.info("OpenAI Responses model (Bedrock Mantle) detected, importing dependencies")
+                try:
+                    from strands.models.openai_responses import OpenAIResponsesModel
+                    openai_imports['OpenAIResponsesModel'] = OpenAIResponsesModel
+                except ImportError as e:
+                    logger.warning(f"OpenAIResponsesModel not available: {e}")
             
             # Import MCP dependencies if needed
             mcp_imports = {}
@@ -440,7 +451,6 @@ async def execute_code_stream(request: ExecutionRequest):
                 'http_request':http_request,
                 'editor':editor,
                 'retrieve':retrieve,
-                'mem0_memory':mem0_memory,
                 'print': print,
                 'str': str,
                 'int': int,
@@ -1485,16 +1495,19 @@ async def save_to_execution_history(
     except Exception as e:
         logger.error(f"Failed to save execution artifacts - ID: {execution_id}, Error: {e}")
 
-async def execute_strands_code(code: str, input_data: Optional[str] = None, openai_api_key: Optional[str] = None) -> str:
+async def execute_strands_code(code: str, input_data: Optional[str] = None, openai_api_key: Optional[str] = None, bedrock_api_key: Optional[str] = None) -> str:
     """Execute Python code with Strands Agent SDK integration"""
     logger.info("Starting execute_strands_code function")
     logger.debug(f"Code length: {len(code)} characters")
-    
+
     try:
         # Set API keys as environment variables for security
         if openai_api_key:
             os.environ["OPENAI_API_KEY"] = openai_api_key
             logger.info("OpenAI API key set in environment")
+        if bedrock_api_key:
+            os.environ["BEDROCK_API_KEY"] = bedrock_api_key
+            logger.info("Bedrock (Mantle) API key set in environment")
         
         # Import Strands Agent SDK
         logger.info("Importing Strands Agent SDK")
@@ -1505,7 +1518,7 @@ async def execute_strands_code(code: str, input_data: Optional[str] = None, open
         # Env for strands tools: skip consent prompts (would hang headless runs)
         os.environ['BYPASS_TOOL_CONSENT'] = "true"
         os.environ['STRANDS_NON_INTERACTIVE'] = "true"
-        # Import OpenAI model if needed
+        # Import OpenAI model(s) if needed
         openai_imports = {}
         if 'OpenAIModel' in code:
             logger.info("OpenAI model detected in code, importing OpenAI dependencies")
@@ -1514,7 +1527,14 @@ async def execute_strands_code(code: str, input_data: Optional[str] = None, open
                 openai_imports['OpenAIModel'] = OpenAIModel
             except ImportError as e:
                 logger.warning(f"OpenAI model not available: {e}")
-        
+        if 'OpenAIResponsesModel' in code:
+            logger.info("OpenAI Responses model (Bedrock Mantle) detected, importing dependencies")
+            try:
+                from strands.models.openai_responses import OpenAIResponsesModel
+                openai_imports['OpenAIResponsesModel'] = OpenAIResponsesModel
+            except ImportError as e:
+                logger.warning(f"OpenAIResponsesModel not available: {e}")
+
         # Import MCP dependencies if needed
         mcp_imports = {}
         if 'MCPClient' in code:

@@ -7,7 +7,14 @@ requires-python = ">=3.12"
 dependencies = [
     "mcp>=1.23.0",
     "strands-agents[openai]>=1.46.0",
-    "strands-agents-tools[mem0_memory]>=0.8.3",
+    # NOTE: the [mem0_memory] extra is intentionally NOT used — it pins
+    # mem0ai<1.0.0 which caps openai<1.110, conflicting with the openai>=2
+    # required by OpenAIResponsesModel (Amazon Bedrock Mantle provider). The
+    # mem0_memory tool import stays lazy; the tool only needs mem0ai when
+    # actually invoked.
+    "strands-agents-tools>=0.8.3",
+    "openai>=2.0.0,<3",
+    "bedrock-agentcore>=1.17.0,<2",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.34",
     "websockets>=14.1",
@@ -18,5 +25,4 @@ dependencies = [
     "python-dotenv>=1.0.1",
     "psutil>=6.1.1",
     "boto3>=1.40.0",
-    "bedrock-agentcore>=1.17.0,<2",
 ]

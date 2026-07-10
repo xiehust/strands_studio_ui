@@ -55,18 +55,6 @@ export const BEDROCK_MODELS: BedrockModelOption[] = [
     model_name: 'Claude Opus 4.8 (EU)',
   },
   {
-    model_id: 'xai.grok-4.3',
-    model_name: 'Grok 4.3 (xAI, us-east-1)',
-  },
-  {
-    model_id: 'openai.gpt-5.5',
-    model_name: 'GPT-5.5 (OpenAI, us-east-1)',
-  },
-  {
-    model_id: 'openai.gpt-5.4',
-    model_name: 'GPT-5.4 (OpenAI, us-east-1)',
-  },
-  {
     model_id: 'openai.gpt-oss-120b-1:0',
     model_name: 'GPT-OSS-120B',
   },
@@ -96,6 +84,30 @@ export const BEDROCK_MODELS: BedrockModelOption[] = [
   },
 ];
 
+/**
+ * Amazon Bedrock Mantle provider — OpenAI-compatible endpoint served via
+ * `OpenAIResponsesModel` (OpenAI Responses API). Grok / GPT models are only
+ * reachable through Mantle, not the native BedrockModel InvokeModel path.
+ * Auth is a user-supplied `BEDROCK_API_KEY`; base URL is region-templated.
+ */
+export const MANTLE_PROVIDER = 'Amazon Bedrock (Mantle)';
+
+/** Default region for the Mantle endpoint (grok/gpt are hosted in us-east-1). */
+export const DEFAULT_MANTLE_REGION = 'us-east-1';
+
+/** Build the Mantle OpenAI-compatible base URL for a region. */
+export function mantleBaseUrl(region: string): string {
+  return `https://bedrock-mantle.${region || DEFAULT_MANTLE_REGION}.api.aws/open/v1`;
+}
+
+export const MANTLE_MODELS: BedrockModelOption[] = [
+  { model_id: 'xai.grok-4.3', model_name: 'Grok 4.3 (xAI)' },
+  { model_id: 'openai.gpt-5.5', model_name: 'GPT-5.5 (OpenAI)' },
+  { model_id: 'openai.gpt-5.4', model_name: 'GPT-5.4 (OpenAI)' },
+];
+
+export const DEFAULT_MANTLE_MODEL_ID = MANTLE_MODELS[0].model_id;
+
 /** Display name marking a node as using a user-entered (custom) model id. */
 export const CUSTOM_MODEL_NAME = 'Custom model';
 
@@ -112,4 +124,14 @@ export function isCustomModel(
   if (modelName === CUSTOM_MODEL_NAME) return true;
   if (!modelId) return false;
   return !BEDROCK_MODELS.some((m) => m.model_id === modelId);
+}
+
+/** Same as {@link isCustomModel} but against the Mantle catalog. */
+export function isCustomMantleModel(
+  modelId: string | undefined | null,
+  modelName?: string | null,
+): boolean {
+  if (modelName === CUSTOM_MODEL_NAME) return true;
+  if (!modelId) return false;
+  return !MANTLE_MODELS.some((m) => m.model_id === modelId);
 }

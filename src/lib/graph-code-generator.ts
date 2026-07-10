@@ -1,6 +1,6 @@
 import { type Node, type Edge } from '@xyflow/react';
 import { validateGraphStructure } from './graph-validator';
-import { DEFAULT_MODEL_ID } from './models';
+import { DEFAULT_MODEL_ID, MANTLE_PROVIDER } from './models';
 
 interface CodeGenerationResult {
   code: string;
@@ -50,7 +50,21 @@ function generateModelConfig(
   const isBedrock = modelProvider === 'AWS Bedrock' || modelProvider === undefined;
   const finalTemperature = thinkingEnabled && isBedrock ? 1 : temperature;
 
-  if (modelProvider === 'OpenAI') {
+  if (modelProvider === MANTLE_PROVIDER) {
+    // Amazon Bedrock (Mantle): OpenAI-compatible endpoint via the Responses API
+    const clientArgs = [
+      `"api_key": os.environ.get("BEDROCK_API_KEY")`,
+      `"base_url": "${baseUrl}"`,
+    ];
+    const clientArgsStr = `\n    client_args={\n        ${clientArgs.join(',\n        ')}\n    },`;
+    const params = [`"max_output_tokens": ${maxTokens}`, `"temperature": ${finalTemperature}`];
+    return `${varName}_model = OpenAIResponsesModel(${clientArgsStr}
+    model_id="${modelIdentifier}",
+    params={
+        ${params.join(',\n        ')},
+    }
+)`;
+  } else if (modelProvider === 'OpenAI') {
     const clientArgs = [];
     clientArgs.push(`"api_key": os.environ.get("OPENAI_API_KEY")`);
     if (baseUrl) {
@@ -285,6 +299,10 @@ export function generateGraphCode(
     const hasOpenAIProvider = agentNodes.some(node => node.data?.modelProvider === 'OpenAI');
     if (hasOpenAIProvider) {
       imports.add('from strands.models.openai import OpenAIModel');
+    }
+    const hasMantleProvider = agentNodes.some(node => node.data?.modelProvider === MANTLE_PROVIDER);
+    if (hasMantleProvider) {
+      imports.add('from strands.models.openai_responses import OpenAIResponsesModel');
     }
 
     // Check if MCP tools are used

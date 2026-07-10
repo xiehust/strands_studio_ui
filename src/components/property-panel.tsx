@@ -1,6 +1,6 @@
 import { type Node, type Edge } from '@xyflow/react';
 import { Settings, X } from 'lucide-react';
-import { BEDROCK_MODELS, CUSTOM_MODEL_OPTION, CUSTOM_MODEL_NAME, isCustomModel } from '@/lib/models';
+import { BEDROCK_MODELS, CUSTOM_MODEL_OPTION, CUSTOM_MODEL_NAME, isCustomModel, MANTLE_PROVIDER, MANTLE_MODELS, DEFAULT_MANTLE_REGION, DEFAULT_MANTLE_MODEL_ID, mantleBaseUrl, isCustomMantleModel } from '@/lib/models';
 
 interface PropertyPanelProps {
   selectedNode: Node | null;
@@ -55,6 +55,120 @@ export function PropertyPanel({
 
   const bedrockModels = BEDROCK_MODELS;
 
+  // When switching provider, seed sensible provider-specific defaults.
+  const applyProviderChange = (provider: string) => {
+    if (provider === 'AWS Bedrock') {
+      onUpdateNode(selectedNode.id, {
+        ...selectedNode.data,
+        modelProvider: provider,
+        modelId: bedrockModels[0].model_id,
+        modelName: bedrockModels[0].model_name,
+      });
+    } else if (provider === MANTLE_PROVIDER) {
+      const region = (selectedNode.data as { region?: string }).region || DEFAULT_MANTLE_REGION;
+      onUpdateNode(selectedNode.id, {
+        ...selectedNode.data,
+        modelProvider: provider,
+        region,
+        baseUrl: mantleBaseUrl(region),
+        // Mantle model ids flow through the non-Bedrock (modelName) codegen path.
+        modelId: DEFAULT_MANTLE_MODEL_ID,
+        modelName: DEFAULT_MANTLE_MODEL_ID,
+      });
+    } else {
+      // OpenAI / other free-text providers
+      onUpdateNode(selectedNode.id, {
+        ...selectedNode.data,
+        modelProvider: provider,
+        modelId: '',
+        modelName: '',
+      });
+    }
+  };
+
+  // Mantle: region + model dropdown (with custom id) + BEDROCK_API_KEY.
+  const renderMantleFields = (data: { region?: string; modelId?: string; modelName?: string; apiKey?: string }) => {
+    const region = data.region || DEFAULT_MANTLE_REGION;
+    const custom = isCustomMantleModel(data.modelId, data.modelName);
+    return (
+      <>
+        <div>
+          <label className="lp-label">Region</label>
+          <input
+            type="text"
+            value={region}
+            onChange={(e) => {
+              const r = e.target.value;
+              onUpdateNode(selectedNode.id, {
+                ...selectedNode.data,
+                region: r,
+                baseUrl: mantleBaseUrl(r),
+              });
+            }}
+            className="lp-input"
+            placeholder={DEFAULT_MANTLE_REGION}
+          />
+          <p className="text-[10px] text-[var(--ink-3)] font-mono mt-1">{mantleBaseUrl(region)}</p>
+        </div>
+        <div>
+          <label className="lp-label">Model</label>
+          <select
+            value={custom ? CUSTOM_MODEL_OPTION : (data.modelId || DEFAULT_MANTLE_MODEL_ID)}
+            onChange={(e) => {
+              if (e.target.value === CUSTOM_MODEL_OPTION) {
+                onUpdateNode(selectedNode.id, {
+                  ...selectedNode.data,
+                  modelId: '',
+                  modelName: CUSTOM_MODEL_NAME,
+                });
+                return;
+              }
+              onUpdateNode(selectedNode.id, {
+                ...selectedNode.data,
+                modelId: e.target.value,
+                modelName: e.target.value,
+              });
+            }}
+            className="lp-input"
+          >
+            {MANTLE_MODELS.map((m) => (
+              <option key={m.model_id} value={m.model_id}>{m.model_name}</option>
+            ))}
+            <option value={CUSTOM_MODEL_OPTION}>Custom model ID…</option>
+          </select>
+          {custom && (
+            <input
+              type="text"
+              value={data.modelId || ''}
+              onChange={(e) => {
+                onUpdateNode(selectedNode.id, {
+                  ...selectedNode.data,
+                  modelId: e.target.value,
+                  modelName: e.target.value ? e.target.value : CUSTOM_MODEL_NAME,
+                });
+              }}
+              className="lp-input mt-2"
+              placeholder="e.g. xai.grok-4.3"
+            />
+          )}
+        </div>
+        <div>
+          <label className="lp-label">Bedrock API Key</label>
+          <input
+            type="password"
+            value={data.apiKey || ''}
+            onChange={(e) => handleInputChange('apiKey', e.target.value)}
+            className="lp-input"
+            placeholder="Enter your Bedrock API key"
+          />
+          <p className="text-[10px] text-[var(--ink-3)] font-mono mt-1">
+            Stored securely as BEDROCK_API_KEY environment variable
+          </p>
+        </div>
+      </>
+    );
+  };
+
   const renderAgentProperties = (data: any) => (
     <div className="space-y-4">
       <div>
@@ -76,32 +190,19 @@ export function PropertyPanel({
         </label>
         <select
           value={data.modelProvider || 'AWS Bedrock'}
-          onChange={(e) => {
-            // Update model provider and reset model selection
-            if (e.target.value === 'AWS Bedrock') {
-              onUpdateNode(selectedNode.id, {
-                ...selectedNode.data,
-                modelProvider: e.target.value,
-                modelId: bedrockModels[0].model_id,
-                modelName: bedrockModels[0].model_name,
-              });
-            } else {
-              onUpdateNode(selectedNode.id, {
-                ...selectedNode.data,
-                modelProvider: e.target.value,
-                modelId: '',
-                modelName: '',
-              });
-            }
-          }}
+          onChange={(e) => applyProviderChange(e.target.value)}
           className="lp-input"
         >
           <option value="AWS Bedrock">AWS Bedrock</option>
+          <option value={MANTLE_PROVIDER}>{MANTLE_PROVIDER}</option>
           <option value="OpenAI">OpenAI</option>
           {/* <option value="Anthropic">Anthropic</option> */}
         </select>
       </div>
 
+      {data.modelProvider === MANTLE_PROVIDER ? (
+        renderMantleFields(data)
+      ) : (
       <div>
         <label className="lp-label">
           Model
@@ -164,6 +265,7 @@ export function PropertyPanel({
           />
         )}
       </div>
+      )}
 
       {/* OpenAI-specific fields */}
       {data.modelProvider === 'OpenAI' && (
@@ -382,7 +484,6 @@ export function PropertyPanel({
             <option value="http_request">Http Request</option>
             <option value="editor">Editor</option>
             <option value="retrieve">Retrieve (KB)</option>
-            <option value="mem0_memory">mem0_memory</option>
           </select>
         ) : (
           <input
@@ -643,31 +744,19 @@ export function PropertyPanel({
         </label>
         <select
           value={data.modelProvider || 'AWS Bedrock'}
-          onChange={(e) => {
-            if (e.target.value === 'AWS Bedrock') {
-              onUpdateNode(selectedNode.id, {
-                ...selectedNode.data,
-                modelProvider: e.target.value,
-                modelId: bedrockModels[0].model_id,
-                modelName: bedrockModels[0].model_name,
-              });
-            } else {
-              onUpdateNode(selectedNode.id, {
-                ...selectedNode.data,
-                modelProvider: e.target.value,
-                modelId: '',
-                modelName: '',
-              });
-            }
-          }}
+          onChange={(e) => applyProviderChange(e.target.value)}
           className="lp-input"
         >
           <option value="AWS Bedrock">AWS Bedrock</option>
+          <option value={MANTLE_PROVIDER}>{MANTLE_PROVIDER}</option>
           <option value="OpenAI">OpenAI</option>
           <option value="Anthropic">Anthropic</option>
         </select>
       </div>
 
+      {data.modelProvider === MANTLE_PROVIDER ? (
+        renderMantleFields(data)
+      ) : (
       <div>
         <label className="lp-label">
           Model
@@ -729,6 +818,7 @@ export function PropertyPanel({
           />
         )}
       </div>
+      )}
 
       {/* OpenAI-specific fields */}
       {data.modelProvider === 'OpenAI' && (

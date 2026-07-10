@@ -1,6 +1,6 @@
 import { type Node, type Edge } from '@xyflow/react';
 import { generateGraphCode } from './graph-code-generator';
-import { DEFAULT_MODEL_ID } from './models';
+import { DEFAULT_MODEL_ID, MANTLE_PROVIDER } from './models';
 
 interface CodeGenerationResult {
   code: string;
@@ -31,7 +31,7 @@ export function generateStrandsAgentCode(
   const imports = new Set<string>([
     'from strands import Agent, tool',
     'from strands.models import BedrockModel',
-    'from strands_tools import calculator, file_read, shell, current_time, http_request, editor, retrieve, mem0_memory',
+    'from strands_tools import calculator, file_read, shell, current_time, http_request, editor, retrieve',
     'import json',
     'import os',
     'import asyncio',
@@ -70,7 +70,12 @@ export function generateStrandsAgentCode(
     if (hasOpenAIProvider) {
       imports.add('from strands.models.openai import OpenAIModel');
     }
-    
+    // Amazon Bedrock (Mantle) uses the OpenAI Responses API
+    const hasMantleProvider = allAgentNodes.some(node => node.data?.modelProvider === MANTLE_PROVIDER);
+    if (hasMantleProvider) {
+      imports.add('from strands.models.openai_responses import OpenAIResponsesModel');
+    }
+
     // Validate mandatory nodes
     if (agentNodes.length === 0 && orchestratorNodes.length === 0 && swarmNodes.length === 0) {
       errors.push('No agent nodes found. At least one agent, orchestrator agent, or swarm is required.');
@@ -448,9 +453,8 @@ function findConnectedTools(
         'shell': 'shell',
         'current_time': 'current_time',
         'http_request': 'http_request',
-        'editor': 'editor', 
-        'retrieve': 'retrieve', 
-        'mem0_memory': 'mem0_memory', 
+        'editor': 'editor',
+        'retrieve': 'retrieve',
       };
       const mappedTool = toolMapping[toolName] || 'calculator';
       return {
@@ -1346,7 +1350,21 @@ function generateModelConfigForCode(
   const isBedrock = modelProvider === 'AWS Bedrock' || modelProvider === undefined;
   const finalTemperature = thinkingEnabled && isBedrock ? 1 : temperature;
 
-  if (modelProvider === 'OpenAI') {
+  if (modelProvider === MANTLE_PROVIDER) {
+    // Amazon Bedrock (Mantle): OpenAI-compatible endpoint via the Responses API
+    const clientArgs = [
+      `"api_key": os.environ.get("BEDROCK_API_KEY")`,
+      `"base_url": "${baseUrl}"`,
+    ];
+    const clientArgsStr = `\n    client_args={\n        ${clientArgs.join(',\n        ')}\n    },`;
+    const params = [`"max_output_tokens": ${maxTokens}`, `"temperature": ${finalTemperature}`];
+    return `${varName}_model = OpenAIResponsesModel(${clientArgsStr}
+    model_id="${modelIdentifier}",
+    params={
+        ${params.join(',\n        ')},
+    }
+)`;
+  } else if (modelProvider === 'OpenAI') {
     const clientArgs = [];
     // Always use environment variable for API key for security - never hardcode
     clientArgs.push(`"api_key": os.environ.get("OPENAI_API_KEY")`);
@@ -1404,7 +1422,21 @@ function generateModelConfigForTool(
   const isBedrock = modelProvider === 'AWS Bedrock' || modelProvider === undefined;
   const finalTemperature = thinkingEnabled && isBedrock ? 1 : temperature;
 
-  if (modelProvider === 'OpenAI') {
+  if (modelProvider === MANTLE_PROVIDER) {
+    // Amazon Bedrock (Mantle): OpenAI-compatible endpoint via the Responses API
+    const clientArgs = [
+      `"api_key": os.environ.get("BEDROCK_API_KEY")`,
+      `"base_url": "${baseUrl}"`,
+    ];
+    const clientArgsStr = `\n            client_args={\n                ${clientArgs.join(',\n                ')}\n            },`;
+    const params = [`"max_output_tokens": ${maxTokens}`, `"temperature": ${finalTemperature}`];
+    return `${varName}_model = OpenAIResponsesModel(${clientArgsStr}
+            model_id="${modelIdentifier}",
+            params={
+                ${params.join(',\n                ')},
+            }
+        )`;
+  } else if (modelProvider === 'OpenAI') {
     const clientArgs = [];
     // Always use environment variable for API key for security - never hardcode
     clientArgs.push(`\"api_key\": os.environ.get(\"OPENAI_API_KEY\")`);

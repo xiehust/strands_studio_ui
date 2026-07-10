@@ -300,14 +300,18 @@ export function ExecutionPanel({
         node.type === 'agent' || node.type === 'orchestrator-agent'
       );
       
-      // Find first OpenAI API key from any agent node
+      // Find first provider API key from any agent node
+      const keys: Record<string, string> = {};
       for (const node of agentNodes) {
         const nodeData = node.data as any;
-        if (nodeData?.modelProvider === 'OpenAI' && nodeData?.apiKey) {
-          return { openai_api_key: nodeData.apiKey };
+        if (nodeData?.modelProvider === 'OpenAI' && nodeData?.apiKey && !keys.openai_api_key) {
+          keys.openai_api_key = nodeData.apiKey;
+        }
+        if (nodeData?.modelProvider === 'Amazon Bedrock (Mantle)' && nodeData?.apiKey && !keys.bedrock_api_key) {
+          keys.bedrock_api_key = nodeData.apiKey;
         }
       }
-      return {};
+      return keys;
     };
     
     const apiKeys = extractApiKeys();
