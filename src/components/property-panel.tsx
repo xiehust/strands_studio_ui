@@ -1,6 +1,6 @@
 import { type Node, type Edge } from '@xyflow/react';
 import { Settings, X } from 'lucide-react';
-import { BEDROCK_MODELS } from '@/lib/models';
+import { BEDROCK_MODELS, CUSTOM_MODEL_OPTION, CUSTOM_MODEL_NAME, isCustomModel } from '@/lib/models';
 
 interface PropertyPanelProps {
   selectedNode: Node | null;
@@ -107,27 +107,53 @@ export function PropertyPanel({
           Model
         </label>
         {data.modelProvider === 'AWS Bedrock' || !data.modelProvider ? (
-          <select
-            value={data.modelId || bedrockModels[0].model_id}
-            onChange={(e) => {
-              const selectedModel = bedrockModels.find(m => m.model_id === e.target.value);
-              if (selectedModel) {
-                // Update both modelId and modelName in a single call to avoid timing issues
-                onUpdateNode(selectedNode.id, {
-                  ...selectedNode.data,
-                  modelId: selectedModel.model_id,
-                  modelName: selectedModel.model_name,
-                });
-              }
-            }}
-            className="lp-input"
-          >
-            {bedrockModels.map((model) => (
-              <option key={model.model_id} value={model.model_id}>
-                {model.model_name}
-              </option>
-            ))}
-          </select>
+          <>
+            <select
+              value={isCustomModel(data.modelId, data.modelName) ? CUSTOM_MODEL_OPTION : (data.modelId || bedrockModels[0].model_id)}
+              onChange={(e) => {
+                if (e.target.value === CUSTOM_MODEL_OPTION) {
+                  onUpdateNode(selectedNode.id, {
+                    ...selectedNode.data,
+                    modelId: '',
+                    modelName: CUSTOM_MODEL_NAME,
+                  });
+                  return;
+                }
+                const selectedModel = bedrockModels.find(m => m.model_id === e.target.value);
+                if (selectedModel) {
+                  // Update both modelId and modelName in a single call to avoid timing issues
+                  onUpdateNode(selectedNode.id, {
+                    ...selectedNode.data,
+                    modelId: selectedModel.model_id,
+                    modelName: selectedModel.model_name,
+                  });
+                }
+              }}
+              className="lp-input"
+            >
+              {bedrockModels.map((model) => (
+                <option key={model.model_id} value={model.model_id}>
+                  {model.model_name}
+                </option>
+              ))}
+              <option value={CUSTOM_MODEL_OPTION}>Custom model ID…</option>
+            </select>
+            {isCustomModel(data.modelId, data.modelName) && (
+              <input
+                type="text"
+                value={data.modelId || ''}
+                onChange={(e) => {
+                  onUpdateNode(selectedNode.id, {
+                    ...selectedNode.data,
+                    modelId: e.target.value,
+                    modelName: CUSTOM_MODEL_NAME,
+                  });
+                }}
+                className="lp-input mt-2"
+                placeholder="e.g. us.anthropic.claude-sonnet-5"
+              />
+            )}
+          </>
         ) : (
           <input
             type="text"
@@ -647,26 +673,52 @@ export function PropertyPanel({
           Model
         </label>
         {data.modelProvider === 'AWS Bedrock' || !data.modelProvider ? (
-          <select
-            value={data.modelId || bedrockModels[0].model_id}
-            onChange={(e) => {
-              const selectedModel = bedrockModels.find(m => m.model_id === e.target.value);
-              if (selectedModel) {
-                onUpdateNode(selectedNode.id, {
-                  ...selectedNode.data,
-                  modelId: selectedModel.model_id,
-                  modelName: selectedModel.model_name,
-                });
-              }
-            }}
-            className="lp-input"
-          >
-            {bedrockModels.map((model) => (
-              <option key={model.model_id} value={model.model_id}>
-                {model.model_name}
-              </option>
-            ))}
-          </select>
+          <>
+            <select
+              value={isCustomModel(data.modelId, data.modelName) ? CUSTOM_MODEL_OPTION : (data.modelId || bedrockModels[0].model_id)}
+              onChange={(e) => {
+                if (e.target.value === CUSTOM_MODEL_OPTION) {
+                  onUpdateNode(selectedNode.id, {
+                    ...selectedNode.data,
+                    modelId: '',
+                    modelName: CUSTOM_MODEL_NAME,
+                  });
+                  return;
+                }
+                const selectedModel = bedrockModels.find(m => m.model_id === e.target.value);
+                if (selectedModel) {
+                  onUpdateNode(selectedNode.id, {
+                    ...selectedNode.data,
+                    modelId: selectedModel.model_id,
+                    modelName: selectedModel.model_name,
+                  });
+                }
+              }}
+              className="lp-input"
+            >
+              {bedrockModels.map((model) => (
+                <option key={model.model_id} value={model.model_id}>
+                  {model.model_name}
+                </option>
+              ))}
+              <option value={CUSTOM_MODEL_OPTION}>Custom model ID…</option>
+            </select>
+            {isCustomModel(data.modelId, data.modelName) && (
+              <input
+                type="text"
+                value={data.modelId || ''}
+                onChange={(e) => {
+                  onUpdateNode(selectedNode.id, {
+                    ...selectedNode.data,
+                    modelId: e.target.value,
+                    modelName: CUSTOM_MODEL_NAME,
+                  });
+                }}
+                className="lp-input mt-2"
+                placeholder="e.g. us.anthropic.claude-sonnet-5"
+              />
+            )}
+          </>
         ) : (
           <input
             type="text"

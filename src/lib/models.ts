@@ -4,11 +4,17 @@
  * DEFAULT_MODEL_ID is the single source of truth for the fallback model used by
  * new agent nodes and all code-generation fallback paths.
  *
- * Model ids verified against `aws bedrock list-inference-profiles`
- * (us-west-2 / eu-west-1) on 2026-07-10.
+ * Claude Sonnet 5 / 4.6 / Opus 4.8 ids verified against
+ * `aws bedrock list-inference-profiles` (us-west-2) on 2026-07-10.
+ * xai.grok-4.3 and openai.gpt-5.5 were not visible in this account's
+ * listings on that date — kept as requested; availability may be
+ * account/region dependent.
  */
 
 export const DEFAULT_MODEL_ID = 'global.anthropic.claude-sonnet-4-6';
+
+/** Sentinel value for the "Custom model ID" option in model dropdowns. */
+export const CUSTOM_MODEL_OPTION = '__custom__';
 
 export interface BedrockModelOption {
   model_id: string;
@@ -16,6 +22,14 @@ export interface BedrockModelOption {
 }
 
 export const BEDROCK_MODELS: BedrockModelOption[] = [
+  {
+    model_id: 'global.anthropic.claude-sonnet-5',
+    model_name: 'Claude Sonnet 5 (global)',
+  },
+  {
+    model_id: 'us.anthropic.claude-sonnet-5',
+    model_name: 'Claude Sonnet 5 (US)',
+  },
   {
     model_id: 'global.anthropic.claude-sonnet-4-6',
     model_name: 'Claude Sonnet 4.6 (global)',
@@ -41,56 +55,12 @@ export const BEDROCK_MODELS: BedrockModelOption[] = [
     model_name: 'Claude Opus 4.8 (EU)',
   },
   {
-    model_id: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
-    model_name: 'Claude 4.5 Haiku (global)',
+    model_id: 'xai.grok-4.3',
+    model_name: 'Grok 4.3 (xAI)',
   },
   {
-    model_id: 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
-    model_name: 'Claude 4.5 Haiku (US)',
-  },
-  {
-    model_id: 'eu.anthropic.claude-haiku-4-5-20251001-v1:0',
-    model_name: 'Claude 4.5 Haiku (EU)',
-  },
-  {
-    model_id: 'global.anthropic.claude-sonnet-4-5-20250929-v1:0',
-    model_name: 'Claude 4.5 Sonnet (global)',
-  },
-  {
-    model_id: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0',
-    model_name: 'Claude 4.5 Sonnet (US)',
-  },
-  {
-    model_id: 'eu.anthropic.claude-sonnet-4-5-20250929-v1:0',
-    model_name: 'Claude 4.5 Sonnet (EU)',
-  },
-  {
-    model_id: 'global.anthropic.claude-sonnet-4-20250514-v1:0',
-    model_name: 'Claude 4 Sonnet (global)',
-  },
-  {
-    model_id: 'us.anthropic.claude-sonnet-4-20250514-v1:0',
-    model_name: 'Claude 4 Sonnet (US)',
-  },
-  {
-    model_id: 'eu.anthropic.claude-sonnet-4-20250514-v1:0',
-    model_name: 'Claude 4 Sonnet (EU)',
-  },
-  {
-    model_id: 'apac.anthropic.claude-sonnet-4-20250514-v1:0',
-    model_name: 'Claude 4 Sonnet (APAC)',
-  },
-  {
-    model_id: 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
-    model_name: 'Claude 3.7 Sonnet (US)',
-  },
-  {
-    model_id: 'eu.anthropic.claude-3-7-sonnet-20250219-v1:0',
-    model_name: 'Claude 3.7 Sonnet (EU)',
-  },
-  {
-    model_id: 'apac.anthropic.claude-3-7-sonnet-20250219-v1:0',
-    model_name: 'Claude 3.7 Sonnet (APAC)',
+    model_id: 'openai.gpt-5.5',
+    model_name: 'GPT-5.5 (OpenAI)',
   },
   {
     model_id: 'openai.gpt-oss-120b-1:0',
@@ -121,3 +91,21 @@ export const BEDROCK_MODELS: BedrockModelOption[] = [
     model_name: 'Amazon Nova Pro v1',
   },
 ];
+
+/** Display name marking a node as using a user-entered (custom) model id. */
+export const CUSTOM_MODEL_NAME = 'Custom model';
+
+/**
+ * True when the node should show the custom-model-id input: either the stored
+ * id is not in the catalog (e.g. a legacy/removed id), or the node was
+ * explicitly switched to "Custom model ID…" (marked via modelName) and the id
+ * is still being typed.
+ */
+export function isCustomModel(
+  modelId: string | undefined | null,
+  modelName?: string | null,
+): boolean {
+  if (modelName === CUSTOM_MODEL_NAME) return true;
+  if (!modelId) return false;
+  return !BEDROCK_MODELS.some((m) => m.model_id === modelId);
+}
