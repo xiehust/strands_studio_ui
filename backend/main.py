@@ -3,8 +3,13 @@ Strands UI Backend Server
 FastAPI server for executing Strands agents and managing projects
 """
 import asyncio
+import codecs
 import json
 import logging
+import shutil
+import signal
+import sys
+import tempfile
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -18,15 +23,13 @@ load_dotenv()
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 import uvicorn
 
 # Import storage components
 from app.models.storage import (
     ArtifactRequest,
     ArtifactResponse,
-    RetrieveArtifactRequest,
     ArtifactContent,
     ProjectInfo,
     VersionInfo,
@@ -38,7 +41,6 @@ from app.services.storage_service import StorageService
 # Import conversation components
 from app.models.conversation import (
     ConversationSession,
-    ChatMessage,
     CreateConversationRequest,
     ChatRequest,
     ChatResponse,
@@ -146,6 +148,16 @@ except ImportError as e:
     logger.warning(f"Deployment routes disabled - missing dependencies: {e}")
 except Exception as e:
     logger.warning(f"Deployment routes disabled - error: {e}")
+
+# Optional AI codegen routes (only include if dependencies are available)
+try:
+    from app.routers.codegen import router as codegen_router
+    app.include_router(codegen_router)
+    logger.info("AI codegen routes enabled")
+except ImportError as e:
+    logger.warning(f"AI codegen routes disabled - missing dependencies: {e}")
+except Exception as e:
+    logger.warning(f"AI codegen routes disabled - error: {e}")
 
 # Data models
 class NodeData(BaseModel):
@@ -305,6 +317,86 @@ async def delete_project(project_id: str):
     logger.info(f"Deleted project: {deleted_project.name} ({project_id})")
     return {"message": "Project deleted successfully"}
 
+# --- Subprocess-based code execution ---
+# Generated code (template or AI) is executed in an isolated Python subprocess
+# instead of in-process exec(). The generated code contract guarantees an
+# argparse CLI (`--user-input` / `--messages`) and an `if __name__ == "__main__"`
+# guard, so the subprocess is invoked exactly like the conversation service does.
+# Timeout is configurable via the EXECUTE_TIMEOUT_S env var (seconds).
+EXECUTE_TIMEOUT_S = float(os.getenv("EXECUTE_TIMEOUT_S", "300"))
+
+def _build_execution_env(openai_api_key: Optional[str] = None, bedrock_api_key: Optional[str] = None) -> Dict[str, str]:
+    """Environment for the execution subprocess: inherit backend env, skip
+    strands tool consent prompts, and inject request-scoped API keys."""
+    env = os.environ.copy()
+    # Skip strands tool consent prompts (would hang headless subprocess runs)
+    env["BYPASS_TOOL_CONSENT"] = "true"
+    env["STRANDS_NON_INTERACTIVE"] = "true"
+    if openai_api_key:
+        env["OPENAI_API_KEY"] = openai_api_key
+    if bedrock_api_key:
+        env["BEDROCK_API_KEY"] = bedrock_api_key
+    return env
+
+def _kill_process_group(process: "asyncio.subprocess.Process") -> None:
+    """Kill the subprocess and everything it spawned (start_new_session=True
+    makes the subprocess its own process-group leader)."""
+    try:
+        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        # Process already gone (or not ours) - fall back to direct kill
+        try:
+            process.kill()
+        except (ProcessLookupError, OSError):
+            pass
+
+def _chunk_to_sse(chunk_str: str) -> str:
+    """Encode a stdout chunk as one SSE event.
+
+    Frontend decoding contract (api-client.ts): within an event, an empty
+    `data: ` line represents a newline character and non-empty `data:` lines
+    are concatenated as-is. So each '\\n' in the chunk becomes its own empty
+    `data: ` line and each text segment its own `data: <segment>` line -
+    the decoded event text is then exactly the chunk, regardless of where
+    subprocess read() boundaries fall.
+    """
+    lines = []
+    for i, segment in enumerate(chunk_str.split('\n')):
+        if i > 0:
+            lines.append('data: ')  # the newline separator itself
+        if segment:
+            lines.append(f'data: {segment}')
+    if not lines:
+        return ''
+    return '\n'.join(lines) + '\n\n'
+
+async def _spawn_execution_subprocess(
+    code: str,
+    input_data: Optional[str],
+    openai_api_key: Optional[str] = None,
+    bedrock_api_key: Optional[str] = None,
+) -> tuple:
+    """Write code to a temp workspace and spawn it as `python -u code.py
+    [--user-input ...]`. Returns (process, workdir). Caller owns cleanup."""
+    workdir = tempfile.mkdtemp(prefix="strands_exec_")
+    code_file = os.path.join(workdir, "generated_agent.py")
+    with open(code_file, "w", encoding="utf-8") as f:
+        f.write(code)
+
+    cmd = [sys.executable, "-u", code_file]
+    if input_data is not None:
+        cmd.extend(["--user-input", input_data])
+
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        cwd=workdir,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=_build_execution_env(openai_api_key, bedrock_api_key),
+        start_new_session=True,
+    )
+    return process, workdir
+
 # Code Execution Endpoints
 @app.post("/api/execute")
 async def execute_code(request: ExecutionRequest):
@@ -382,299 +474,90 @@ async def execute_code_stream(request: ExecutionRequest):
     logger.info(f"Starting streaming execution - ID: {execution_id}")
     
     async def generate_stream():
+        process = None
+        workdir = None
+        stderr_task = None
+        stderr_chunks = []
+        chunk_count = 0
         try:
-            logger.info(f"Setting up streaming environment - ID: {execution_id}")
-            
-            # Set API keys as environment variables for security
-            if request.openai_api_key:
-                os.environ["OPENAI_API_KEY"] = request.openai_api_key
-                logger.info("OpenAI API key set in environment for streaming")
-            if request.bedrock_api_key:
-                os.environ["BEDROCK_API_KEY"] = request.bedrock_api_key
-                logger.info("Bedrock (Mantle) API key set in environment for streaming")
-            # Env for strands tools: skip consent prompts (would hang headless runs)
-            os.environ['BYPASS_TOOL_CONSENT'] = "true"
-            os.environ['STRANDS_NON_INTERACTIVE'] = "true"
-            # Import Strands Agent SDK
-            logger.info("Importing Strands Agent SDK for streaming")
-            from strands import Agent, tool
-            from strands.models import BedrockModel
-            from strands_tools import calculator, file_read, shell, current_time,http_request, editor, retrieve
+            logger.info(f"Setting up streaming subprocess - ID: {execution_id}")
+            process, workdir = await _spawn_execution_subprocess(
+                request.code, request.input_data, request.openai_api_key, request.bedrock_api_key
+            )
+            logger.info(f"Streaming subprocess started - PID: {process.pid}, timeout: {EXECUTE_TIMEOUT_S}s - ID: {execution_id}")
 
-            # Import OpenAI model(s) if needed
-            openai_imports = {}
-            if 'OpenAIModel' in request.code:
-                logger.info("OpenAI model detected in streaming code, importing OpenAI dependencies")
-                try:
-                    from strands.models.openai import OpenAIModel
-                    openai_imports['OpenAIModel'] = OpenAIModel
-                except ImportError as e:
-                    logger.warning(f"OpenAI model not available: {e}")
-            if 'OpenAIResponsesModel' in request.code:
-                logger.info("OpenAI Responses model (Bedrock Mantle) detected, importing dependencies")
-                try:
-                    from strands.models.openai_responses import OpenAIResponsesModel
-                    openai_imports['OpenAIResponsesModel'] = OpenAIResponsesModel
-                except ImportError as e:
-                    logger.warning(f"OpenAIResponsesModel not available: {e}")
-            
-            # Import MCP dependencies if needed
-            mcp_imports = {}
-            if 'MCPClient' in request.code:
-                logger.info("MCP Client detected in code, importing MCP dependencies")
-                try:
-                    from strands.tools.mcp import MCPClient
-                    from mcp import stdio_client, StdioServerParameters
-                    from mcp.client.streamable_http import streamablehttp_client
-                    from mcp.client.sse import sse_client
-                    
-                    mcp_imports.update({
-                        'MCPClient': MCPClient,
-                        'stdio_client': stdio_client,
-                        'streamablehttp_client': streamablehttp_client,
-                        'sse_client': sse_client,
-                        'StdioServerParameters': StdioServerParameters,
-                    })
-                except ImportError as e:
-                    logger.warning(f"MCP dependencies not available: {e}")
-            
-            # Create a safe execution environment
-            globals_dict = {
-                '__builtins__': __builtins__,
-                'Agent': Agent,
-                'tool': tool,
-                'BedrockModel': BedrockModel,
-                'calculator': calculator,
-                'file_read': file_read,
-                'shell': shell,
-                'current_time': current_time,
-                'http_request':http_request,
-                'editor':editor,
-                'retrieve':retrieve,
-                'print': print,
-                'str': str,
-                'int': int,
-                'float': float,
-                'list': list,
-                'dict': dict,
-                'len': len,
-                'range': range,
-                'json': json,
-                'os': os,  # Add os module for environment variables
-                'asyncio': asyncio,
-                'input_data': request.input_data,  # Make input data available to executed code
-                **mcp_imports,  # Add MCP imports if available
-                **openai_imports,  # Add OpenAI imports if available
-            }
-            
-            locals_dict = {}
-            
-            # Execute the setup code (imports, agent configuration, main function definition)
-            logger.info(f"Executing setup code - ID: {execution_id}")
-            exec(request.code, globals_dict, locals_dict)
-            
-            # Make globals available to locals for function access
-            for key, value in globals_dict.items():
-                if key not in locals_dict:
-                    locals_dict[key] = value
-            
-            # Also make all local definitions available as globals for main function
-            for key, value in locals_dict.items():
-                if key not in globals_dict:
-                    globals_dict[key] = value
-            
-            # Check if there's a main function and if it's async
-            main_func = locals_dict.get('main') or globals_dict.get('main')
-            if not main_func or not callable(main_func):
-                logger.error(f"No callable main function found - ID: {execution_id}")
-                yield f"data: Error: No callable main function found in the code\n\n"
-                yield f"data: [STREAM_COMPLETE]\n\n"
-                return
-            
-            import inspect
-            logger.info(f"Main function type: {type(main_func).__name__} - ID: {execution_id}")
-            logger.info(f"Is coroutine function: {inspect.iscoroutinefunction(main_func)} - ID: {execution_id}")
-            logger.info(f"Is async gen function: {inspect.isasyncgenfunction(main_func)} - ID: {execution_id}")
-            
-            if not (inspect.iscoroutinefunction(main_func) or inspect.isasyncgenfunction(main_func)):
-                logger.error(f"Main function is not async - ID: {execution_id}")
-                yield f"data: Error: Main function must be async for streaming\n\n"
-                yield f"data: [STREAM_COMPLETE]\n\n"
-                return
-            
-            logger.info(f"Found async main function, starting streaming execution - ID: {execution_id}")
-            
-            # Create a custom async generator that captures the streaming
-            async def stream_main():
-                # Set up the execution context for the main function
-                try:
-                    # Check if the main function is a generator (has yield statements)
-                    import inspect
-                    if inspect.isasyncgenfunction(main_func):
-                        # The main function is an async generator, stream from it directly
-                        logger.info(f"Main function is an async generator, streaming directly - ID: {execution_id}")
-                        async for chunk in main_func(user_input_arg=request.input_data):
-                            if chunk is not None:
-                                yield chunk
-                    elif 'yield' in request.code:
-                        # The main function contains yield statements but may not be detected as generator
-                        # This happens when the yield is conditional or inside try/except
-                        logger.info(f"Detected yield in code, attempting to stream from main function - ID: {execution_id}")
-                        try:
-                            # Try to call main as a generator
-                            result = main_func(user_input_arg=request.input_data)
-                            if hasattr(result, '__aiter__'):
-                                # It's an async iterator/generator
-                                async for chunk in result:
-                                    if chunk is not None:
-                                        yield chunk
-                            elif hasattr(result, '__await__'):
-                                # It's a coroutine, await it
-                                final_result = await result
-                                if final_result is not None:
-                                    yield str(final_result)
-                            elif inspect.isgenerator(result) or inspect.isasyncgen(result):
-                                # It's a generator or async generator
-                                if inspect.isasyncgen(result):
-                                    async for chunk in result:
-                                        if chunk is not None:
-                                            yield chunk
-                                else:
-                                    for chunk in result:
-                                        if chunk is not None:
-                                            yield chunk
-                            else:
-                                # It's some other object, convert to string
-                                yield str(result)
-                        except Exception as e:
-                            logger.warning(f"Failed to stream from main function, falling back - ID: {execution_id}: {e}")
-                            # Fallback to regular execution
-                            try:
-                                result = await main_func(user_input_arg=request.input_data)
-                                if result is not None:
-                                    # Check if the result is an async generator
-                                    if inspect.isasyncgen(result):
-                                        async for chunk in result:
-                                            if chunk is not None:
-                                                yield chunk
-                                    else:
-                                        yield str(result)
-                            except Exception as fallback_error:
-                                logger.error(f"Fallback execution also failed - ID: {execution_id}: {fallback_error}")
-                                yield f"Error: {str(fallback_error)}"
-                    else:
-                        # Regular async function - check if it's a streaming agent by looking for stream_async in code
-                        if 'stream_async' in request.code:
-                            logger.info(f"Detected streaming agent code, setting up real-time print capture - ID: {execution_id}")
-                            
-                            # Create an async queue to capture print output in real-time
-                            import asyncio
-                            output_queue = asyncio.Queue()
-                            execution_done = asyncio.Event()
-                            original_print = print
-                            
-                            def streaming_print(*args, **kwargs):
-                                # Capture the output for streaming
-                                if args:
-                                    output = args[0]
-                                    # Check if this looks like streaming data (not debug messages)
-                                    if output:
-                                        # Put the output in the queue (non-blocking)
-                                        try:
-                                            output_queue.put_nowait(output)
-                                        except asyncio.QueueFull:
-                                            pass  # Skip if queue is full
-                            
-                            # Replace print function in globals for the main function
-                            globals_dict['print'] = streaming_print
-                            
-                            # Run the main function in a separate task
-                            async def run_main():
-                                try:
-                                    result = await main_func(user_input_arg=request.input_data)
-                                    if result is not None:
-                                        output_queue.put_nowait(str(result))
-                                except Exception as e:
-                                    output_queue.put_nowait(f"Error: {str(e)}")
-                                finally:
-                                    execution_done.set()
-                            
-                            # Start the main function
-                            main_task = asyncio.create_task(run_main())
-                            
-                            # Stream output as it becomes available
-                            while not execution_done.is_set() or not output_queue.empty():
-                                try:
-                                    # Wait for output with a timeout
-                                    output = await asyncio.wait_for(output_queue.get(), timeout=0.1)
-                                    if output:
-                                        yield output
-                                except asyncio.TimeoutError:
-                                    # Check if execution is done
-                                    if execution_done.is_set():
-                                        break
-                                    continue
-                            
-                            # Wait for the main task to complete
-                            await main_task
-                        else:
-                            # Regular async function without streaming
-                            logger.info(f"Regular async function, executing once - ID: {execution_id}")
-                            result = await main_func(user_input_arg=request.input_data)
-                            if result is not None:
-                                # Check if the result is an async generator
-                                if inspect.isasyncgen(result):
-                                    async for chunk in result:
-                                        if chunk is not None:
-                                            yield chunk
-                                else:
-                                    yield str(result)
-                    
-                except Exception as e:
-                    logger.error(f"Error in stream_main - ID: {execution_id}: {e}")
-                    yield f"Error in main function: {str(e)}"
-            
-            # Start streaming from the main function
-            chunk_count = 0
-            try:
-                async for stream_data in stream_main():
-                    # Ensure proper SSE format and preserve newlines
-                    if stream_data:
-                        # Convert stream_data to string and ensure it preserves formatting
-                        chunk_str = str(stream_data)
-                        if not chunk_str.startswith("data: "):
-                            # Properly escape newlines in SSE data by splitting into multiple data: lines
-                            lines = chunk_str.split('\n')
-                            sse_data = '\n'.join(f'data: {line}' for line in lines)
-                            yield f"{sse_data}\n\n"
-                        else:
-                            yield f"{chunk_str}\n\n" if not chunk_str.endswith("\n\n") else chunk_str
-                    chunk_count += 1
-                
-                end_time = datetime.now()
-                execution_time = (end_time - start_time).total_seconds()
-                logger.info(f"Streaming completed - {chunk_count} chunks sent - ID: {execution_id}, Duration: {execution_time:.3f}s")
-                yield f"data: [STREAM_COMPLETE:{execution_time}]\n\n"
-                
-            except Exception as e:
-                end_time = datetime.now()
-                execution_time = (end_time - start_time).total_seconds()
-                logger.error(f"Streaming error in main execution - ID: {execution_id}: {e}")
-                yield f"data: Error: {str(e)}\n\n"
-                yield f"data: [STREAM_COMPLETE:{execution_time}]\n\n"
-                
-        except ImportError as e:
+            # Drain stderr concurrently so a chatty subprocess cannot block on a
+            # full stderr pipe while we are reading stdout
+            async def drain_stderr():
+                while True:
+                    data = await process.stderr.read(4096)
+                    if not data:
+                        break
+                    stderr_chunks.append(data)
+
+            stderr_task = asyncio.create_task(drain_stderr())
+
+            # Incremental decoder: a read() boundary may split a multi-byte
+            # UTF-8 character
+            decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + EXECUTE_TIMEOUT_S
+
+            while True:
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    raise asyncio.TimeoutError()
+                data = await asyncio.wait_for(process.stdout.read(4096), timeout=remaining)
+                if not data:
+                    break
+                chunk_str = decoder.decode(data)
+                if not chunk_str:
+                    continue
+                # Same SSE convention as the previous in-process implementation:
+                # an empty `data: ` line represents a newline character
+                if not chunk_str.startswith("data: "):
+                    sse_event = _chunk_to_sse(chunk_str)
+                    if sse_event:
+                        yield sse_event
+                else:
+                    # Parity with previous behavior: pre-formatted SSE data
+                    # printed by the code is forwarded as-is
+                    yield f"{chunk_str}\n\n" if not chunk_str.endswith("\n\n") else chunk_str
+                chunk_count += 1
+
+            # Flush any buffered partial character
+            tail = decoder.decode(b"", final=True)
+            if tail:
+                sse_event = _chunk_to_sse(tail)
+                if sse_event:
+                    yield sse_event
+
+            remaining = max(deadline - loop.time(), 1.0)
+            await asyncio.wait_for(asyncio.gather(stderr_task, process.wait()), timeout=remaining)
+
             end_time = datetime.now()
             execution_time = (end_time - start_time).total_seconds()
-            if "strands" in str(e) or "strands_tools" in str(e):
-                error_msg = f"Strands Agent SDK not available. Please install strands-agents and strands-agents-tools packages. Error: {str(e)}"
-                logger.error(f"Strands SDK import error - ID: {execution_id}: {error_msg}")
-                yield f"data: Error: {error_msg}\n\n"
+
+            if process.returncode != 0:
+                stderr_text = b"".join(stderr_chunks).decode("utf-8", errors="replace").strip()
+                error_msg = stderr_text or f"Code execution failed with exit code {process.returncode}"
+                logger.error(f"Streaming subprocess failed - exit code: {process.returncode} - ID: {execution_id}")
+                logger.error(f"Subprocess stderr: {stderr_text[:2000]}")
+                yield _chunk_to_sse(f"Error: {error_msg}")
                 yield f"data: [STREAM_COMPLETE:{execution_time}]\n\n"
-            else:
-                logger.error(f"Import error - ID: {execution_id}: {e}")
-                yield f"data: Error: Import error: {str(e)}\n\n"
-                yield f"data: [STREAM_COMPLETE:{execution_time}]\n\n"
+                return
+
+            logger.info(f"Streaming completed - {chunk_count} chunks sent - ID: {execution_id}, Duration: {execution_time:.3f}s")
+            yield f"data: [STREAM_COMPLETE:{execution_time}]\n\n"
+
+        except asyncio.TimeoutError:
+            end_time = datetime.now()
+            execution_time = (end_time - start_time).total_seconds()
+            logger.error(f"Streaming execution timed out after {EXECUTE_TIMEOUT_S}s - killing process group - ID: {execution_id}")
+            if process is not None:
+                _kill_process_group(process)
+            yield f"data: Error: Code execution timed out after {EXECUTE_TIMEOUT_S:g} seconds\n\n"
+            yield f"data: [STREAM_COMPLETE:{execution_time}]\n\n"
         except Exception as e:
             end_time = datetime.now()
             execution_time = (end_time - start_time).total_seconds()
@@ -683,7 +566,18 @@ async def execute_code_stream(request: ExecutionRequest):
             logger.error(f"Full traceback - ID: {execution_id}: {traceback.format_exc()}")
             yield f"data: Error: {error_msg}\n\n"
             yield f"data: [STREAM_COMPLETE:{execution_time}]\n\n"
-    
+        finally:
+            if process is not None and process.returncode is None:
+                _kill_process_group(process)
+                try:
+                    await process.wait()
+                except Exception:
+                    pass
+            if stderr_task is not None and not stderr_task.done():
+                stderr_task.cancel()
+            if workdir is not None:
+                shutil.rmtree(workdir, ignore_errors=True)
+
     return StreamingResponse(
         generate_stream(),
         media_type="text/plain",
@@ -1496,152 +1390,51 @@ async def save_to_execution_history(
         logger.error(f"Failed to save execution artifacts - ID: {execution_id}, Error: {e}")
 
 async def execute_strands_code(code: str, input_data: Optional[str] = None, openai_api_key: Optional[str] = None, bedrock_api_key: Optional[str] = None) -> str:
-    """Execute Python code with Strands Agent SDK integration"""
-    logger.info("Starting execute_strands_code function")
+    """Execute generated agent code in an isolated Python subprocess.
+
+    The generated code contract guarantees an argparse CLI entrypoint
+    (`--user-input`), so the code runs exactly as it would from the command
+    line. stdout is the execution output (same semantics as the previous
+    in-process stdout capture); a non-zero exit raises with stderr content.
+    """
+    logger.info("Starting execute_strands_code (subprocess mode)")
     logger.debug(f"Code length: {len(code)} characters")
 
+    process = None
+    workdir = None
     try:
-        # Set API keys as environment variables for security
-        if openai_api_key:
-            os.environ["OPENAI_API_KEY"] = openai_api_key
-            logger.info("OpenAI API key set in environment")
-        if bedrock_api_key:
-            os.environ["BEDROCK_API_KEY"] = bedrock_api_key
-            logger.info("Bedrock (Mantle) API key set in environment")
-        
-        # Import Strands Agent SDK
-        logger.info("Importing Strands Agent SDK")
-        from strands import Agent, tool
-        from strands.models import BedrockModel
-        from strands_tools import calculator, file_read, shell, current_time
-        
-        # Env for strands tools: skip consent prompts (would hang headless runs)
-        os.environ['BYPASS_TOOL_CONSENT'] = "true"
-        os.environ['STRANDS_NON_INTERACTIVE'] = "true"
-        # Import OpenAI model(s) if needed
-        openai_imports = {}
-        if 'OpenAIModel' in code:
-            logger.info("OpenAI model detected in code, importing OpenAI dependencies")
-            try:
-                from strands.models.openai import OpenAIModel
-                openai_imports['OpenAIModel'] = OpenAIModel
-            except ImportError as e:
-                logger.warning(f"OpenAI model not available: {e}")
-        if 'OpenAIResponsesModel' in code:
-            logger.info("OpenAI Responses model (Bedrock Mantle) detected, importing dependencies")
-            try:
-                from strands.models.openai_responses import OpenAIResponsesModel
-                openai_imports['OpenAIResponsesModel'] = OpenAIResponsesModel
-            except ImportError as e:
-                logger.warning(f"OpenAIResponsesModel not available: {e}")
+        process, workdir = await _spawn_execution_subprocess(code, input_data, openai_api_key, bedrock_api_key)
+        logger.info(f"Execution subprocess started - PID: {process.pid}, timeout: {EXECUTE_TIMEOUT_S}s")
 
-        # Import MCP dependencies if needed
-        mcp_imports = {}
-        if 'MCPClient' in code:
-            logger.info("MCP Client detected in code, importing MCP dependencies")
-            try:
-                from strands.tools.mcp import MCPClient
-                from mcp import stdio_client, StdioServerParameters
-                from mcp.client.streamable_http import streamablehttp_client
-                from mcp.client.sse import sse_client
-                
-                mcp_imports.update({
-                    'MCPClient': MCPClient,
-                    'stdio_client': stdio_client,
-                    'streamablehttp_client': streamablehttp_client,
-                    'sse_client': sse_client,
-                    'StdioServerParameters': StdioServerParameters,
-                })
-            except ImportError as e:
-                logger.warning(f"MCP dependencies not available: {e}")
-                # MCP imports are optional
-        
-        # Create a safe execution environment
-        globals_dict = {
-            '__builtins__': __builtins__,
-            'Agent': Agent,
-            'tool': tool,
-            'BedrockModel': BedrockModel,
-            'calculator': calculator,
-            'file_read': file_read,
-            'shell': shell,
-            'current_time': current_time,
-            'print': print,
-            'str': str,
-            'int': int,
-            'float': float,
-            'list': list,
-            'dict': dict,
-            'len': len,
-            'range': range,
-            'json': json,
-            'os': os,  # Add os module for environment variables
-            'input_data': input_data,  # Make input data available to executed code
-            **mcp_imports,  # Add MCP imports if available
-            **openai_imports,  # Add OpenAI imports if available
-        }
-        
-        locals_dict = {}
-        
-        # Capture output
-        import io
-        import sys
-        output_buffer = io.StringIO()
-        old_stdout = sys.stdout
-        sys.stdout = output_buffer
-        
         try:
-            # Execute the code
-            logger.info("Executing user code")
-            exec(code, globals_dict, locals_dict)
-            
-            # Make globals available to locals for function access
-            for key, value in globals_dict.items():
-                if key not in locals_dict:
-                    locals_dict[key] = value
-            
-            # Also make all local definitions available as globals for main function
-            for key, value in locals_dict.items():
-                if key not in globals_dict:
-                    globals_dict[key] = value
-            
-            # If there's a main function, call it
-            if 'main' in locals_dict and callable(locals_dict['main']):
-                logger.info("Calling main function")
-                import inspect
-                import asyncio
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                process.communicate(), timeout=EXECUTE_TIMEOUT_S
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"Execution timed out after {EXECUTE_TIMEOUT_S}s - killing process group (PID: {process.pid})")
+            _kill_process_group(process)
+            await process.wait()
+            raise RuntimeError(f"Code execution timed out after {EXECUTE_TIMEOUT_S:g} seconds")
 
-                # Check if main function is async
-                if inspect.iscoroutinefunction(locals_dict['main']):
-                    logger.info("Main function is async, awaiting result")
-                    # Pass user_input and input_data as arguments
-                    result = await locals_dict['main'](user_input_arg=input_data)
-                else:
-                    logger.info("Main function is sync, calling directly")
-                    # Pass user_input and input_data as arguments
-                    result = locals_dict['main'](user_input_arg=input_data)
+        stdout = stdout_bytes.decode("utf-8", errors="replace")
+        stderr = stderr_bytes.decode("utf-8", errors="replace")
 
-                if result is not None:
-                    logger.info(f"Main function returned: {type(result).__name__}")
-                    logger.info(f"Main function result: {result}")
-        
-        finally:
-            sys.stdout = old_stdout
-        
-        output = output_buffer.getvalue()
-        logger.info(f"Code execution completed, output length: {len(output)}")
-        return output if output else "Code executed successfully (no output)"
-        
-    except ImportError as e:
-        if "strands" in str(e) or "strands_tools" in str(e):
-            logger.error(f"Strands SDK import error: {e}")
-            return f"Strands Agent SDK not available. Please install strands-agents and strands-agents-tools packages.\nError: {str(e)}"
-        else:
-            logger.error(f"Import error: {e}")
-            raise e
-    except Exception as e:
-        logger.error(f"Code execution exception: {e}")
-        raise e
+        if process.returncode != 0:
+            logger.error(f"Execution subprocess failed - exit code: {process.returncode}")
+            logger.error(f"Subprocess stderr: {stderr[:2000]}")
+            # Parity with previous behavior: missing strands packages returned a
+            # friendly message as output instead of raising
+            if ("ModuleNotFoundError" in stderr or "ImportError" in stderr) and "strands" in stderr:
+                return f"Strands Agent SDK not available. Please install strands-agents and strands-agents-tools packages.\nError: {stderr.strip()}"
+            raise RuntimeError(stderr.strip() or f"Code execution failed with exit code {process.returncode}")
+
+        logger.info(f"Code execution completed, output length: {len(stdout)}")
+        return stdout if stdout else "Code executed successfully (no output)"
+    finally:
+        if process is not None and process.returncode is None:
+            _kill_process_group(process)
+        if workdir is not None:
+            shutil.rmtree(workdir, ignore_errors=True)
 
 # Storage API Endpoints
 @app.post("/api/storage/artifacts", response_model=ArtifactResponse)
@@ -1720,7 +1513,7 @@ async def delete_artifact(project_id: str, version: str, execution_id: str, file
     try:
         success = await storage_service.delete_artifact(project_id, version, execution_id, file_type)
         if success:
-            logger.info(f"Artifact deleted successfully")
+            logger.info("Artifact deleted successfully")
             return {"message": "Artifact deleted successfully"}
         else:
             raise HTTPException(status_code=500, detail="Failed to delete artifact")
