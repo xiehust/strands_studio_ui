@@ -6,9 +6,9 @@
  *
  * Claude Sonnet 5 / 4.6 / Opus 4.8 ids verified against
  * `aws bedrock list-inference-profiles` (us-west-2) on 2026-07-10.
- * xai.grok-4.3 and openai.gpt-5.5 were not visible in this account's
- * listings on that date — kept as requested; availability may be
- * account/region dependent.
+ * xai.grok-4.3 / openai.gpt-5.5 / openai.gpt-5.4 are available in
+ * us-east-1 (per user confirmation; not visible in this account's
+ * listings — likely requires model access enablement).
  */
 
 export const DEFAULT_MODEL_ID = 'global.anthropic.claude-sonnet-4-6';
@@ -56,11 +56,15 @@ export const BEDROCK_MODELS: BedrockModelOption[] = [
   },
   {
     model_id: 'xai.grok-4.3',
-    model_name: 'Grok 4.3 (xAI)',
+    model_name: 'Grok 4.3 (xAI, us-east-1)',
   },
   {
     model_id: 'openai.gpt-5.5',
-    model_name: 'GPT-5.5 (OpenAI)',
+    model_name: 'GPT-5.5 (OpenAI, us-east-1)',
+  },
+  {
+    model_id: 'openai.gpt-5.4',
+    model_name: 'GPT-5.4 (OpenAI, us-east-1)',
   },
   {
     model_id: 'openai.gpt-oss-120b-1:0',
