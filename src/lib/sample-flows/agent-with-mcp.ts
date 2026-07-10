@@ -1,0 +1,80 @@
+import type { SampleFlow } from './types';
+
+export const agentWithMcp: SampleFlow = {
+  id: 'agent-with-mcp',
+  name: 'Agent with MCP Server',
+  description:
+    'An agent connected to an external MCP server over streamable HTTP. Point the MCP node URL at your own server (default: http://localhost:8811/mcp) before running.',
+  level: 'basic',
+  graphMode: false,
+  nodes: [
+    {
+      id: 'input-1003',
+      type: 'input',
+      position: { x: 40, y: 100 },
+      data: {
+        label: 'User Input',
+        inputType: 'user-prompt',
+      },
+    },
+    {
+      id: 'agent-2003',
+      type: 'agent',
+      position: { x: 360, y: 80 },
+      data: {
+        label: 'Docs Agent',
+        modelProvider: 'AWS Bedrock',
+        modelId: 'global.anthropic.claude-sonnet-4-6',
+        modelName: 'Claude Sonnet 4.6',
+        systemPrompt: 'You are a documentation assistant. Use the available MCP tools to search and fetch documentation before answering.',
+        temperature: 0.7,
+        maxTokens: 4000,
+        streaming: false,
+      },
+    },
+    {
+      id: 'mcp-6003',
+      type: 'mcp-tool',
+      position: { x: 40, y: 320 },
+      data: {
+        label: 'Docs MCP Server',
+        serverName: 'docs_server',
+        transportType: 'streamable_http',
+        url: 'http://localhost:8811/mcp',
+        timeout: 30,
+        description: 'Documentation search MCP server',
+      },
+    },
+    {
+      id: 'output-3003',
+      type: 'output',
+      position: { x: 720, y: 100 },
+      data: {
+        label: 'Output',
+      },
+    },
+  ],
+  edges: [
+    {
+      id: 'e-1003-2003',
+      source: 'input-1003',
+      target: 'agent-2003',
+      sourceHandle: 'output',
+      targetHandle: 'user-input',
+    },
+    {
+      id: 'e-6003-2003',
+      source: 'mcp-6003',
+      target: 'agent-2003',
+      sourceHandle: 'mcp-tools',
+      targetHandle: 'tools',
+    },
+    {
+      id: 'e-2003-3003',
+      source: 'agent-2003',
+      target: 'output-3003',
+      sourceHandle: 'output',
+      targetHandle: 'input',
+    },
+  ],
+};

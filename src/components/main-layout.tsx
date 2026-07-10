@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { type Node, type Edge } from '@xyflow/react';
-import { Code, Eye, EyeOff, FolderOpen, Terminal, Save, Plus, Download, Upload, Rocket, Play, GithubIcon, Star } from 'lucide-react';
+import { Code, Eye, EyeOff, FolderOpen, Terminal, Save, Plus, Download, Upload, Rocket, Play, GithubIcon, Star, LayoutGrid } from 'lucide-react';
 import { FlowEditor } from './flow-editor';
 import { NodePalette } from './node-palette';
 import { PropertyPanel } from './property-panel';
@@ -9,6 +9,8 @@ import { ExecutionPanel } from './execution-panel';
 import { DeployPanel } from './deploy-panel';
 import { InvokePanel } from './invoke-panel';
 import { ProjectManagerComponent } from './project-manager';
+import { SampleGalleryModal } from './sample-gallery-modal';
+import { type SampleFlow } from '../lib/sample-flows';
 import { ResizablePanel } from './resizable-panel';
 import { type StrandsProject, type ProjectCodeState, type CodeState, ProjectManager } from '../lib/project-manager';
 import { generateStrandsAgentCode } from '../lib/code-generator';
@@ -122,6 +124,7 @@ export function MainLayout() {
   const [showCodePanel, setShowCodePanel] = useState(true);
   const [rightPanelMode, setRightPanelMode] = useState<'code' | 'execution' | 'deploy' | 'invoke'>('code');
   const [showProjectManager, setShowProjectManager] = useState(false);
+  const [showSampleGallery, setShowSampleGallery] = useState(false);
   const [currentProject, setCurrentProject] = useState<StrandsProject | null>(initialState.project);
   const [showNewProjectDialog, setShowNewProjectDialog] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
@@ -370,6 +373,32 @@ export function MainLayout() {
     }
   }, [nodes, edges, graphMode]);
 
+  // Load a preset sample onto the canvas (equivalent to starting a fresh,
+  // unsaved canvas: template code state, no current project pointer).
+  const handleLoadSample = useCallback((sample: SampleFlow) => {
+    if (nodes.length > 0) {
+      if (!confirm('Loading a sample will replace the current canvas. Continue?')) {
+        return;
+      }
+    }
+    // Deep-copy so canvas edits never mutate the shared sample constants
+    const sampleNodes = structuredClone(sample.nodes);
+    const sampleEdges = structuredClone(sample.edges);
+    setGraphMode(sample.graphMode);
+    setNodes(sampleNodes);
+    setEdges(sampleEdges);
+    setSelectedNode(null);
+    // Reset code state to a freshly generated template for the sample flow
+    const { code, errors } = buildTemplateCode(sampleNodes, sampleEdges, sample.graphMode);
+    codeFlowBaselineRef.current = { nodes: sampleNodes, edges: sampleEdges, graphMode: sample.graphMode };
+    setCodeState({ code, source: 'template', flowStale: false });
+    setCodeErrors(errors);
+    // Detach from any open project (saved project data stays untouched)
+    setCurrentProject(null);
+    ProjectManager.clearCurrentProject();
+    setShowSampleGallery(false);
+  }, [nodes]);
+
   const handleExportCurrentProject = useCallback(() => {
     if (currentProject) {
       const jsonData = ProjectManager.exportProject(currentProject);
@@ -505,6 +534,15 @@ export function MainLayout() {
             Open
           </button>
 
+          <button
+            onClick={() => setShowSampleGallery(true)}
+            className="lp-btn sm"
+            title="Browse preset sample flows"
+          >
+            <LayoutGrid className="w-3 h-3" />
+            Samples
+          </button>
+
           <div className="ml-auto flex items-center gap-2 flex-wrap">
             <button
               onClick={() => {
@@ -638,6 +676,14 @@ export function MainLayout() {
             onClose={() => setShowProjectManager(false)}
           />
         </div>
+      )}
+
+      {/* Sample Gallery Modal */}
+      {showSampleGallery && (
+        <SampleGalleryModal
+          onClose={() => setShowSampleGallery(false)}
+          onLoadSample={handleLoadSample}
+        />
       )}
 
       {/* New Project Dialog */}
