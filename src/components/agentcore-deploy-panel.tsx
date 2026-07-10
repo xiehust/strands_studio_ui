@@ -4,6 +4,7 @@ import { type Node, type Edge } from '@xyflow/react';
 import { Rocket, Download, Copy, CheckCircle, AlertCircle, Edit3, Save, RotateCcw, History, ChevronDown, ChevronUp, Trash2, Plus, X, Eye, EyeOff } from 'lucide-react';
 import { generateStrandsAgentCode } from '../lib/code-generator';
 import { apiClient, type DeploymentHistoryItem } from '../lib/api-client';
+import { defineLaunchpadMonacoTheme, LAUNCHPAD_MONACO_THEME } from '../lib/monaco-theme';
 
 // Utility function to extract API key references from generated code
 function extractApiKeysFromCode(generatedCode: string): Record<string, string> {
@@ -920,42 +921,27 @@ async def entry(payload):
   return (
     <div className={`flex flex-col h-full ${className}`}>
       {/* AgentCore Panel Header */}
-      <div className="flex items-center justify-between p-4 border-b border-gray-200">
-        <div className="flex items-center">
-          <Rocket className="w-4 h-4 text-purple-600 mr-2" />
-          <h3 className="text-lg font-semibold text-gray-900">Deploy to AgentCore</h3>
-        </div>
-        <div className="flex space-x-2">
-          {/* Tab Buttons */}
-          <button
-            onClick={() => setActiveTab('configuration')}
-            className={`px-3 py-1 text-sm rounded transition-colors ${
-              activeTab === 'configuration'
-                ? 'bg-purple-100 text-purple-700'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            Config
-          </button>
-          <button
-            onClick={() => setActiveTab('code-preview')}
-            className={`px-3 py-1 text-sm rounded transition-colors ${
-              activeTab === 'code-preview'
-                ? 'bg-purple-100 text-purple-700'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            Code
-          </button>
-        </div>
+      <div className="flex items-center border-b border-line px-2">
+        <button
+          onClick={() => setActiveTab('configuration')}
+          className={`lp-tab ${activeTab === 'configuration' ? 'active' : ''}`}
+        >
+          Configure
+        </button>
+        <button
+          onClick={() => setActiveTab('code-preview')}
+          className={`lp-tab ${activeTab === 'code-preview' ? 'active' : ''}`}
+        >
+          Code
+        </button>
       </div>
 
       {/* Errors */}
       {errors.length > 0 && (
-        <div className="p-4 bg-red-50 border-b border-red-200">
+        <div className="p-4 bg-crit/10 border-b border-crit/40">
           <div className="flex items-center mb-2">
-            <AlertCircle className="w-4 h-4 text-red-500 mr-2" />
-            <span className="text-sm font-medium text-red-800">Code Generation Errors</span>
+            <AlertCircle className="w-4 h-4 text-crit mr-2" />
+            <span className="font-mono text-[10px] uppercase tracking-wider text-crit">Code Generation Errors</span>
           </div>
           <ul className="text-sm text-red-700">
             {errors.map((error, index) => (
@@ -973,33 +959,31 @@ async def entry(payload):
             <div className="space-y-6">
               {/* Configuration Fields */}
               <div className="space-y-4">
-                <label className="text-sm font-medium text-gray-900">Configuration</label>
+                <label className="lp-label !text-amber">Configuration</label>
 
                 <div className="space-y-3">
                   <div>
-                    <label htmlFor="agentName" className="text-sm text-gray-700">Agent Name *</label>
+                    <label htmlFor="agentName" className="lp-label" style={{marginBottom:4}}>Agent Name *</label>
                     <input
                       id="agentName"
                       type="text"
                       value={deploymentState.config.agentName}
                       onChange={(e) => handleConfigChange('agentName', e.target.value)}
                       placeholder="my-agent-name"
-                      className={`w-full px-3 py-2 border rounded-md text-sm ${
-                        formErrors.agentName ? 'border-red-500' : 'border-gray-300'
-                      } focus:outline-none focus:ring-2 focus:ring-purple-500`}
+                      className={`lp-input text-sm ${formErrors.agentName ? '!border-crit' : ''}`}
                     />
                     {formErrors.agentName && (
-                      <p className="text-xs text-red-600 mt-1">{formErrors.agentName}</p>
+                      <p className="font-mono text-[10px] text-crit mt-1">{formErrors.agentName}</p>
                     )}
                   </div>
 
                   <div>
-                    <label htmlFor="region" className="text-sm text-gray-700">Region</label>
+                    <label htmlFor="region" className="lp-label" style={{marginBottom:4}}>Region</label>
                     <select
                       id="region"
                       value={deploymentState.config.region}
                       onChange={(e) => handleConfigChange('region', e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      className="lp-input text-sm"
                     >
                       <option value="us-east-1">us-east-1 (N. Virginia)</option>
                       <option value="us-west-2">us-west-2 (Oregon)</option>
@@ -1010,46 +994,44 @@ async def entry(payload):
 
                   {/* Execute Role - Always required for AgentCore */}
                   <div>
-                    <label htmlFor="executeRole" className="text-sm text-gray-700">Execute Role *</label>
+                    <label htmlFor="executeRole" className="lp-label" style={{marginBottom:4}}>Execute Role *</label>
                     <input
                       id="executeRole"
                       type="text"
                       value={deploymentState.config.executeRole || ''}
                       onChange={(e) => handleConfigChange('executeRole', e.target.value)}
                       placeholder="AmazonBedrockAgentCoreRuntimeDefaultServiceRole"
-                      className={`w-full px-3 py-2 border rounded-md text-sm ${
-                        formErrors.executeRole ? 'border-red-500' : 'border-gray-300'
-                      } focus:outline-none focus:ring-2 focus:ring-purple-500`}
+                      className={`lp-input text-sm ${formErrors.executeRole ? '!border-crit' : ''}`}
                     />
                     {formErrors.executeRole && (
-                      <p className="text-xs text-red-600 mt-1">{formErrors.executeRole}</p>
+                      <p className="font-mono text-[10px] text-crit mt-1">{formErrors.executeRole}</p>
                     )}
-                    <p className="text-xs text-gray-500 mt-1">
+                    <p className="font-mono text-[10px] text-ink-3 mt-1">
                       IAM role name that AgentCore will use to execute your agent
                     </p>
                   </div>
 
                   <div>
-                    <label htmlFor="projectId" className="text-sm text-gray-700">Project ID (Optional)</label>
+                    <label htmlFor="projectId" className="lp-label" style={{marginBottom:4}}>Project ID (Optional)</label>
                     <input
                       id="projectId"
                       type="text"
                       value={deploymentState.config.projectId || ''}
                       onChange={(e) => handleConfigChange('projectId', e.target.value)}
                       placeholder="my-project-id"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      className="lp-input text-sm"
                     />
                   </div>
 
                   <div>
-                    <label htmlFor="version" className="text-sm text-gray-700">Version</label>
+                    <label htmlFor="version" className="lp-label" style={{marginBottom:4}}>Version</label>
                     <input
                       id="version"
                       type="text"
                       value={deploymentState.config.version || ''}
                       onChange={(e) => handleConfigChange('version', e.target.value)}
                       placeholder="v1.0.0"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      className="lp-input text-sm"
                     />
                   </div>
                 </div>
@@ -1058,12 +1040,12 @@ async def entry(payload):
               {/* API Keys */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <label className="text-sm font-medium text-gray-900">API Keys (Optional)</label>
+                  <label className="lp-label !text-amber !mb-0">API Keys (Optional)</label>
                   <button
                     onClick={addApiKey}
-                    className="flex items-center px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
+                    className="lp-btn sm"
                   >
-                    <Plus className="w-3 h-3 mr-1" />
+                    <Plus className="w-3 h-3" />
                     Add Key
                   </button>
                 </div>
@@ -1074,7 +1056,7 @@ async def entry(payload):
                       placeholder="Key name (e.g., ANTHROPIC_API_KEY)"
                       value={apiKey.key}
                       onChange={(e) => updateApiKey(index, 'key', e.target.value)}
-                      className="flex-1 px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-purple-500"
+                      className="lp-input flex-1 !py-1.5 text-sm"
                     />
                     <div className="relative flex-1">
                       <input
@@ -1082,19 +1064,19 @@ async def entry(payload):
                         placeholder="API key value"
                         value={apiKey.value}
                         onChange={(e) => updateApiKey(index, 'value', e.target.value)}
-                        className="w-full px-2 py-1 pr-8 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-purple-500"
+                        className="lp-input w-full !py-1.5 pr-8 text-sm"
                       />
                       <button
                         type="button"
                         onClick={() => toggleApiKeyVisibility(index)}
-                        className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                        className="absolute right-2 top-1/2 transform -translate-y-1/2 text-ink-3 hover:text-ink"
                       >
                         {apiKey.visible ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
                       </button>
                     </div>
                     <button
                       onClick={() => removeApiKey(index)}
-                      className="p-1 text-gray-400 hover:text-red-600"
+                      className="p-1 text-ink-3 hover:text-crit"
                     >
                       <X className="w-3 h-3" />
                     </button>
@@ -1103,56 +1085,53 @@ async def entry(payload):
               </div>
 
               {/* Deploy Actions */}
-              <div className="space-y-3 pt-4 border-t border-gray-200">
+              <div className="space-y-3 pt-4 border-t border-line">
                 {/* Deploy Button */}
                 <button
                   onClick={handleDeploy}
                   disabled={!canDeploy()}
-                  className="w-full px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-sm font-medium"
+                  className="lp-btn primary w-full justify-center"
                 >
-                  {deploymentState.isDeploying ? 'Deploying...' : 'Deploy'}
+                  {deploymentState.isDeploying ? '◐ DEPLOYING…' : '▲ LAUNCH AGENT'}
                 </button>
 
-                {/* Deployment Steps Display */}
+                {/* Deployment Steps Display — launch sequence */}
                 {deploymentSteps.length > 0 && (
-                  <div className="mt-4 p-3 bg-black text-green-400 rounded text-xs font-mono">
-                    <div className="space-y-1">
+                  <div className="mt-4">
+                    <div className="lp-label">Launch Sequence</div>
+                    <div className="lp-steps">
                       {deploymentSteps.map((step, index) => (
-                        <div key={index} className="flex items-center space-x-2">
-                          <span className={`inline-block w-2 h-2 rounded-full ${
-                            step.status === 'completed' ? 'bg-green-400' :
-                            step.status === 'running' ? 'bg-yellow-400 animate-pulse' :
-                            step.status === 'error' ? 'bg-red-400' :
-                            'bg-gray-600'
-                          }`}></span>
-                          <span className={`${
-                            step.status === 'error' ? 'text-red-400' :
-                            step.status === 'completed' ? 'text-green-400' :
-                            step.status === 'running' ? 'text-yellow-400' :
-                            'text-gray-400'
-                          }`}>
-                            {step.step}
-                            {step.status === 'running' && ' ...'}
-                            {step.status === 'completed' && ' ✓'}
-                            {step.status === 'error' && ' ✗'}
+                        <div
+                          key={index}
+                          className={`lp-step ${
+                            step.status === 'completed' ? 'done' :
+                            step.status === 'running' ? 'now' :
+                            step.status === 'error' ? 'error' : ''
+                          }`}
+                        >
+                          <span className="n">
+                            {step.status === 'completed' ? '✓' :
+                             step.status === 'error' ? '✕' :
+                             step.status === 'running' ? '●' :
+                             String(index + 1).padStart(2, '0')}
                           </span>
+                          <b>{step.step}</b>
+                          {step.status === 'running' && <span className="msg">running…</span>}
+                          {step.status === 'error' && step.message && (
+                            <span className="msg !text-crit">{step.message}</span>
+                          )}
                         </div>
                       ))}
-                      {deploymentSteps.some(step => step.status === 'error' && step.message) && (
-                        <div className="mt-2 text-red-400 text-xs">
-                          Error: {deploymentSteps.find(step => step.status === 'error' && step.message)?.message}
-                        </div>
-                      )}
                     </div>
                   </div>
                 )}
               </div>
 
               {/* Deployment History */}
-              <div className="pt-4 border-t border-gray-200">
+              <div className="pt-4 border-t border-line">
                   <button
                     onClick={() => setShowHistory(!showHistory)}
-                    className="flex items-center justify-between w-full text-left text-sm font-medium text-gray-700 hover:text-gray-900 transition-colors"
+                    className="flex items-center justify-between w-full text-left font-mono text-[10px] uppercase tracking-[0.16em] text-ink-2 hover:text-ink transition-colors"
                   >
                     <div className="flex items-center">
                       <History className="w-4 h-4 mr-2" />
@@ -1162,51 +1141,51 @@ async def entry(payload):
                   </button>
 
                   {showHistory && (
-                    <div className="border-t border-gray-200">
-                      <div className="p-3 bg-gray-50 flex items-center justify-between">
-                        <div className="flex items-center space-x-2">
-                          <Rocket className="w-4 h-4 text-gray-600" />
-                          <h4 className="text-sm font-medium text-gray-700">Stored Deployments</h4>
+                    <div className="border-t border-line mt-2">
+                      <div className="px-3 py-2 bg-panel2 flex items-center justify-between border-b border-line">
+                        <div className="flex items-center gap-2">
+                          <Rocket className="w-3.5 h-3.5 text-ink-3" />
+                          <h4 className="lp-label !mb-0">Stored Deployments</h4>
                         </div>
                         <button
                           onClick={loadDeploymentHistory}
-                          className="text-xs text-blue-600 hover:text-blue-800"
+                          className="font-mono text-[10px] uppercase tracking-wider text-amber hover:text-orange-400"
                         >
                           Refresh
                         </button>
                       </div>
                       <div className="max-h-40 overflow-auto">
                         {deploymentHistory.length === 0 ? (
-                          <div className="p-4 text-center text-xs text-gray-500">
+                          <div className="p-4 text-center font-mono text-[10px] text-ink-3">
                             No stored deployments available
                           </div>
                         ) : (
                           deploymentHistory.slice(0, 10).map((entry) => (
                             <div
                               key={entry.deployment_id}
-                              className={`p-3 border-b border-gray-100 hover:bg-gray-50 cursor-pointer ${
-                                expandedHistoryId === entry.deployment_id ? 'bg-blue-50' : ''
+                              className={`p-3 border-b border-grid hover:bg-white/[0.02] cursor-pointer ${
+                                expandedHistoryId === entry.deployment_id ? 'bg-amber-soft' : ''
                               }`}
                               onClick={() => toggleHistoryExpansion(entry.deployment_id)}
                               title={`Deployment ID: ${entry.deployment_id || 'Unknown'}`}
                             >
                               <div className="flex items-center justify-between text-xs">
-                                <div className="flex items-center space-x-2">
-                                  <Rocket className="w-3 h-3 text-gray-500" />
-                                  <span className="text-gray-700">
-                                    {entry.deployment_id ? entry.deployment_id.substring(0, 12) + '...' : 'Unknown ID'}
+                                <div className="flex items-center gap-2">
+                                  <Rocket className="w-3 h-3 text-ink-3" />
+                                  <span className="font-mono text-[10.5px] text-ink-2">
+                                    {entry.deployment_id ? entry.deployment_id.substring(0, 12) + '…' : 'Unknown ID'}
                                   </span>
-                                  <span className={`text-xs px-1 rounded ${
-                                    entry.success ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                                  }`}>
-                                    {entry.success ? '✓' : '✗'}
-                                  </span>
-                                  <span className="text-xs bg-gray-100 px-1 rounded text-gray-600">
+                                  {entry.success ? (
+                                    <span className="lp-chip good"><i>●</i>OK</span>
+                                  ) : (
+                                    <span className="lp-chip crit"><i>✕</i>ERR</span>
+                                  )}
+                                  <span className="lp-chip amber"><i>◇</i>
                                     {entry.deployment_target ? entry.deployment_target.toUpperCase() : 'AGENTCORE'}
                                   </span>
                                 </div>
-                                <div className="flex items-center space-x-2">
-                                  <span className="text-gray-500">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-mono text-[10px] text-ink-3">
                                     {entry.created_at ? new Date(entry.created_at).toLocaleTimeString() : 'Unknown time'}
                                   </span>
                                   <button
@@ -1214,38 +1193,38 @@ async def entry(payload):
                                       e.stopPropagation();
                                       deleteFromHistory(entry.deployment_id);
                                     }}
-                                    className="text-gray-400 hover:text-red-600 transition-colors"
+                                    className="text-ink-3 hover:text-crit transition-colors"
                                     title="Delete deployment"
                                   >
                                     <Trash2 className="w-3 h-3" />
                                   </button>
                                 </div>
                               </div>
-                              <div className="mt-1 text-xs text-gray-600">
-                                Agent: {entry.agent_name || 'Unknown'} • Region: {entry.region || 'Unknown'}
+                              <div className="mt-1 font-mono text-[9.5px] text-ink-3">
+                                {entry.agent_name || 'Unknown'} · {entry.region || 'Unknown'}
                                 {!entry.success && entry.error_message && (
-                                  <span className="text-red-600 ml-2">• Error: {entry.error_message.substring(0, 50)}...</span>
+                                  <span className="text-crit ml-2">· {entry.error_message.substring(0, 50)}…</span>
                                 )}
                               </div>
 
                               {/* Expanded details */}
                               {expandedHistoryId === entry.deployment_id && (
-                                <div className="mt-2 pt-2 border-t border-gray-200 space-y-2">
+                                <div className="mt-2 pt-2 border-t border-grid space-y-2">
                                   {/* Deployment Results */}
                                   {entry.deployment_result?.agent_arn && (
-                                    <div className="text-xs text-gray-600">
-                                      <p><strong>Agent ARN:</strong> <span className="font-mono">{entry.deployment_result.agent_arn}</span></p>
+                                    <div className="text-xs text-ink-2">
+                                      <p><strong className="font-mono text-[9.5px] text-ink-3 uppercase tracking-wider mr-1">ARN</strong> <span className="lp-arn !max-w-full">{entry.deployment_result.agent_arn}</span></p>
                                       {entry.deployment_result.agent_endpoint && (
-                                        <p><strong>Endpoint:</strong> <span className="font-mono">{entry.deployment_result.agent_endpoint}</span></p>
+                                        <p><strong className="font-mono text-[9.5px] text-ink-3 uppercase tracking-wider mr-1">ENDPOINT</strong> <span className="lp-arn !max-w-full">{entry.deployment_result.agent_endpoint}</span></p>
                                       )}
                                     </div>
                                   )}
                                   {/* Deployment Logs Preview */}
                                   {entry.deployment_logs && (
                                     <div className="text-xs">
-                                      <p className="font-medium text-gray-700 mb-1">Logs:</p>
-                                      <div className="bg-gray-100 p-2 rounded font-mono max-h-32 overflow-y-auto">
-                                        <pre className="whitespace-pre-wrap text-xs">{entry.deployment_logs}</pre>
+                                      <p className="lp-label !mb-1">Logs</p>
+                                      <div className="lp-code max-h-32 overflow-y-auto !p-2">
+                                        <pre className="whitespace-pre-wrap text-[10px]">{entry.deployment_logs}</pre>
                                       </div>
                                     </div>
                                   )}
@@ -1266,13 +1245,13 @@ async def entry(payload):
                     <div className="space-y-3">
                       {deploymentState.deploymentResult.success ? (
                     <>
-                      <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-                        <div className="text-sm text-green-800">
+                      <div className="p-3 bg-good/10 border border-good/40">
+                        <div className="text-sm text-green-700">
                           <div className="flex items-center justify-between mb-2">
-                            <p className="font-medium">✅ Deployment successful!</p>
+                            <span className="lp-chip good"><i>●</i>DEPLOYMENT SUCCESSFUL</span>
                             <button
                               onClick={() => setShowDeploymentLogs(!showDeploymentLogs)}
-                              className="text-xs px-2 py-1 bg-green-100 hover:bg-green-200 rounded border border-green-300 transition-colors"
+                              className="lp-btn sm"
                             >
                               {showDeploymentLogs ? 'Hide Logs' : 'View Logs'}
                             </button>
@@ -1280,13 +1259,13 @@ async def entry(payload):
 
                           {/* AgentCore specific results */}
                           {deploymentState.deploymentResult.agent_arn && (
-                            <div className="space-y-1 text-xs">
-                              <p><strong>Agent ARN:</strong> {deploymentState.deploymentResult.agent_arn}</p>
+                            <div className="space-y-1 text-xs text-ink-2">
+                              <p><strong className="font-mono text-[9.5px] text-ink-3 uppercase tracking-wider mr-1">ARN</strong> <span className="lp-arn !max-w-full">{deploymentState.deploymentResult.agent_arn}</span></p>
                               {deploymentState.deploymentResult.agent_endpoint && (
-                                <p><strong>Endpoint:</strong> {deploymentState.deploymentResult.agent_endpoint}</p>
+                                <p><strong className="font-mono text-[9.5px] text-ink-3 uppercase tracking-wider mr-1">ENDPOINT</strong> <span className="lp-arn !max-w-full">{deploymentState.deploymentResult.agent_endpoint}</span></p>
                               )}
                               {deploymentState.deploymentResult.ecr_uri && (
-                                <p><strong>ECR URI:</strong> {deploymentState.deploymentResult.ecr_uri}</p>
+                                <p><strong className="font-mono text-[9.5px] text-ink-3 uppercase tracking-wider mr-1">ECR</strong> <span className="lp-arn !max-w-full">{deploymentState.deploymentResult.ecr_uri}</span></p>
                               )}
                             </div>
                           )}
@@ -1294,7 +1273,7 @@ async def entry(payload):
                           {/* Generic URL fallback */}
                           {deploymentState.deploymentResult.url && !deploymentState.deploymentResult.agent_arn && (
                             <p className="text-xs">
-                              <a href={deploymentState.deploymentResult.url} target="_blank" rel="noopener noreferrer" className="underline">
+                              <a href={deploymentState.deploymentResult.url} target="_blank" rel="noopener noreferrer" className="underline text-amber">
                                 View deployment
                               </a>
                             </p>
@@ -1304,9 +1283,9 @@ async def entry(payload):
 
                       {/* Deployment Logs */}
                       {showDeploymentLogs && (
-                        <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                        <div className="lp-panel p-3">
                           <div className="flex items-center justify-between mb-2">
-                            <h4 className="text-sm font-medium text-gray-900">Deployment Logs</h4>
+                            <h4 className="lp-label !mb-0">Deployment Logs</h4>
                             <button
                               onClick={() => {
                                 const logsText = JSON.stringify(deploymentState.deploymentResult, null, 2);
@@ -1314,25 +1293,25 @@ async def entry(payload):
                                   // Could add a toast notification here
                                 });
                               }}
-                              className="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded border border-gray-300 transition-colors"
+                              className="lp-btn sm"
                             >
                               Copy Logs
                             </button>
                           </div>
-                          <div className="bg-black text-green-400 p-3 rounded text-xs font-mono overflow-auto max-h-64">
+                          <div className="lp-code overflow-auto max-h-64">
                             <pre>{JSON.stringify(deploymentState.deploymentResult, null, 2)}</pre>
                           </div>
                         </div>
                       )}
                     </>
                   ) : (
-                    <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-                      <div className="text-sm text-red-800">
+                    <div className="p-3 bg-crit/10 border border-crit/40">
+                      <div className="text-sm text-red-700">
                         <div className="flex items-center justify-between mb-2">
-                          <p className="font-medium">❌ Deployment failed!</p>
+                          <span className="lp-chip crit"><i>✕</i>DEPLOYMENT FAILED</span>
                           <button
                             onClick={() => setShowDeploymentLogs(!showDeploymentLogs)}
-                            className="text-xs px-2 py-1 bg-red-100 hover:bg-red-200 rounded border border-red-300 transition-colors"
+                            className="lp-btn sm"
                           >
                             {showDeploymentLogs ? 'Hide Details' : 'View Details'}
                           </button>
@@ -1344,7 +1323,7 @@ async def entry(payload):
 
                         {/* Failure Details */}
                         {showDeploymentLogs && (
-                          <div className="mt-3 p-3 bg-red-900 text-red-100 rounded text-xs font-mono overflow-auto max-h-64">
+                          <div className="mt-3 lp-code !text-red-700 !border-crit/40 overflow-auto max-h-64">
                             <pre>{JSON.stringify(deploymentState.deploymentResult, null, 2)}</pre>
                           </div>
                         )}
@@ -1356,8 +1335,8 @@ async def entry(payload):
                 } catch (renderError) {
                   console.error('Error rendering deployment result:', renderError);
                   return (
-                    <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-                      <p className="text-sm text-red-800">Error displaying deployment result. Check console for details.</p>
+                    <div className="p-3 bg-crit/10 border border-crit/40">
+                      <p className="text-sm text-red-700">Error displaying deployment result. Check console for details.</p>
                     </div>
                   );
                 }
@@ -1365,8 +1344,8 @@ async def entry(payload):
 
               {/* Error */}
               {deploymentState.error && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-                  <p className="text-sm text-red-800">❌ {deploymentState.error}</p>
+                <div className="p-3 bg-crit/10 border border-crit/40">
+                  <p className="text-sm text-red-700">✕ {deploymentState.error}</p>
                 </div>
               )}
             </div>
@@ -1375,13 +1354,11 @@ async def entry(payload):
           /* Code Preview */
           <div className="flex flex-col h-full">
             {/* Code Preview Header */}
-            <div className="flex items-center justify-between p-4 border-b border-gray-200">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-line">
               <div className="flex items-center gap-2">
-                <span className="font-medium text-gray-900">Deploy Code</span>
+                <span className="lp-label !mb-0">Deploy Code</span>
                 {isEditing && (
-                  <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded">
-                    Editing
-                  </span>
+                  <span className="lp-chip warn"><i>◍</i>EDITING</span>
                 )}
               </div>
               <div className="flex gap-2">
@@ -1389,16 +1366,16 @@ async def entry(payload):
                   <>
                     <button
                       onClick={handleSaveEdit}
-                      className="flex items-center px-3 py-1 text-sm bg-green-500 text-white rounded hover:bg-green-600"
+                      className="lp-btn sm primary"
                     >
-                      <Save className="h-4 w-4 mr-2" />
+                      <Save className="h-3 w-3" />
                       Save
                     </button>
                     <button
                       onClick={handleCancelEdit}
-                      className="flex items-center px-3 py-1 text-sm bg-gray-500 text-white rounded hover:bg-gray-600"
+                      className="lp-btn sm"
                     >
-                      <RotateCcw className="h-4 w-4 mr-2" />
+                      <RotateCcw className="h-3 w-3" />
                       Cancel
                     </button>
                   </>
@@ -1406,30 +1383,30 @@ async def entry(payload):
                   <>
                     <button
                       onClick={handleEditCode}
-                      className="flex items-center px-3 py-1 text-sm bg-orange-500 text-white rounded hover:bg-orange-600"
+                      className="lp-btn sm"
                     >
-                      <Edit3 className="h-4 w-4 mr-2" />
+                      <Edit3 className="h-3 w-3" />
                       Edit
                     </button>
                     <button
                       onClick={handleDownload}
-                      className="flex items-center px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600"
+                      className="lp-btn sm"
                     >
-                      <Download className="h-4 w-4 mr-2" />
+                      <Download className="h-3 w-3" />
                       Download
                     </button>
                     <button
                       onClick={handleCopyToClipboard}
-                      className="flex items-center px-3 py-1 text-sm bg-gray-500 text-white rounded hover:bg-gray-600"
+                      className="lp-btn sm"
                     >
                       {copied ? (
                         <>
-                          <CheckCircle className="h-4 w-4 mr-2 text-green-400" />
+                          <CheckCircle className="h-3 w-3 text-good" />
                           Copied!
                         </>
                       ) : (
                         <>
-                          <Copy className="h-4 w-4 mr-2" />
+                          <Copy className="h-3 w-3" />
                           Copy
                         </>
                       )}
@@ -1444,7 +1421,8 @@ async def entry(payload):
               <Editor
                 height="100%"
                 language="python"
-                theme="vs-light"
+                theme={LAUNCHPAD_MONACO_THEME}
+                beforeMount={defineLaunchpadMonacoTheme}
                 value={isEditing ? editableCode : generatedCode}
                 onChange={isEditing ? handleCodeChange : undefined}
                 options={{
@@ -1452,6 +1430,7 @@ async def entry(payload):
                   minimap: { enabled: false },
                   scrollBeyondLastLine: false,
                   fontSize: 12,
+                  fontFamily: '"IBM Plex Mono", ui-monospace, monospace',
                   lineNumbers: 'on',
                   roundedSelection: false,
                   automaticLayout: true,
@@ -1466,9 +1445,9 @@ async def entry(payload):
       </div>
 
       {/* Footer Info */}
-      <div className="p-3 bg-gray-50 border-t border-gray-200 text-xs text-gray-600">
+      <div className="px-3 py-2 border-t border-line font-mono text-[9.5px] text-ink-3 tracking-wider uppercase">
         <div className="flex justify-between">
-          <span>Deploy • AWS AgentCore</span>
+          <span>Deploy · AWS AgentCore</span>
           <span>{generatedCode.split('\n').length} lines</span>
         </div>
       </div>

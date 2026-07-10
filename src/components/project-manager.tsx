@@ -60,27 +60,29 @@ export function ProjectManagerComponent({
 
 
   return (
-    <div className={`bg-white border border-gray-300 rounded-lg shadow-lg ${className}`}>
+    <div className={`lp-panel brk lp-rise ${className}`}>
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-gray-200">
-        <h3 className="text-lg font-semibold text-gray-900">Open Project</h3>
+      <div className="lp-phead">
+        <FolderOpen className="w-4 h-4 text-ink-3" />
+        <h3 className="lp-ptitle">Open Project</h3>
+        <span className="lp-sub">local registry</span>
         <button
           onClick={onClose}
-          className="p-1 text-gray-400 hover:text-gray-600 rounded"
+          className="ml-auto p-1 text-ink-3 hover:text-ink transition-colors"
         >
           <X className="w-4 h-4" />
         </button>
       </div>
 
       {/* Current Project Status */}
-      <div className="p-4 bg-gray-50 border-b border-gray-200">
-        <div className="text-sm text-gray-600 mb-2">Current Project</div>
-        <div className="text-md font-medium text-gray-900">
+      <div className="p-4 bg-panel2 border-b border-line">
+        <div className="lp-label">Current Project</div>
+        <div className="text-sm font-semibold text-ink">
           {currentProject ? currentProject.name : 'Untitled Project'}
         </div>
         {currentProject && (
-          <div className="text-xs text-gray-500 mt-1">
-            Last updated: {new Date(currentProject.updatedAt).toLocaleDateString()}
+          <div className="font-mono text-[10px] text-ink-3 mt-1">
+            UPDATED {new Date(currentProject.updatedAt).toLocaleDateString()}
           </div>
         )}
       </div>
@@ -89,45 +91,45 @@ export function ProjectManagerComponent({
       {/* Projects List */}
       <div className="max-h-64 overflow-y-auto">
         {projects.length === 0 ? (
-          <div className="p-4 text-center text-gray-500">
+          <div className="p-4 text-center font-mono text-[11px] text-ink-3">
             No saved projects yet
           </div>
         ) : (
-          <div className="divide-y divide-gray-200">
+          <div className="divide-y divide-grid">
             {projects.map((project) => (
-              <div key={project.id} className="p-3 hover:bg-gray-50">
+              <div key={project.id} className="p-3 hover:bg-white/[0.02]">
                 <div className="flex items-center justify-between">
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-gray-900 truncate">
+                    <div className="text-sm font-medium text-ink truncate">
                       {project.name}
                     </div>
                     {project.description && (
-                      <div className="text-xs text-gray-500 mt-1 truncate">
+                      <div className="text-xs text-ink-3 mt-1 truncate">
                         {project.description}
                       </div>
                     )}
-                    <div className="text-xs text-gray-400 mt-1">
-                      {project.nodes.length} nodes • {project.edges.length} connections
+                    <div className="font-mono text-[10px] text-ink-3 mt-1">
+                      {project.nodes.length} nodes · {project.edges.length} connections
                     </div>
                   </div>
                   <div className="flex items-center space-x-1 ml-2">
                     <button
                       onClick={() => handleLoadProject(project)}
-                      className="p-1 text-blue-500 hover:text-blue-700"
+                      className="p-1 text-amber hover:text-orange-400"
                       title="Load project"
                     >
                       <FolderOpen className="w-3 h-3" />
                     </button>
                     <button
                       onClick={() => handleExportProject(project)}
-                      className="p-1 text-green-500 hover:text-green-700"
+                      className="p-1 text-s2 hover:text-green-400"
                       title="Export project"
                     >
                       <Download className="w-3 h-3" />
                     </button>
                     <button
                       onClick={() => handleDeleteProject(project.id)}
-                      className="p-1 text-red-500 hover:text-red-700"
+                      className="p-1 text-crit hover:text-red-400"
                       title="Delete project"
                     >
                       <Trash2 className="w-3 h-3" />

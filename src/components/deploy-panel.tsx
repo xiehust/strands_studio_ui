@@ -16,14 +16,12 @@ interface DeployPanelProps {
 
 export function DeployPanel({ nodes, edges, graphMode = false, className = '' }: DeployPanelProps) {
   return (
-    <div className={`bg-white border-l border-gray-200 flex flex-col h-full ${className}`}>
+    <div className={`bg-panel border-l border-line flex flex-col h-full ${className}`}>
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-gray-200">
-        <div className="flex items-center">
-          <Rocket className="w-4 h-4 text-purple-600 mr-2" />
-          <h3 className="text-lg font-semibold text-gray-900">Deploy Agent</h3>
-          <span className="ml-2 text-xs text-gray-500">AWS Bedrock AgentCore</span>
-        </div>
+      <div className="lp-phead">
+        <Rocket className="w-4 h-4 text-amber" />
+        <h3 className="lp-ptitle">Deploy Agent</h3>
+        <span className="lp-sub">aws bedrock agentcore</span>
       </div>
 
       {/* AgentCore Deployment Panel */}

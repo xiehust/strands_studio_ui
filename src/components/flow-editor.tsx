@@ -242,21 +242,22 @@ export function FlowEditor({
   return (
     <div className={`h-full w-full ${className} relative`} ref={reactFlowWrapper}>
       {/* Graph Mode Toggle */}
-      <div className="absolute top-4 right-4 z-10 bg-white rounded-lg shadow-lg px-4 py-2 flex items-center space-x-3 border-2 border-gray-200">
-        <Network className={`w-4 h-4 ${graphMode ? 'text-purple-600' : 'text-gray-400'}`} />
-        <span className="text-sm font-medium text-gray-700">Graph Mode</span>
+      <div className="absolute top-4 right-4 z-10 lp-panel px-3.5 py-2 flex items-center gap-3">
+        <Network className={`w-4 h-4 ${graphMode ? 'text-s5' : 'text-ink-3'}`} />
+        <span className={`font-mono text-[10px] uppercase tracking-[0.14em] ${graphMode ? 'text-s5' : 'text-ink-2'}`}>Graph Mode</span>
         <button
           onClick={() => onGraphModeChange?.(!graphMode)}
           className={`
-            relative inline-flex h-6 w-11 items-center rounded-full transition-colors
-            ${graphMode ? 'bg-purple-600' : 'bg-gray-300'}
+            relative inline-flex items-center border transition-colors
+            ${graphMode ? 'bg-s5/25 border-s5' : 'bg-panel2 border-line2'}
           `}
+          style={{ height: 18, width: 36 }}
           title="Toggle Graph Mode: Enable DAG-based multi-agent orchestration"
         >
           <span
             className={`
-              inline-block h-4 w-4 transform rounded-full bg-white transition-transform
-              ${graphMode ? 'translate-x-6' : 'translate-x-1'}
+              inline-block h-3 w-3 transform transition-transform
+              ${graphMode ? 'translate-x-[19px] bg-s5' : 'translate-x-[3px] bg-ink-3'}
             `}
           />
         </button>
@@ -281,8 +282,20 @@ export function FlowEditor({
         attributionPosition="bottom-left"
       >
         <Controls />
-        <MiniMap />
-        <Background variant={BackgroundVariant.Dots} gap={12} size={1} />
+        <MiniMap
+          pannable
+          zoomable
+          bgColor="var(--panel)"
+          maskColor="rgba(11, 14, 13, 0.75)"
+          nodeColor="var(--line-2)"
+          nodeStrokeColor="transparent"
+        />
+        <Background
+          variant={BackgroundVariant.Lines}
+          gap={28}
+          size={1}
+          color="var(--grid)"
+        />
       </ReactFlow>
     </div>
   );

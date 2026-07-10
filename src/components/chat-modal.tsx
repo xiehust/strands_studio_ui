@@ -187,28 +187,21 @@ export function ChatModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 backdrop-blur-sm flex items-center justify-center z-50">
-      <div className="bg-white bg-opacity-90 rounded-lg shadow-xl w-full max-w-4xl h-3/4 flex flex-col ">
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
+      <div className="lp-panel brk lp-rise w-full max-w-4xl h-3/4 flex flex-col m-4">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-gray-100">
-          <div className="flex items-center space-x-2 ">
-            <MessageSquare className="w-5 h-5 text-blue-600" />
-            <h2 className="text-lg font-semibold text-gray-900">Chat with Agent</h2>
-            {session && (
-              <span className="text-xs text-green-600 bg-green-100 px-2 py-1 rounded">
-                active
-              </span>
-            )}
-            {isStreamingAgent && (
-              <div className="flex items-center space-x-1 text-xs text-blue-600">
-                <Zap className="w-3 h-3" />
-                <span>Streaming</span>
-              </div>
-            )}
-          </div>
+        <div className="lp-phead">
+          <MessageSquare className="w-4 h-4 text-amber" />
+          <h2 className="lp-ptitle">Chat Playground</h2>
+          {session && (
+            <span className="lp-chip good"><i>●</i>ACTIVE</span>
+          )}
+          {isStreamingAgent && (
+            <span className="lp-chip blue"><Zap className="w-3 h-3" />STREAMING</span>
+          )}
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 transition-colors"
+            className="ml-auto text-ink-3 hover:text-ink transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
@@ -216,24 +209,24 @@ export function ChatModal({
 
         {/* Session Info */}
         {session && (
-          <div className="px-4 py-2 border-b border-gray-100 bg-gray-50">
-            <div className="flex items-center justify-between text-xs text-gray-600">
-              <span>Session: {session.session_id.substring(0, 8)}...</span>
-              <span>Project: {session.project_id} v{session.version}</span>
+          <div className="px-4 py-2 border-b border-grid bg-panel2">
+            <div className="flex items-center justify-between font-mono text-[10px] text-ink-3 tracking-wider">
+              <span>SESSION {session.session_id.substring(0, 8)}…</span>
+              <span>PROJECT {session.project_id} · v{session.version}</span>
             </div>
           </div>
         )}
 
         {/* Error Display */}
         {error && (
-          <div className="mx-4 mt-4 p-3 bg-red-50 border border-red-200 rounded-md">
+          <div className="mx-4 mt-4 p-3 bg-crit/10 border border-crit/40">
             <div className="flex items-center">
-              <AlertTriangle className="w-4 h-4 text-red-500 mr-2" />
+              <AlertTriangle className="w-4 h-4 text-crit mr-2 flex-shrink-0" />
               <div className="flex-1">
                 <p className="text-sm text-red-700">{error}</p>
                 <button
                   onClick={() => setError(null)}
-                  className="text-xs text-red-500 hover:text-red-700 mt-1"
+                  className="font-mono text-[10px] uppercase tracking-wider text-crit hover:text-red-700 mt-1"
                 >
                   Dismiss
                 </button>
@@ -243,12 +236,12 @@ export function ChatModal({
         )}
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-4">
           {isLoading && !session && (
             <div className="flex items-center justify-center py-8">
               <div className="text-center">
-                <Loader className="w-6 h-6 animate-spin mx-auto mb-2 text-blue-600" />
-                <p className="text-sm text-gray-600">Initializing chat session...</p>
+                <Loader className="w-6 h-6 animate-spin mx-auto mb-2 text-amber" />
+                <p className="font-mono text-[11px] text-ink-3">Initializing chat session…</p>
               </div>
             </div>
           )}
@@ -256,9 +249,9 @@ export function ChatModal({
           {session && messages.length === 0 && !isStreaming && (
             <div className="flex items-center justify-center py-8">
               <div className="text-center">
-                <MessageSquare className="w-8 h-8 mx-auto mb-2 text-gray-400" />
-                <p className="text-sm text-gray-600">Start a conversation with your agent</p>
-                <p className="text-xs text-gray-500 mt-1">
+                <MessageSquare className="w-8 h-8 mx-auto mb-2 text-ink-3" />
+                <p className="text-sm text-ink-2">Start a conversation with your agent</p>
+                <p className="font-mono text-[10px] uppercase tracking-wider text-ink-3 mt-1">
                   {isStreamingAgent ? 'Streaming responses enabled' : 'Regular responses'}
                 </p>
               </div>
@@ -268,38 +261,36 @@ export function ChatModal({
           {messages.map((message) => (
             <div
               key={message.message_id}
-              className={`flex items-start space-x-3 ${
+              className={`flex items-start gap-3 ${
                 message.sender === 'user' ? 'justify-end' : 'justify-start'
               }`}
             >
               {message.sender === 'agent' && (
-                <div className="flex-shrink-0">
-                  <Bot className="w-6 h-6 text-blue-600" />
+                <div className="flex-shrink-0 pt-4">
+                  <Bot className="w-5 h-5 text-amber" />
                 </div>
               )}
 
               <div
                 className={`${
                   message.sender === 'user'
-                    ? 'max-w-xs lg:max-w-md'
+                    ? 'max-w-xs lg:max-w-md text-right'
                     : 'max-w-sm lg:max-w-2xl'
-                } px-4 py-2 rounded-lg ${
-                  message.sender === 'user'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 text-gray-900'
                 }`}
               >
-                <pre className="whitespace-pre-wrap text-sm break-words font-sans">
-                  {message.content}
-                </pre>
-                <div className="text-xs opacity-70 mt-1">
-                  {new Date(message.timestamp).toLocaleTimeString()}
+                <div className="lp-who">
+                  {message.sender === 'user' ? 'YOU' : 'AGENT'} · {new Date(message.timestamp).toLocaleTimeString()}
+                </div>
+                <div className={`lp-bub ${message.sender === 'user' ? 'user text-left' : ''}`}>
+                  <pre className="whitespace-pre-wrap text-[13.5px] break-words font-sans">
+                    {message.content}
+                  </pre>
                 </div>
               </div>
 
               {message.sender === 'user' && (
-                <div className="flex-shrink-0">
-                  <User className="w-6 h-6 text-gray-600" />
+                <div className="flex-shrink-0 pt-4">
+                  <User className="w-5 h-5 text-ink-3" />
                 </div>
               )}
             </div>
@@ -307,18 +298,19 @@ export function ChatModal({
 
           {/* Streaming response */}
           {isStreaming && (
-            <div className="flex items-start space-x-3 justify-start">
-              <div className="flex-shrink-0">
-                <Bot className="w-6 h-6 text-blue-600" />
+            <div className="flex items-start gap-3 justify-start">
+              <div className="flex-shrink-0 pt-4">
+                <Bot className="w-5 h-5 text-amber" />
               </div>
-              <div className="max-w-sm lg:max-w-2xl px-4 py-2 rounded-lg bg-gray-100 text-gray-900">
-                <pre className="whitespace-pre-wrap text-sm break-words font-sans">
-                  {streamingContent}
-                  <span className="animate-pulse">█</span>
-                </pre>
-                <div className="text-xs opacity-70 mt-1 flex items-center">
-                  <Zap className="w-3 h-3 mr-1" />
-                  Streaming...
+              <div className="max-w-sm lg:max-w-2xl">
+                <div className="lp-who flex items-center gap-1.5">
+                  AGENT · STREAMING <Zap className="w-3 h-3 text-s1" />
+                </div>
+                <div className="lp-bub">
+                  <pre className="whitespace-pre-wrap text-[13.5px] break-words font-sans">
+                    {streamingContent}
+                    <span className="lp-caret" />
+                  </pre>
                 </div>
               </div>
             </div>
@@ -329,33 +321,36 @@ export function ChatModal({
 
         {/* Input */}
         {session && (
-          <div className="border-t border-gray-200 p-4">
-            <div className="flex space-x-2">
+          <div className="border-t border-line p-4">
+            <div className="flex gap-2.5">
               <textarea
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
                 onKeyPress={handleKeyPress}
-                placeholder="Type your message..."
-                className="flex-1 border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                placeholder="Message your agent…"
+                className="lp-input flex-1 resize-none"
                 rows={1}
                 disabled={isLoading || isStreaming}
               />
               <button
                 onClick={sendMessage}
                 disabled={!inputMessage.trim() || isLoading || isStreaming}
-                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center"
+                className="lp-btn primary"
               >
                 {isLoading || isStreaming ? (
                   <Loader className="w-4 h-4 animate-spin" />
                 ) : (
-                  <Send className="w-4 h-4" />
+                  <>
+                    <Send className="w-3.5 h-3.5" />
+                    SEND ▸
+                  </>
                 )}
               </button>
             </div>
-            <div className="flex items-center justify-between mt-2 text-xs text-gray-500">
-              <span>Press Enter to send, Shift+Enter for new line</span>
+            <div className="flex items-center justify-between mt-2 font-mono text-[9.5px] uppercase tracking-wider text-ink-3">
+              <span>Enter to send · Shift+Enter for new line</span>
               {isStreamingAgent && (
-                <div className="flex items-center space-x-1 text-blue-600">
+                <div className="flex items-center gap-1 text-s1">
                   <Zap className="w-3 h-3" />
                   <span>Streaming enabled</span>
                 </div>

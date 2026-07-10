@@ -74,38 +74,56 @@ interface NodePaletteProps {
   className?: string;
 }
 
+const accentByType: Record<string, string> = {
+  agent: 'text-amber',
+  'orchestrator-agent': 'text-s5',
+  swarm: 'text-s5',
+  tool: 'text-s2',
+  'custom-tool': 'text-s2',
+  'mcp-tool': 'text-s1',
+  input: 'text-ink-2',
+  output: 'text-ink-2',
+};
+
 export function NodePalette({ className = '' }: NodePaletteProps) {
   const onDragStart = (event: React.DragEvent, nodeType: string) => {
     event.dataTransfer.setData('application/reactflow', nodeType);
     event.dataTransfer.effectAllowed = 'move';
   };
 
+  let idx = 0;
+
   return (
-    <div className={`bg-white border-r border-gray-200 p-4 overflow-y-auto ${className}`}>
-      <h2 className="text-lg font-semibold text-gray-900 mb-4">Node Palette</h2>
-      
+    <div className={`bg-panel border-r border-line py-4 overflow-y-auto flex flex-col ${className}`}>
+      <div className="px-4 mb-3">
+        <div className="lp-kicker mb-1">// MODULE LIBRARY</div>
+        <h2 className="lp-title text-sm text-ink uppercase tracking-wider">Node Palette</h2>
+      </div>
+
       {categories.map((category) => {
         const categoryNodes = nodeTypes.filter((node) => node.category === category);
-        
+
         return (
-          <div key={category} className="mb-6">
-            <h3 className="text-sm font-medium text-gray-700 mb-2">{category}</h3>
-            <div className="space-y-2">
+          <div key={category} className="mb-3">
+            <div className="lp-side-label">{category}</div>
+            <div>
               {categoryNodes.map((nodeType) => {
+                idx += 1;
                 const IconComponent = nodeType.icon;
-                
+
                 return (
                   <div
                     key={nodeType.type}
-                    className="flex items-center p-3 bg-gray-50 rounded-lg cursor-grab hover:bg-gray-100 transition-colors border border-gray-200 hover:border-gray-300"
+                    className="lp-nav-item"
                     draggable
                     onDragStart={(event) => onDragStart(event, nodeType.type)}
                     title={nodeType.description}
                   >
-                    <IconComponent className="w-4 h-4 text-gray-600 mr-3 flex-shrink-0" />
-                    <div className="flex-1">
-                      <div className="text-sm font-medium text-gray-900">{nodeType.label}</div>
-                      <div className="text-xs text-gray-500 mt-1">{nodeType.description}</div>
+                    <span className="idx">{String(idx).padStart(2, '0')}</span>
+                    <IconComponent className={`w-4 h-4 flex-shrink-0 ${accentByType[nodeType.type] || 'text-ink-2'}`} />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[13px] font-medium leading-tight">{nodeType.label}</div>
+                      <div className="text-[10px] font-mono text-ink-3 mt-0.5 truncate">{nodeType.description}</div>
                     </div>
                   </div>
                 );
@@ -114,6 +132,12 @@ export function NodePalette({ className = '' }: NodePaletteProps) {
           </div>
         );
       })}
+
+      <div className="mt-auto px-4 pt-3 border-t border-line font-mono text-[9.5px] text-ink-3 leading-[1.9]">
+        MODE <b className="text-ink-2 font-medium">DRAG → CANVAS</b><br />
+        SDK <b className="text-ink-2 font-medium">strands-agents</b><br />
+        TARGET <b className="text-ink-2 font-medium">bedrock-agentcore</b>
+      </div>
     </div>
   );
 }

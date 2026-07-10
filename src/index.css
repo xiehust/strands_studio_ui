@@ -1,20 +1,108 @@
-
-/* @import "tw-animate-css"; */
 @import "tailwindcss";
 
 @plugin "tailwindcss-animate";
 
-@custom-variant dark (&:is(.dark *));
+/* ================================================================
+   AgentCore Launchpad design tokens (source of truth: mockup.html)
+   ================================================================ */
+:root {
+  --bg: #0B0E0D;            /* page plane */
+  --panel: #141816;         /* card surface */
+  --panel-2: #191E1B;       /* raised surface */
+  --line: #232B27;          /* hairline */
+  --line-2: #2E3833;
+  --ink: #E9EDEA;           /* primary text */
+  --ink-2: #A3ACA6;         /* secondary text */
+  --ink-3: #69736C;         /* muted text */
+  --amber: #FFB000;         /* brand signal — chrome only */
+  --amber-soft: rgba(255, 176, 0, 0.13);
+  --s1: #3987E5;            /* series blue   */
+  --s2: #199E70;            /* series aqua   */
+  --s3: #C98500;            /* series yellow */
+  --s5: #9085E9;            /* series violet */
+  --good: #0CA30C;
+  --warn: #FAB219;
+  --serious: #EC835A;
+  --crit: #D03B3B;
+  --grid: #212823;
+  --code-bg: #0A0D0C;
+  --input-bg: #0E1210;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --sans: "Archivo", system-ui, -apple-system, sans-serif;
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+  /* shadcn semantic vars mapped onto the Launchpad tokens (dark only) */
+  --radius: 0rem;
+  --background: var(--bg);
+  --foreground: var(--ink);
+  --card: var(--panel);
+  --card-foreground: var(--ink);
+  --popover: var(--panel-2);
+  --popover-foreground: var(--ink);
+  --primary: var(--amber);
+  --primary-foreground: #161207;
+  --secondary: var(--panel-2);
+  --secondary-foreground: var(--ink);
+  --muted: var(--panel-2);
+  --muted-foreground: var(--ink-2);
+  --accent: var(--amber-soft);
+  --accent-foreground: var(--amber);
+  --destructive: var(--crit);
+  --border: var(--line);
+  --input: var(--line-2);
+  --ring: var(--amber);
+  --chart-1: var(--s1);
+  --chart-2: var(--s2);
+  --chart-3: var(--s3);
+  --chart-4: var(--s5);
+  --chart-5: var(--serious);
+  --sidebar: var(--panel);
+  --sidebar-foreground: var(--ink);
+  --sidebar-primary: var(--amber);
+  --sidebar-primary-foreground: #161207;
+  --sidebar-accent: var(--amber-soft);
+  --sidebar-accent-foreground: var(--amber);
+  --sidebar-border: var(--line);
+  --sidebar-ring: var(--amber);
+}
 
 @theme inline {
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  /* square corners everywhere */
+  --radius-xs: 0rem;
+  --radius-sm: 0rem;
+  --radius-md: 0rem;
+  --radius-lg: 0rem;
+  --radius-xl: 0rem;
+  --radius-2xl: 0rem;
+  --radius-3xl: 0rem;
+  --radius-4xl: 0rem;
+
+  --font-sans: "Archivo", system-ui, -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* launchpad token utilities: bg-panel, border-line, text-ink-2, text-amber… */
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-panel2: var(--panel-2);
+  --color-panel-2: var(--panel-2);
+  --color-line: var(--line);
+  --color-line2: var(--line-2);
+  --color-line-2: var(--line-2);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-amber: var(--amber);
+  --color-amber-soft: var(--amber-soft);
+  --color-s1: var(--s1);
+  --color-s2: var(--s2);
+  --color-s3: var(--s3);
+  --color-s5: var(--s5);
+  --color-good: var(--good);
+  --color-warn: var(--warn);
+  --color-serious: var(--serious);
+  --color-crit: var(--crit);
+  --color-grid: var(--grid);
+
+  /* shadcn semantic mapping */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -48,80 +136,834 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
-:root {
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+/* ================================================================
+   Default Tailwind palette remapped onto the dark Launchpad scales.
+   Low shades = translucent tints (badges/backgrounds), mid = brand
+   hue, high shades = bright text tints legible on #141816.
+   ================================================================ */
+@theme {
+  /* neutral (gray) — inverted onto the ink/line/panel scale */
+  --color-gray-50: #171B19;
+  --color-gray-100: #1B211D;
+  --color-gray-200: #232B27;
+  --color-gray-300: #2E3833;
+  --color-gray-400: #69736C;
+  --color-gray-500: #7E877F;
+  --color-gray-600: #A3ACA6;
+  --color-gray-700: #C2C9C4;
+  --color-gray-800: #DAE0DC;
+  --color-gray-900: #E9EDEA;
+  --color-gray-950: #F4F6F5;
+
+  /* blue → s1 */
+  --color-blue-50: rgba(57, 135, 229, 0.08);
+  --color-blue-100: rgba(57, 135, 229, 0.15);
+  --color-blue-200: rgba(57, 135, 229, 0.35);
+  --color-blue-300: rgba(57, 135, 229, 0.5);
+  --color-blue-400: #5B9BE9;
+  --color-blue-500: #3987E5;
+  --color-blue-600: #5FA3EC;
+  --color-blue-700: #7AB2EE;
+  --color-blue-800: #A9CCF4;
+  --color-blue-900: #CFE3F9;
+
+  /* green / emerald / teal → s2 + good */
+  --color-green-50: rgba(25, 158, 112, 0.08);
+  --color-green-100: rgba(25, 158, 112, 0.15);
+  --color-green-200: rgba(25, 158, 112, 0.35);
+  --color-green-300: rgba(25, 158, 112, 0.5);
+  --color-green-400: #35C98F;
+  --color-green-500: #199E70;
+  --color-green-600: #2FBF8C;
+  --color-green-700: #64D3A9;
+  --color-green-800: #9FE3C8;
+  --color-green-900: #CBF0E0;
+  --color-emerald-50: rgba(25, 158, 112, 0.08);
+  --color-emerald-100: rgba(25, 158, 112, 0.15);
+  --color-emerald-200: rgba(25, 158, 112, 0.35);
+  --color-emerald-300: rgba(25, 158, 112, 0.5);
+  --color-emerald-400: #35C98F;
+  --color-emerald-500: #199E70;
+  --color-emerald-600: #2FBF8C;
+  --color-emerald-700: #64D3A9;
+  --color-emerald-800: #9FE3C8;
+  --color-emerald-900: #CBF0E0;
+  --color-teal-50: rgba(25, 158, 112, 0.08);
+  --color-teal-100: rgba(25, 158, 112, 0.15);
+  --color-teal-200: rgba(25, 158, 112, 0.35);
+  --color-teal-300: rgba(25, 158, 112, 0.5);
+  --color-teal-400: #35C98F;
+  --color-teal-500: #199E70;
+  --color-teal-600: #2FBF8C;
+  --color-teal-700: #64D3A9;
+  --color-teal-800: #9FE3C8;
+  --color-teal-900: #CBF0E0;
+
+  /* purple / violet / indigo → s5 */
+  --color-purple-50: rgba(144, 133, 233, 0.08);
+  --color-purple-100: rgba(144, 133, 233, 0.15);
+  --color-purple-200: rgba(144, 133, 233, 0.32);
+  --color-purple-300: rgba(144, 133, 233, 0.5);
+  --color-purple-400: #9C92EC;
+  --color-purple-500: #9085E9;
+  --color-purple-600: #A79EEF;
+  --color-purple-700: #BEB7F3;
+  --color-purple-800: #D5D0F7;
+  --color-purple-900: #E7E4FB;
+  --color-violet-50: rgba(144, 133, 233, 0.08);
+  --color-violet-100: rgba(144, 133, 233, 0.15);
+  --color-violet-200: rgba(144, 133, 233, 0.32);
+  --color-violet-300: rgba(144, 133, 233, 0.5);
+  --color-violet-400: #9C92EC;
+  --color-violet-500: #9085E9;
+  --color-violet-600: #A79EEF;
+  --color-violet-700: #BEB7F3;
+  --color-violet-800: #D5D0F7;
+  --color-violet-900: #E7E4FB;
+  --color-indigo-50: rgba(144, 133, 233, 0.08);
+  --color-indigo-100: rgba(144, 133, 233, 0.15);
+  --color-indigo-200: rgba(144, 133, 233, 0.32);
+  --color-indigo-300: rgba(144, 133, 233, 0.5);
+  --color-indigo-400: #9C92EC;
+  --color-indigo-500: #9085E9;
+  --color-indigo-600: #A79EEF;
+  --color-indigo-700: #BEB7F3;
+  --color-indigo-800: #D5D0F7;
+  --color-indigo-900: #E7E4FB;
+
+  /* orange / amber → brand amber */
+  --color-orange-50: rgba(255, 176, 0, 0.08);
+  --color-orange-100: rgba(255, 176, 0, 0.13);
+  --color-orange-200: rgba(255, 176, 0, 0.3);
+  --color-orange-300: rgba(255, 176, 0, 0.45);
+  --color-orange-400: #FFC23D;
+  --color-orange-500: #FFB000;
+  --color-orange-600: #FFB000;
+  --color-orange-700: #FFC23D;
+  --color-orange-800: #FFD473;
+  --color-orange-900: #FFE7AE;
+  --color-amber-50: rgba(255, 176, 0, 0.08);
+  --color-amber-100: rgba(255, 176, 0, 0.13);
+  --color-amber-200: rgba(255, 176, 0, 0.3);
+  --color-amber-300: rgba(255, 176, 0, 0.45);
+  --color-amber-400: #FFC23D;
+  --color-amber-500: #FFB000;
+  --color-amber-600: #FFB000;
+  --color-amber-700: #FFC23D;
+  --color-amber-800: #FFD473;
+  --color-amber-900: #FFE7AE;
+
+  /* red → crit */
+  --color-red-50: rgba(208, 59, 59, 0.1);
+  --color-red-100: rgba(208, 59, 59, 0.16);
+  --color-red-200: rgba(208, 59, 59, 0.35);
+  --color-red-300: rgba(208, 59, 59, 0.5);
+  --color-red-400: #E36A6A;
+  --color-red-500: #DA5050;
+  --color-red-600: #E06666;
+  --color-red-700: #EC8B8B;
+  --color-red-800: #F4B3B3;
+  --color-red-900: #FAD6D6;
+
+  /* yellow → warn */
+  --color-yellow-50: rgba(250, 178, 25, 0.08);
+  --color-yellow-100: rgba(250, 178, 25, 0.14);
+  --color-yellow-200: rgba(250, 178, 25, 0.32);
+  --color-yellow-300: rgba(250, 178, 25, 0.5);
+  --color-yellow-400: #FAB219;
+  --color-yellow-500: #FAB219;
+  --color-yellow-600: #FBC24C;
+  --color-yellow-700: #FCD27F;
+  --color-yellow-800: #FDE1B0;
+  --color-yellow-900: #FEF0D8;
 }
 
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
-}
-
+/* ================================================================
+   Base
+   ================================================================ */
 @layer base {
   * {
     @apply border-border outline-ring/50;
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-2) transparent;
   }
+
+  html {
+    color-scheme: dark;
+  }
+
   body {
-    @apply bg-background text-foreground;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+    /* graph-paper page background + amber radial glow */
+    background-image:
+      radial-gradient(1100px 500px at 75% -10%, rgba(255, 176, 0, 0.045), transparent 60%),
+      repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.014) 0 1px, transparent 1px 56px),
+      repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.014) 0 1px, transparent 1px 56px);
   }
+
+  /* film grain */
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.05;
+    z-index: 99;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.6'/%3E%3C/svg%3E");
+  }
+
+  ::selection {
+    background: var(--amber);
+    color: #141210;
+  }
+}
+
+/* ================================================================
+   Launchpad pattern classes (from mockup.html)
+   ================================================================ */
+@layer components {
+  /* --- chrome --- */
+  .lp-topbar {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    height: 52px;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(11, 14, 13, 0.92);
+    backdrop-filter: blur(6px);
+    position: relative;
+    z-index: 50;
+  }
+  .lp-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-stretch: 125%;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+    font-size: 13px;
+    white-space: nowrap;
+    color: var(--ink);
+  }
+  .lp-brand .glyph {
+    width: 22px;
+    height: 22px;
+    display: grid;
+    place-items: center;
+    background: var(--amber);
+    color: #131008;
+    clip-path: polygon(50% 0, 100% 100%, 0 100%);
+    font-size: 0;
+    flex-shrink: 0;
+  }
+  .lp-brand em {
+    color: var(--amber);
+    font-style: normal;
+  }
+  .lp-crumb {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-3);
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .lp-crumb b {
+    color: var(--ink-2);
+    font-weight: 500;
+  }
+  .lp-syschip {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--ink-2);
+    border: 1px solid var(--line);
+    padding: 4px 9px;
+    display: inline-flex;
+    gap: 7px;
+    align-items: center;
+    background: var(--panel);
+    white-space: nowrap;
+  }
+  .lp-led {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--good);
+    box-shadow: 0 0 6px var(--good);
+    animation: lp-pulse 2.4s infinite;
+    flex-shrink: 0;
+  }
+  .lp-led.crit {
+    background: var(--crit);
+    box-shadow: 0 0 6px var(--crit);
+    animation-duration: 1.2s;
+  }
+
+  /* --- panels --- */
+  .lp-panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    position: relative;
+  }
+  .lp-panel.brk::before,
+  .lp-panel.brk::after {
+    content: "";
+    position: absolute;
+    width: 11px;
+    height: 11px;
+    pointer-events: none;
+    z-index: 1;
+  }
+  .lp-panel.brk::before {
+    top: -1px;
+    left: -1px;
+    border-top: 2px solid var(--amber);
+    border-left: 2px solid var(--amber);
+  }
+  .lp-panel.brk::after {
+    bottom: -1px;
+    right: -1px;
+    border-bottom: 2px solid var(--amber);
+    border-right: 2px solid var(--amber);
+  }
+  .lp-phead {
+    display: flex;
+    align-items: center;
+    gap: 8px 10px;
+    flex-wrap: wrap;
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+  }
+  .lp-ptitle {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    font-stretch: 112%;
+    text-transform: uppercase;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+  .lp-sub {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-3);
+  }
+  .lp-kicker {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.24em;
+    color: var(--amber);
+  }
+
+  /* --- chips: icon + label always, never color alone --- */
+  .lp-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.05em;
+    padding: 3px 8px;
+    border: 1px solid var(--line-2);
+    color: var(--ink-2);
+    white-space: nowrap;
+    text-transform: uppercase;
+  }
+  .lp-chip i,
+  .lp-chip svg {
+    font-style: normal;
+    font-size: 9px;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+  .lp-chip.good { color: var(--good); border-color: rgba(12, 163, 12, 0.4); }
+  .lp-chip.warn { color: var(--warn); border-color: rgba(250, 178, 25, 0.35); }
+  .lp-chip.crit { color: var(--crit); border-color: rgba(208, 59, 59, 0.45); }
+  .lp-chip.muted { color: var(--ink-3); }
+  .lp-chip.amber { color: var(--amber); border-color: rgba(255, 176, 0, 0.4); }
+  .lp-chip.blue { color: var(--s1); border-color: rgba(57, 135, 229, 0.4); }
+  .lp-chip.aqua { color: var(--s2); border-color: rgba(25, 158, 112, 0.4); }
+  .lp-chip.violet { color: var(--s5); border-color: rgba(144, 133, 233, 0.4); }
+
+  /* --- buttons --- */
+  .lp-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    padding: 7px 14px;
+    cursor: pointer;
+    border: 1px solid var(--line-2);
+    color: var(--ink);
+    background: transparent;
+    text-transform: uppercase;
+    white-space: nowrap;
+    transition: border-color 0.15s, background 0.15s, color 0.15s;
+  }
+  .lp-btn:hover:not(:disabled) { border-color: var(--ink-3); }
+  .lp-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .lp-btn.primary {
+    background: var(--amber);
+    border-color: var(--amber);
+    color: #161207;
+    font-weight: 600;
+  }
+  .lp-btn.primary:hover:not(:disabled) { background: #ffc23d; border-color: #ffc23d; }
+  .lp-btn.danger {
+    color: var(--crit);
+    border-color: rgba(208, 59, 59, 0.45);
+  }
+  .lp-btn.danger:hover:not(:disabled) { border-color: var(--crit); }
+  .lp-btn.sm { padding: 4px 10px; font-size: 10px; }
+  .lp-btn.active {
+    border-color: rgba(255, 176, 0, 0.4);
+    color: var(--amber);
+    background: var(--amber-soft);
+  }
+
+  /* --- tabs --- */
+  .lp-tab {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    padding: 11px 18px;
+    color: var(--ink-3);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    text-transform: uppercase;
+    background: transparent;
+  }
+  .lp-tab:hover { color: var(--ink-2); }
+  .lp-tab.active { color: var(--amber); border-bottom-color: var(--amber); }
+
+  /* --- fields --- */
+  .lp-label {
+    display: block;
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.18em;
+    color: var(--ink-3);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+  }
+  .lp-input {
+    background: var(--input-bg);
+    border: 1px solid var(--line-2);
+    padding: 8px 11px;
+    font-size: 13px;
+    color: var(--ink);
+    width: 100%;
+    font-family: var(--sans);
+    outline: none;
+  }
+  .lp-input:focus { border-color: var(--amber); }
+  .lp-input::placeholder { color: var(--ink-3); }
+  .lp-input.mono {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    line-height: 1.7;
+  }
+
+  /* --- code blocks / logs --- */
+  .lp-code {
+    background: var(--code-bg);
+    border: 1px solid var(--grid);
+    padding: 12px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    line-height: 1.75;
+    color: var(--ink-2);
+    overflow-x: auto;
+  }
+
+  /* --- notes --- */
+  .lp-note {
+    display: flex;
+    gap: 9px;
+    font-size: 11.5px;
+    color: var(--ink-2);
+    background: var(--amber-soft);
+    border: 1px solid rgba(255, 176, 0, 0.25);
+    padding: 10px 12px;
+    line-height: 1.5;
+  }
+
+  /* --- sidebar nav (node palette) --- */
+  .lp-side-label {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.22em;
+    color: var(--ink-3);
+    padding: 8px 16px 6px;
+    text-transform: uppercase;
+  }
+  .lp-nav-item {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 9px 16px;
+    cursor: grab;
+    color: var(--ink-2);
+    border-left: 2px solid transparent;
+    font-weight: 500;
+    font-size: 13px;
+    user-select: none;
+  }
+  .lp-nav-item:hover {
+    color: var(--ink);
+    background: rgba(255, 255, 255, 0.02);
+    border-left-color: var(--amber);
+  }
+  .lp-nav-item .idx {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    color: var(--ink-3);
+    width: 20px;
+    flex-shrink: 0;
+  }
+  .lp-nav-item:hover .idx { color: var(--amber); }
+
+  /* --- deployment steps / pipeline --- */
+  .lp-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    border: 1px solid var(--line);
+    background: var(--panel);
+  }
+  .lp-step {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--grid);
+    color: var(--ink-3);
+    font-size: 11px;
+  }
+  .lp-step:last-child { border-bottom: 0; }
+  .lp-step .n {
+    font-family: var(--mono);
+    font-size: 10px;
+    border: 1px solid var(--line-2);
+    width: 22px;
+    height: 22px;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    color: var(--ink-3);
+  }
+  .lp-step b {
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+  .lp-step .msg {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    color: var(--ink-3);
+    margin-left: auto;
+    text-align: right;
+  }
+  .lp-step.done { color: var(--ink-2); }
+  .lp-step.done .n { border-color: var(--good); color: var(--good); }
+  .lp-step.now { color: var(--amber); }
+  .lp-step.now .n {
+    border-color: var(--amber);
+    color: var(--amber);
+    background: var(--amber-soft);
+    animation: lp-pulse 1.6s infinite;
+  }
+  .lp-step.error { color: var(--crit); }
+  .lp-step.error .n { border-color: var(--crit); color: var(--crit); }
+
+  /* --- chat --- */
+  .lp-who {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.16em;
+    color: var(--ink-3);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+  }
+  .lp-bub {
+    padding: 12px 15px;
+    font-size: 13.5px;
+    line-height: 1.6;
+    border: 1px solid var(--line);
+    color: var(--ink);
+  }
+  .lp-bub.user {
+    background: var(--panel-2);
+    border-color: var(--line-2);
+  }
+  .lp-caret {
+    display: inline-block;
+    width: 8px;
+    height: 15px;
+    background: var(--amber);
+    vertical-align: -2px;
+    animation: lp-blink 0.9s steps(1) infinite;
+    margin-left: 2px;
+  }
+
+  /* --- mono helpers --- */
+  .lp-mono { font-family: var(--mono); font-size: 11px; }
+  .lp-arn {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-3);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: inline-block;
+    vertical-align: middle;
+    max-width: 100%;
+  }
+  .lp-title {
+    font-stretch: 112%;
+    font-weight: 800;
+    letter-spacing: 0.01em;
+  }
+
+  /* --- node cards (flow canvas) --- */
+  .lp-node {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    position: relative;
+  }
+  .lp-node:hover { border-color: var(--line-2); }
+  .lp-node.sel {
+    border-color: var(--amber);
+    box-shadow: 0 0 0 1px var(--amber), 0 12px 40px -18px rgba(255, 176, 0, 0.35);
+  }
+  .lp-node-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel-2);
+  }
+  .lp-node-type {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+  }
+  .lp-node-kv {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 11px;
+    padding: 2px 0;
+  }
+  .lp-node-kv .k { color: var(--ink-3); font-family: var(--mono); font-size: 10px; }
+  .lp-node-kv .v {
+    color: var(--ink-2);
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 160px;
+  }
+  .lp-handle-tag {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    padding: 0 4px;
+    line-height: 1.5;
+  }
+
+}
+
+/* ================================================================
+   Legacy light-theme utility remaps (unlayered so they beat
+   the utilities layer). The surface sweep restyles the primary
+   panels by hand; these catch stragglers in secondary dialogs.
+   ================================================================ */
+.bg-white {
+  background-color: var(--panel);
+}
+
+/* old dark terminal/log surfaces → Launchpad code surface */
+.bg-gray-900:not(.text-white),
+.bg-black:not([class*="bg-opacity"]) {
+  background-color: var(--code-bg);
+}
+.bg-gray-800 {
+  background-color: var(--panel-2);
+}
+
+/* bright accent bg + white text combos from the old light theme:
+   flip to dark text per the mockup primary-button pattern */
+.text-white:where(
+    .bg-blue-500, .bg-blue-600, .bg-blue-700, .bg-green-500, .bg-green-600,
+    .bg-orange-500, .bg-orange-600, .bg-orange-700, .bg-purple-500, .bg-purple-600,
+    .bg-red-500, .bg-red-600, .bg-indigo-500, .bg-emerald-500, .bg-teal-600,
+    .bg-yellow-500
+  ) {
+  color: #10140f;
+  font-weight: 600;
+}
+
+/* ================================================================
+   Animations
+   ================================================================ */
+@keyframes lp-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes lp-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+@keyframes lp-blink {
+  50% { opacity: 0; }
+}
+.lp-rise { animation: lp-rise 0.5s cubic-bezier(0.22, 0.9, 0.3, 1) both; }
+
+/* ================================================================
+   XYFlow dark theme overrides (after @xyflow/react/dist/style.css)
+   ================================================================ */
+.react-flow {
+  background: transparent;
+  /* XYFlow theme variables */
+  --xy-edge-stroke-default: var(--ink-3);
+  --xy-edge-stroke-selected-default: var(--amber);
+  --xy-connectionline-stroke-default: var(--amber);
+  --xy-handle-background-color-default: var(--ink-3);
+  --xy-handle-border-color-default: var(--bg);
+  --xy-selection-background-color-default: rgba(255, 176, 0, 0.06);
+  --xy-selection-border-default: 1px dashed var(--amber);
+  --xy-controls-button-background-color-default: var(--panel);
+  --xy-controls-button-background-color-hover-default: var(--panel-2);
+  --xy-controls-button-color-default: var(--ink-2);
+  --xy-controls-button-color-hover-default: var(--ink);
+  --xy-controls-button-border-color-default: var(--line);
+  --xy-controls-box-shadow-default: none;
+  --xy-minimap-background-color-default: var(--panel);
+  --xy-minimap-mask-background-color-default: rgba(11, 14, 13, 0.75);
+  --xy-minimap-mask-stroke-color-default: var(--line-2);
+  --xy-minimap-node-background-color-default: var(--line-2);
+  --xy-minimap-node-stroke-color-default: transparent;
+  --xy-attribution-background-color-default: transparent;
+  --xy-background-color-default: transparent;
+}
+.react-flow__pane {
+  cursor: default;
+}
+/* Kill XYFlow's built-in white node chrome for the reserved type names
+   (input / output / default / group) — our custom components own the look */
+.react-flow__node-input,
+.react-flow__node-output,
+.react-flow__node-default,
+.react-flow__node-group {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  width: auto !important;
+  box-shadow: none !important;
+  color: inherit !important;
+  font-size: inherit !important;
+  text-align: left !important;
+}
+.react-flow__edge-path,
+.react-flow__connection-path {
+  stroke: var(--ink-3);
+  stroke-width: 1.5;
+}
+.react-flow__edge.selected .react-flow__edge-path,
+.react-flow__edge:focus .react-flow__edge-path {
+  stroke: var(--amber);
+  stroke-width: 2;
+}
+.react-flow__edge.animated .react-flow__edge-path {
+  stroke: var(--amber);
+}
+.react-flow__connection-path {
+  stroke: var(--amber);
+}
+.react-flow__handle {
+  border: 1px solid var(--bg);
+}
+.react-flow__controls {
+  box-shadow: none;
+  border: 1px solid var(--line);
+}
+.react-flow__controls-button {
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-2);
+  fill: var(--ink-2);
+}
+.react-flow__controls-button:hover {
+  background: var(--panel-2);
+  color: var(--ink);
+  fill: var(--ink);
+}
+.react-flow__controls-button svg {
+  fill: currentColor;
+}
+.react-flow__minimap {
+  background: var(--panel) !important;
+  background-color: var(--panel) !important;
+  border: 1px solid var(--line);
+}
+.react-flow__minimap svg {
+  background: var(--panel) !important;
+}
+.react-flow__minimap-svg {
+  background: var(--panel) !important;
+}
+.react-flow__minimap-mask {
+  fill: rgba(11, 14, 13, 0.75);
+}
+.react-flow__minimap-node {
+  fill: var(--line-2);
+  stroke: none;
+}
+.react-flow__attribution {
+  background: transparent;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 9px;
+}
+.react-flow__attribution a {
+  color: var(--ink-3);
+}
+.react-flow__node.selected .lp-node {
+  border-color: var(--amber);
+  box-shadow: 0 0 0 1px var(--amber), 0 12px 40px -18px rgba(255, 176, 0, 0.35);
+}
+
+/* dark scrollbars (webkit) */
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line-2);
+  border: 2px solid var(--bg);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-3);
 }

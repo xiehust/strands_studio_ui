@@ -274,189 +274,149 @@ export function MainLayout() {
   }, [nodes, edges, graphMode]);
 
   return (
-    <div className="h-screen w-screen flex bg-gray-50">
+    <div className="h-screen w-screen flex bg-bg text-ink">
       {/* Node Palette Sidebar */}
-      <NodePalette className="w-80 flex-shrink-0" />
-      
+      <NodePalette className="w-64 flex-shrink-0" />
+
       {/* Main Content */}
-      <div className="flex-1 flex flex-col">
-        {/* Header */}
-        <header className="bg-white border-b border-gray-200 px-6 py-4">
-          {/* First row - Title and Project Management */}
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center space-x-6">
-              <div>
-                <h1 className="text-xl font-semibold text-gray-900">Open Studio for Strands Agent SDK</h1>
-                <p className="text-sm text-gray-500 mt-1">
-                  Visually create and configure AI agents using drag-and-drop interface
-                </p>
-              </div>
-              <div className="flex items-center space-x-1 pl-6 border-l border-gray-200">
-                <span className="text-sm text-gray-600">Project:</span>
-                <span className="text-sm font-medium text-gray-900">
-                  {currentProject ? currentProject.name : 'Untitled Project'}
-                </span>
-              </div>
-            </div>
-            <div className="flex items-center space-x-2">
-              {/* Save timestamp indicator */}
-              {lastSaveTime && (
-                <span className="text-xs text-blue-600 mr-2">
-                  Saved at {lastSaveTime.toLocaleTimeString()}
-                </span>
-              )}
-
-              <button
-                onClick={handleSaveCurrentProject}
-                className="flex items-center px-3 py-2 rounded-md text-sm font-medium bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors"
-                title="Save current project"
-              >
-                <Save className="w-4 h-4 mr-2" />
-                Save
-              </button>
-
-              <button
-                onClick={handleNewProject}
-                className="flex items-center px-3 py-2 rounded-md text-sm font-medium bg-green-100 text-green-700 hover:bg-green-200 transition-colors"
-                title="Create new project"
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                New
-              </button>
-
-              <label className="flex items-center px-3 py-2 rounded-md text-sm font-medium bg-purple-100 text-purple-700 hover:bg-purple-200 transition-colors cursor-pointer"
-                     title="Import project">
-                <Upload className="w-4 h-4 mr-2" />
-                Import
-                <input
-                  type="file"
-                  accept=".json"
-                  onChange={handleImportProject}
-                  className="hidden"
-                />
-              </label>
-
-              <button
-                onClick={handleExportCurrentProject}
-                disabled={!currentProject}
-                className={`flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                  currentProject
-                    ? 'bg-orange-100 text-orange-700 hover:bg-orange-200'
-                    : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                }`}
-                title="Export current project"
-              >
-                <Download className="w-4 h-4 mr-2" />
-                Export
-              </button>
-
-              <button
-                onClick={() => setShowProjectManager(true)}
-                className="flex items-center px-3 py-2 rounded-md text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors"
-              >
-                <FolderOpen className="w-4 h-4 mr-2" />
-                Open
-              </button>
-
-              <a
-                href="https://github.com/xiehust/strands_studio_ui"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center px-3 py-2 rounded-md text-sm font-medium bg-gray-900 text-white hover:bg-gray-800 transition-colors"
-                title="Star us on GitHub"
-              >
-                <GithubIcon className="w-4 h-4 mr-1" />
-                <Star className="w-4 h-4 mr-2" />
-                Star
-              </a>
-            </div>
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Topbar — Launchpad chrome */}
+        <header className="lp-topbar flex-shrink-0">
+          <div className="lp-brand">
+            <span className="glyph">▲</span>
+            AGENTCORE<em>//</em>LAUNCHPAD
+            <span className="text-ink-3 font-normal tracking-normal">·</span>
+            <span className="text-ink-2">STRANDS STUDIO</span>
           </div>
-
-          {/* Second row - Panel Controls */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-6">
-              {/* Empty space to match left side of first row */}
-              <div className="invisible">
-                <h1 className="text-xl font-semibold text-gray-900">Open Studio for Strands Agent SDK</h1>
-              </div>
-              <div className="invisible flex items-center space-x-1 pl-6 border-l border-gray-200">
-                <span className="text-sm text-gray-600">Project:</span>
-                <span className="text-sm font-medium text-gray-900">Untitled Project</span>
-              </div>
-            </div>
-            <div className="flex items-center space-x-2">
-              <button
-                onClick={() => {
-                  setRightPanelMode('code');
-                  setShowCodePanel(true);
-                }}
-                className={`flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                  showCodePanel && rightPanelMode === 'code'
-                    ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                <Code className="w-4 h-4 mr-2" />
-                Code
-              </button>
-
-              <button
-                onClick={() => {
-                  setRightPanelMode('execution');
-                  setShowCodePanel(true);
-                }}
-                className={`flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                  showCodePanel && rightPanelMode === 'execution'
-                    ? 'bg-green-100 text-green-700 hover:bg-green-200'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                <Terminal className="w-4 h-4 mr-2" />
-                Local Invoke
-              </button>
-
-              <button
-                onClick={() => {
-                  setRightPanelMode('deploy');
-                  setShowCodePanel(true);
-                }}
-                className={`flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                  showCodePanel && rightPanelMode === 'deploy'
-                    ? 'bg-purple-100 text-purple-700 hover:bg-purple-200'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                <Rocket className="w-4 h-4 mr-2" />
-                Deploy to Cloud
-              </button>
-
-              <button
-                onClick={() => {
-                  setRightPanelMode('invoke');
-                  setShowCodePanel(true);
-                }}
-                className={`flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                  showCodePanel && rightPanelMode === 'invoke'
-                    ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                <Play className="w-4 h-4 mr-2" />
-                Cloud Invoke
-              </button>
-
-              <div className="w-px h-6 bg-gray-300 mx-2" />
-
-              <button
-                onClick={() => setShowCodePanel(!showCodePanel)}
-                className="flex items-center px-2 py-2 rounded-md text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors"
-                title={showCodePanel ? 'Hide Panel' : 'Show Panel'}
-              >
-                {showCodePanel ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
+          <div className="lp-crumb hidden md:block">
+            CONSOLE / STUDIO / <b>{(currentProject ? currentProject.name : 'UNTITLED PROJECT').toUpperCase()}</b>
+          </div>
+          <div className="ml-auto flex items-center gap-2.5">
+            {lastSaveTime && (
+              <span className="lp-syschip hidden lg:flex" title="Last save time">
+                SAVED {lastSaveTime.toLocaleTimeString()}
+              </span>
+            )}
+            <span className="lp-syschip"><span className="lp-led" />STUDIO READY</span>
+            <a
+              href="https://github.com/xiehust/strands_studio_ui"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="lp-syschip hover:border-line2 hover:text-ink transition-colors"
+              title="Star us on GitHub"
+            >
+              <GithubIcon className="w-3 h-3" />
+              <Star className="w-3 h-3" />
+              STAR
+            </a>
           </div>
         </header>
+
+        {/* Toolbar — project actions + panel controls */}
+        <div className="flex items-center gap-2 px-4 py-2 border-b border-line bg-panel/60 flex-shrink-0 flex-wrap">
+          <button
+            onClick={handleSaveCurrentProject}
+            className="lp-btn sm"
+            title="Save current project"
+          >
+            <Save className="w-3 h-3" />
+            Save
+          </button>
+
+          <button
+            onClick={handleNewProject}
+            className="lp-btn sm"
+            title="Create new project"
+          >
+            <Plus className="w-3 h-3" />
+            New
+          </button>
+
+          <label className="lp-btn sm" title="Import project">
+            <Upload className="w-3 h-3" />
+            Import
+            <input
+              type="file"
+              accept=".json"
+              onChange={handleImportProject}
+              className="hidden"
+            />
+          </label>
+
+          <button
+            onClick={handleExportCurrentProject}
+            disabled={!currentProject}
+            className="lp-btn sm"
+            title="Export current project"
+          >
+            <Download className="w-3 h-3" />
+            Export
+          </button>
+
+          <button
+            onClick={() => setShowProjectManager(true)}
+            className="lp-btn sm"
+          >
+            <FolderOpen className="w-3 h-3" />
+            Open
+          </button>
+
+          <div className="ml-auto flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => {
+                setRightPanelMode('code');
+                setShowCodePanel(true);
+              }}
+              className={`lp-btn sm ${showCodePanel && rightPanelMode === 'code' ? 'active' : ''}`}
+            >
+              <Code className="w-3 h-3" />
+              Code
+            </button>
+
+            <button
+              onClick={() => {
+                setRightPanelMode('execution');
+                setShowCodePanel(true);
+              }}
+              className={`lp-btn sm ${showCodePanel && rightPanelMode === 'execution' ? 'active' : ''}`}
+            >
+              <Terminal className="w-3 h-3" />
+              Local Invoke
+            </button>
+
+            <button
+              onClick={() => {
+                setRightPanelMode('deploy');
+                setShowCodePanel(true);
+              }}
+              className={`lp-btn sm ${showCodePanel && rightPanelMode === 'deploy' ? 'active' : ''}`}
+            >
+              <Rocket className="w-3 h-3" />
+              Deploy
+            </button>
+
+            <button
+              onClick={() => {
+                setRightPanelMode('invoke');
+                setShowCodePanel(true);
+              }}
+              className={`lp-btn sm ${showCodePanel && rightPanelMode === 'invoke' ? 'active' : ''}`}
+            >
+              <Play className="w-3 h-3" />
+              Cloud Invoke
+            </button>
+
+            <div className="w-px h-5 bg-line mx-1" />
+
+            <button
+              onClick={() => setShowCodePanel(!showCodePanel)}
+              className="lp-btn sm"
+              title={showCodePanel ? 'Hide Panel' : 'Show Panel'}
+            >
+              {showCodePanel ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+            </button>
+          </div>
+        </div>
         
         {/* Flow Editor, Property Panel, and Code Panel */}
         <div className="flex-1 flex">
@@ -520,7 +480,7 @@ export function MainLayout() {
 
       {/* Project Manager Modal */}
       {showProjectManager && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
           <ProjectManagerComponent
             className="w-96 max-h-96 m-4"
             onLoadProject={handleLoadProject}
@@ -531,50 +491,51 @@ export function MainLayout() {
 
       {/* New Project Dialog */}
       {showNewProjectDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-80 mx-4">
-            <h4 className="text-lg font-semibold text-gray-900 mb-4">Create New Project</h4>
-            
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="lp-panel brk lp-rise p-6 w-80 mx-4">
+            <div className="lp-kicker mb-1">// NEW PROJECT</div>
+            <h4 className="lp-title text-lg text-ink mb-4">Create New Project</h4>
+
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="lp-label">
                   Project Name *
                 </label>
                 <input
                   type="text"
                   value={newProjectName}
                   onChange={(e) => setNewProjectName(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                  className="lp-input"
                   placeholder="Enter project name"
                 />
               </div>
-              
+
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="lp-label">
                   Description
                 </label>
                 <textarea
                   value={newProjectDescription}
                   onChange={(e) => setNewProjectDescription(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                  className="lp-input"
                   placeholder="Optional description"
                   rows={3}
                 />
               </div>
             </div>
 
-            <div className="flex justify-end space-x-2 mt-6">
+            <div className="flex justify-end gap-2 mt-6">
               <button
                 onClick={() => setShowNewProjectDialog(false)}
-                className="px-3 py-2 text-sm text-gray-600 hover:text-gray-800"
+                className="lp-btn"
               >
                 Cancel
               </button>
               <button
                 onClick={handleCreateNewProject}
-                className="px-3 py-2 text-sm bg-blue-500 text-white rounded hover:bg-blue-600"
+                className="lp-btn primary"
               >
-                Create Project
+                ▲ Create
               </button>
             </div>
           </div>

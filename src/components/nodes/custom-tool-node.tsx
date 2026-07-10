@@ -28,20 +28,18 @@ export function CustomToolNode({ data, selected, id }: NodeProps) {
   };
 
   return (
-    <div className={`
-      bg-white rounded-lg border-2 shadow-sm min-w-[220px]
-      ${selected ? 'border-blue-500 shadow-lg' : 'border-gray-200 hover:border-purple-200'}
-    `}>
+    <div className={`lp-node min-w-[220px] ${selected ? 'sel' : ''}`}>
       {/* Node Header */}
-      <div className="bg-purple-50 px-4 py-2 border-b border-purple-200 rounded-t-lg flex items-center">
-        <Code className="w-4 h-4 text-purple-600 mr-2" />
-        <span className="text-sm font-semibold text-purple-800">{label}</span>
-        <div className="ml-auto flex items-center space-x-1">
-          <Settings className="w-3 h-3 text-gray-400" />
+      <div className="lp-node-head" style={{ boxShadow: 'inset 2px 0 0 var(--s2)' }}>
+        <Code className="w-4 h-4 text-s2 flex-shrink-0" />
+        <span className="text-[13px] font-semibold text-ink flex-1 truncate">{label}</span>
+        <span className="lp-node-type text-s2">PY TOOL</span>
+        <div className="flex items-center gap-1">
+          <Settings className="w-3 h-3 text-ink-3" />
           {selected && (
             <button
               onClick={handleDelete}
-              className="w-4 h-4 flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+              className="w-4 h-4 flex items-center justify-center text-ink-3 hover:text-crit transition-colors"
               title="Delete node"
             >
               <X className="w-3 h-3" />
@@ -51,18 +49,16 @@ export function CustomToolNode({ data, selected, id }: NodeProps) {
       </div>
 
       {/* Node Content */}
-      <div className="p-3">
+      <div className="px-3 py-2.5">
         <div className="space-y-2">
-          <div className="text-xs text-gray-600">
-            <span className="font-medium">Function:</span> {functionName}
-          </div>
-          
+          <div className="lp-node-kv"><span className="k">FUNCTION</span><span className="v">{functionName}</span></div>
+
           {parameters && parameters.length > 0 && (
             <div className="text-xs">
-              <span className="font-medium text-gray-600">Parameters:</span>
-              <div className="text-gray-700 mt-1">
+              <span className="font-mono text-[10px] text-ink-3">PARAMETERS</span>
+              <div className="mt-1">
                 {parameters.map((param) => (
-                  <span key={param} className="inline-block bg-gray-100 px-2 py-1 rounded text-xs mr-1 mb-1">
+                  <span key={param} className="inline-block font-mono text-[10px] text-ink-2 border border-line-2 bg-panel2 px-1.5 py-0.5 mr-1 mb-1">
                     {param}
                   </span>
                 ))}
@@ -71,14 +67,14 @@ export function CustomToolNode({ data, selected, id }: NodeProps) {
           )}
 
           {description && (
-            <div className="text-xs text-gray-500">
+            <div className="font-mono text-[10px] text-ink-3">
               {description}
             </div>
           )}
 
           {pythonCode && (
             <div className="text-xs">
-              <div className="rounded border max-h-24 overflow-y-auto">
+              <div className="border border-grid max-h-24 overflow-y-auto">
                 <SyntaxHighlighter
                   language="python"
                   style={vscDarkPlus}
@@ -87,7 +83,7 @@ export function CustomToolNode({ data, selected, id }: NodeProps) {
                     lineHeight: '1.2',
                     margin: 0,
                     padding: '8px',
-                    background: '#1e1e1e'
+                    background: '#0A0D0C'
                   }}
                   showLineNumbers={false}
                   wrapLines={true}
@@ -106,7 +102,7 @@ export function CustomToolNode({ data, selected, id }: NodeProps) {
         type="target"
         position={Position.Left}
         id="config"
-        className="!bg-gray-500 !w-3 !h-3 !absolute"
+        className="!bg-line-2 !w-3 !h-3 !absolute"
         style={{ left: -6 }}
       />
 
@@ -116,10 +112,10 @@ export function CustomToolNode({ data, selected, id }: NodeProps) {
           type="source"
           position={Position.Right}
           id="tool-output"
-          className="!bg-orange-500 !w-3 !h-3 !relative !transform-none"
+          className="!bg-s3 !w-3 !h-3 !relative !transform-none"
           style={{ position: 'relative', right: 0, top: 0 }}
         />
-        <span className="text-[10px] font-medium text-orange-600 bg-white px-1 rounded ml-0.5">Tool</span>
+        <span className="lp-handle-tag text-s3 ml-0.5">Tool</span>
       </div>
     </div>
   );
