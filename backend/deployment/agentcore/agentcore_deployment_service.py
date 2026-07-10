@@ -82,7 +82,8 @@ class AgentCoreDeploymentService:
         self,
         generated_code: str,
         config: AgentCoreDeploymentConfig,
-        deployment_id: Optional[str] = None
+        deployment_id: Optional[str] = None,
+        flow_data: Optional[Dict[str, Any]] = None,
     ) -> AgentCoreDeploymentResult:
         """
         Deploy a Strands agent to AWS Bedrock AgentCore via direct code deploy.
@@ -91,6 +92,10 @@ class AgentCoreDeploymentService:
             generated_code: The Python code generated from the visual flow
             config: Deployment configuration
             deployment_id: Optional deployment ID used for progress streaming
+            flow_data: Optional visual flow ({nodes, edges}); used to find skill
+                       nodes so their library directories are bundled into the zip.
+                       Without it, skill names are extracted from the generated
+                       code's `os.path.join(_skills_dir, "<name>")` calls.
 
         Returns:
             AgentCoreDeploymentResult with deployment status and details
@@ -167,11 +172,17 @@ class AgentCoreDeploymentService:
             async def package_log(message: str):
                 await log(message, step="Building deployment package")
 
+            # Bundle Studio skill library directories referenced by the flow
+            skill_names = self._extract_skill_names(generated_code, flow_data)
+            if skill_names:
+                await log(f"Flow references skills: {', '.join(skill_names)}")
+
             zip_path = await self.package_builder.build_package(
                 workspace_dir=workspace_dir,
                 source_files=source_files,
                 requirements_content=requirements_content,
                 log=package_log,
+                skill_names=skill_names,
             )
 
             # 3. Ensure S3 artifact bucket and upload
@@ -295,6 +306,36 @@ class AgentCoreDeploymentService:
     # ------------------------------------------------------------------
     # Naming / progress helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _extract_skill_names(
+        generated_code: str,
+        flow_data: Optional[Dict[str, Any]] = None,
+    ) -> List[str]:
+        """
+        Determine which Studio skill library skills the flow references.
+
+        Preferred source: flow_data nodes of type 'skill' (data.skillName).
+        Fallback: the generated-code contract's emission pattern
+        `os.path.join(_skills_dir, "<name>")` (contract_spec.md §10).
+        """
+        names: List[str] = []
+        if flow_data and isinstance(flow_data.get("nodes"), list):
+            for node in flow_data["nodes"]:
+                if not isinstance(node, dict) or node.get("type") != "skill":
+                    continue
+                skill_name = (node.get("data") or {}).get("skillName")
+                if skill_name and skill_name not in names:
+                    names.append(skill_name)
+            if names:
+                return names
+        # Fallback: extract from the code emission pattern
+        for match in re.findall(
+            r'os\.path\.join\(\s*_skills_dir\s*,\s*"([a-z0-9-]+)"\s*\)', generated_code
+        ):
+            if match not in names:
+                names.append(match)
+        return names
 
     @staticmethod
     def _sanitize_runtime_name(name: str) -> str:

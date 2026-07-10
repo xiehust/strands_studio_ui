@@ -128,6 +128,23 @@ decorator. Extract the function name from the `def` line and pass it in the
 connected agent's `tools=[...]` list. If `pythonCode` is empty, emit a
 placeholder `custom_tool(input_text: str) -> str` function.
 
+### `skill` — Studio skill library reference
+
+| Field | Meaning |
+|---|---|
+| `skillName` | Name of an imported library skill (lowercase alphanumeric + hyphens) |
+| `label`, `description` | Informational only |
+
+A skill node attaches an Agent Skill (SKILL.md-based plugin) to the agent(s)
+it connects to. It generates no standalone code; its effect is the
+`plugins=[AgentSkills(skills=[os.path.join(_skills_dir, "<skillName>")])]`
+kwarg on the connected agent, plus the one-time module-level `_skills_dir`
+assignment and imports — follow `contract_spec.md` rule 10 EXACTLY. Use
+`skillName` verbatim (never sanitize it). A skill node may connect to multiple
+agents; each connected agent lists it in its own `AgentSkills(skills=[...])`.
+Skill nodes never connect to swarm nodes — like tools, skills attach to the
+individual member agents inside a swarm.
+
 ### `mcp-tool` — MCP server connection
 
 | Field | Meaning |
@@ -180,6 +197,7 @@ Each MCP server node connects to exactly one agent (enforced by the editor).
 | `tool.tool-output` → `agent\|orchestrator-agent.tools` | Attach built-in tool to the agent's `tools` list |
 | `custom-tool.tool-output` → `agent\|orchestrator-agent.tools` | Attach custom `@tool` function |
 | `mcp-tool.mcp-tools` → `agent\|orchestrator-agent.tools` | Attach MCP server's tools (context-manager pattern above) |
+| `skill.*` → `agent\|orchestrator-agent.tools` | Attach a library skill via `plugins=[AgentSkills(...)]` (contract rule 10; any edge from a `skill` node counts; never valid toward swarm nodes) |
 | `orchestrator-agent.sub-agents` → `agent.orchestrator-input` | Target agent is a sub-agent: wrap as `@tool` function, add to orchestrator's tools |
 | `orchestrator-agent.sub-agents` → `orchestrator-agent.orchestrator-input` | Hierarchical: the target orchestrator itself becomes a `@tool` of the source orchestrator |
 | `swarm.sub-agents` → `agent.orchestrator-input` | Target agent is a swarm member (construct with `name=`, include in the `Swarm([...])` list) |

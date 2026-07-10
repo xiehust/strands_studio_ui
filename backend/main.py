@@ -159,6 +159,22 @@ except ImportError as e:
 except Exception as e:
     logger.warning(f"AI codegen routes disabled - error: {e}")
 
+# Skill library routes + STUDIO_SKILLS_DIR for generated-code skill resolution.
+# Generated code resolves skills via `os.environ.get("STUDIO_SKILLS_DIR")` with a
+# `Path(__file__).parent / "skills"` fallback (contract_spec.md §10). Setting the
+# env var here covers local execution AND chat subprocesses (which inherit the
+# backend process env via conversation_service).
+try:
+    from app.routers.skills import router as skills_router
+    from app.services.skill_service import SKILLS_ROOT
+    os.environ.setdefault("STUDIO_SKILLS_DIR", str(SKILLS_ROOT.resolve()))
+    app.include_router(skills_router)
+    logger.info(f"Skill library routes enabled (STUDIO_SKILLS_DIR={os.environ['STUDIO_SKILLS_DIR']})")
+except ImportError as e:
+    logger.warning(f"Skill library routes disabled - missing dependencies: {e}")
+except Exception as e:
+    logger.warning(f"Skill library routes disabled - error: {e}")
+
 # Data models
 class NodeData(BaseModel):
     id: str
@@ -332,6 +348,10 @@ def _build_execution_env(openai_api_key: Optional[str] = None, bedrock_api_key: 
     # Skip strands tool consent prompts (would hang headless subprocess runs)
     env["BYPASS_TOOL_CONSENT"] = "true"
     env["STRANDS_NON_INTERACTIVE"] = "true"
+    # Skill library location for generated code (explicit, in case the copy()
+    # above is ever replaced by an allowlist during a refactor)
+    if os.environ.get("STUDIO_SKILLS_DIR"):
+        env["STUDIO_SKILLS_DIR"] = os.environ["STUDIO_SKILLS_DIR"]
     if openai_api_key:
         env["OPENAI_API_KEY"] = openai_api_key
     if bedrock_api_key:

@@ -30,6 +30,11 @@ TARGET_PYTHON_VERSION = "3.13"
 MAX_ZIP_SIZE_BYTES = 250 * 1024 * 1024      # 250 MB zipped
 MAX_UNZIPPED_SIZE_BYTES = 750 * 1024 * 1024  # 750 MB unzipped
 
+# Studio skill library root (backend/storage/skills); skills referenced by the
+# flow are copied into the zip under `skills/{name}/` so the generated code's
+# `Path(__file__).parent / "skills"` fallback resolves them inside the runtime.
+DEFAULT_SKILLS_ROOT = Path(__file__).parent.parent.parent / "storage" / "skills"
+
 # Optional async callback: (message) -> None
 LogCallback = Optional[Callable[[str], Awaitable[None]]]
 
@@ -57,6 +62,8 @@ class AgentCorePackageBuilder:
         source_files: Dict[str, str],
         requirements_content: str,
         log: LogCallback = None,
+        skill_names: Optional[List[str]] = None,
+        skills_root: Optional[Path] = None,
     ) -> Path:
         """
         Build the deployment zip.
@@ -67,6 +74,10 @@ class AgentCorePackageBuilder:
                           root (must include the entrypoint file, e.g. agent_runtime.py)
             requirements_content: requirements.txt content for vendored dependencies
             log: Optional async progress log callback
+            skill_names: Studio skill library skills referenced by the flow; each is
+                         copied into the zip as `skills/{name}/`. Missing skills are
+                         logged as warnings and skipped (never block the deploy).
+            skills_root: Skill library root (defaults to backend/storage/skills)
 
         Returns:
             Path to the built zip file
@@ -82,6 +93,21 @@ class AgentCorePackageBuilder:
             source_paths.append(source_path)
         (workspace_dir / "requirements.txt").write_text(requirements_content, encoding="utf-8")
 
+        # Resolve skill directories to bundle under skills/{name}/
+        skill_dirs: List[Path] = []
+        root = Path(skills_root) if skills_root else DEFAULT_SKILLS_ROOT
+        for skill_name in skill_names or []:
+            skill_dir = root / skill_name
+            if skill_dir.is_dir():
+                skill_dirs.append(skill_dir)
+                await self._log(log, f"Bundling skill '{skill_name}' into deployment package")
+            else:
+                await self._log(
+                    log,
+                    f"Warning: skill '{skill_name}' referenced by the flow was not found "
+                    f"in the skill library ({root}); deploying without it",
+                )
+
         # Vendor dependencies (cached by requirements hash)
         pkg_dir = await self._ensure_vendored_deps(requirements_content, log)
 
@@ -89,7 +115,7 @@ class AgentCorePackageBuilder:
         zip_path = workspace_dir / "deployment_package.zip"
         await self._log(log, "Assembling deployment package zip...")
         unzipped_size = await asyncio.to_thread(
-            self._assemble_zip, zip_path, pkg_dir, source_paths
+            self._assemble_zip, zip_path, pkg_dir, source_paths, skill_dirs
         )
 
         zip_size = zip_path.stat().st_size
@@ -193,10 +219,16 @@ class AgentCorePackageBuilder:
             return final_dir / "pkg"
 
     @staticmethod
-    def _assemble_zip(zip_path: Path, pkg_dir: Path, extra_files: List[Path]) -> int:
+    def _assemble_zip(
+        zip_path: Path,
+        pkg_dir: Path,
+        extra_files: List[Path],
+        skill_dirs: Optional[List[Path]] = None,
+    ) -> int:
         """
-        Write the deployment zip: vendored deps at root + extra files at root.
-        Skips __pycache__ / *.pyc. Enforces 644/755 permissions.
+        Write the deployment zip: vendored deps at root + extra files at root
+        + skill directories under `skills/{name}/`.
+        Skips __pycache__ / *.pyc / .studio-meta.json. Enforces 644/755 permissions.
 
         Returns:
             Total unzipped size in bytes
@@ -217,6 +249,16 @@ class AgentCorePackageBuilder:
 
             for extra in extra_files:
                 total_size += AgentCorePackageBuilder._write_zip_entry(zf, extra, extra.name)
+
+            for skill_dir in skill_dirs or []:
+                for root, dirs, files in os.walk(skill_dir):
+                    dirs[:] = [d for d in dirs if d != "__pycache__"]
+                    for filename in sorted(files):
+                        if filename.endswith(".pyc") or filename == ".studio-meta.json":
+                            continue
+                        file_path = Path(root) / filename
+                        arcname = f"skills/{skill_dir.name}/{file_path.relative_to(skill_dir)}"
+                        total_size += AgentCorePackageBuilder._write_zip_entry(zf, file_path, arcname)
 
         return total_size
 

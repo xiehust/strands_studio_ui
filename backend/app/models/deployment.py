@@ -52,6 +52,10 @@ class AgentCoreDeploymentRequest(BaseDeploymentRequest):
     # 可选参数（有合理默认值）
     region: str = Field("us-east-1", description="AWS 区域")
 
+    # Optional visual flow ({nodes, edges}); used to bundle referenced Studio
+    # skills into the deployment package (fallback: regex over the code)
+    flow_data: Optional[Dict[str, Any]] = Field(None, description="Visual flow data (nodes/edges)")
+
     @field_validator('agent_name')
     @classmethod
     def validate_agent_name(cls, v: str) -> str:

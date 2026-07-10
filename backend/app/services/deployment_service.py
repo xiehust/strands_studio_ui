@@ -366,8 +366,11 @@ class DeploymentService:
             status.message = "Deploying to AWS Bedrock AgentCore"
             self.deployments[deployment_id] = status
 
-            # Perform deployment
-            result = await agentcore_service.deploy_agent(request.code, config, deployment_id)
+            # Perform deployment (flow_data lets the service bundle referenced skills)
+            result = await agentcore_service.deploy_agent(
+                request.code, config, deployment_id,
+                flow_data=getattr(request, 'flow_data', None),
+            )
 
             # Update final status
             if result.success:

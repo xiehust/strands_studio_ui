@@ -184,3 +184,49 @@ Never hardcode API keys or credentials. Even if the flow JSON contains an
 - Python identifiers derived from node labels: lowercase the label and replace
   every non-alphanumeric character with `_`, collapsing repeats
   (e.g. `"Research Agent"` → `research_agent`). Keep names unique.
+
+## 10. Skills (Studio skill library)
+
+When the flow contains `skill` nodes (see `flow_semantics.md`), the generated
+code loads them via the `AgentSkills` plugin using this EXACT resolution
+convention (deployment tooling extracts skill names from the emitted pattern):
+
+1. Emit once at module top level (after the imports):
+
+```python
+_skills_dir = os.environ.get("STUDIO_SKILLS_DIR") or str(Path(__file__).parent / "skills")
+```
+
+   - Locally / in chat, the platform sets `STUDIO_SKILLS_DIR` to the Studio
+     skill library. In deployed runtimes the env var is absent and skills are
+     bundled next to the code in a `skills/` directory — the fallback finds them.
+   - The assignment is a plain constant; it keeps the import side-effect free.
+
+2. Add the required imports: `from strands import AgentSkills` (extend the
+   existing `from strands import Agent, tool` line) and
+   `from pathlib import Path`. `import os` is already required.
+
+3. For every agent-like node with connected skill nodes, append a `plugins`
+   kwarg to its `Agent(...)` constructor:
+
+```python
+my_agent = Agent(
+    model=my_agent_model,
+    system_prompt="...",
+    tools=[...],
+    callback_handler=None,
+    plugins=[AgentSkills(skills=[os.path.join(_skills_dir, "skill-name")])],
+)
+```
+
+   - One `AgentSkills(skills=[...])` per agent, listing ALL of that agent's
+     connected skills as `os.path.join(_skills_dir, "<name>")` entries.
+   - Skill path entries must use exactly the `os.path.join(_skills_dir, "<name>")`
+     form with a double-quoted literal name — no f-strings, no `/` operator,
+     no intermediate variables (the platform detects skill usage by this pattern).
+   - Skill names are lowercase alphanumeric with hyphens (`[a-z0-9-]+`), taken
+     verbatim from the node's `skillName` — never sanitize them into `_` form.
+   - This applies everywhere agents are constructed: top-level agents, swarm
+     member agents, and agents inside `@tool` wrapper functions.
+   - Agents without connected skill nodes get NO `plugins` kwarg. If no skill
+     nodes exist in the flow, none of the above appears in the file.
