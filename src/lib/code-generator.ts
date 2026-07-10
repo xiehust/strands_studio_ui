@@ -255,7 +255,6 @@ function generateAgentModelOnly(
     maxTokens = 4000,
     baseUrl = '',
     thinkingEnabled = false,
-    thinkingBudgetTokens = 2048,
     reasoningEffort = 'medium',
   } = data;
 
@@ -266,7 +265,7 @@ function generateAgentModelOnly(
   const agentVarName = sanitizePythonVariableName(label as string);
 
   // Generate model configuration based on provider
-  const modelConfig = generateModelConfigForCode(agentVarName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, thinkingBudgetTokens as number, reasoningEffort as string);
+  const modelConfig = generateModelConfigForCode(agentVarName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, reasoningEffort as string);
 
   return `# ${label} Configuration
 ${modelConfig}`;
@@ -289,7 +288,6 @@ function generateAgentCode(
     maxTokens = 4000,
     baseUrl = '',
     thinkingEnabled = false,
-    thinkingBudgetTokens = 2048,
     reasoningEffort = 'medium',
   } = data;
 
@@ -309,7 +307,7 @@ function generateAgentCode(
   const systemPromptValue = String(systemPrompt || 'You are a helpful AI assistant.');
 
   // Generate model configuration based on provider
-  const modelConfig = generateModelConfigForCode(agentVarName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, thinkingBudgetTokens as number, reasoningEffort as string);
+  const modelConfig = generateModelConfigForCode(agentVarName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, reasoningEffort as string);
 
   return `# ${label} Configuration
 ${modelConfig}
@@ -338,7 +336,6 @@ function generateSwarmAgentCode(
     maxTokens = 4000,
     baseUrl = '',
     thinkingEnabled = false,
-    thinkingBudgetTokens = 2048,
     reasoningEffort = 'medium',
   } = data;
 
@@ -358,7 +355,7 @@ function generateSwarmAgentCode(
   const systemPromptValue = String(systemPrompt || 'You are a helpful AI assistant.');
 
   // Generate model configuration based on provider
-  const modelConfig = generateModelConfigForCode(agentVarName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, thinkingBudgetTokens as number, reasoningEffort as string);
+  const modelConfig = generateModelConfigForCode(agentVarName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, reasoningEffort as string);
 
   return `# ${label} Configuration
 ${modelConfig}
@@ -1014,7 +1011,6 @@ function generateAgentAsToolCode(
     maxTokens = 4000,
     baseUrl = '',
     thinkingEnabled = false,
-    thinkingBudgetTokens = 2048,
     reasoningEffort = 'medium',
   } = data;
 
@@ -1053,7 +1049,7 @@ def ${functionName}(user_input: str) -> str:
         ${mcpClientVars.map(clientVar => `mcp_tools.extend(${clientVar}.list_tools_sync())`).join('\n        ')}
         
         # Create model for ${label}
-        ${generateModelConfigForTool(functionName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, thinkingBudgetTokens as number, reasoningEffort as string)}
+        ${generateModelConfigForTool(functionName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, reasoningEffort as string)}
 
         # Create agent with MCP tools
         agent = Agent(
@@ -1077,7 +1073,7 @@ def ${functionName}(user_input: str) -> str:
     """${label} - ${(systemPrompt as string).substring(0, 100)}${(systemPrompt as string).length > 100 ? '...' : ''}"""
     
     # Create model for ${label}
-    ${generateModelConfigForTool(functionName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, thinkingBudgetTokens as number, reasoningEffort as string)}
+    ${generateModelConfigForTool(functionName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, reasoningEffort as string)}
 
     # Create agent
     agent = Agent(
@@ -1113,7 +1109,6 @@ function generateOrchestratorAsToolCode(
     coordinationPrompt = '',
     baseUrl = '',
     thinkingEnabled = false,
-    thinkingBudgetTokens = 2048,
     reasoningEffort = 'medium',
   } = data;
 
@@ -1171,7 +1166,7 @@ def ${functionName}(user_input: str) -> str:
         ${mcpClientVars.map(clientVar => `mcp_tools.extend(${clientVar}.list_tools_sync())`).join('\n        ')}
         
         # Create model for ${label}
-        ${generateModelConfigForTool(functionName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, thinkingBudgetTokens as number, reasoningEffort as string)}
+        ${generateModelConfigForTool(functionName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, reasoningEffort as string)}
 
         # Create orchestrator agent with MCP tools
         agent = Agent(
@@ -1195,7 +1190,7 @@ def ${functionName}(user_input: str) -> str:
     """${label} - ${(systemPrompt as string).substring(0, 100)}${(systemPrompt as string).length > 100 ? '...' : ''}"""
     
     # Create model for ${label}
-    ${generateModelConfigForTool(functionName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, thinkingBudgetTokens as number, reasoningEffort as string)}
+    ${generateModelConfigForTool(functionName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, reasoningEffort as string)}
 
     # Create orchestrator agent
     agent = Agent(
@@ -1226,7 +1221,6 @@ function generateOrchestratorModelOnly(
     maxTokens = 4000,
     baseUrl = '',
     thinkingEnabled = false,
-    thinkingBudgetTokens = 2048,
     reasoningEffort = 'medium',
   } = data;
 
@@ -1235,7 +1229,7 @@ function generateOrchestratorModelOnly(
   const orchestratorName = sanitizePythonVariableName(label as string);
 
   // Generate model configuration based on provider
-  const modelConfig = generateModelConfigForCode(orchestratorName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, thinkingBudgetTokens as number, reasoningEffort as string);
+  const modelConfig = generateModelConfigForCode(orchestratorName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, reasoningEffort as string);
 
   return `# ${label} Configuration
 ${modelConfig}`;
@@ -1259,7 +1253,6 @@ function generateOrchestratorCode(
     coordinationPrompt = '',
     baseUrl = '',
     thinkingEnabled = false,
-    thinkingBudgetTokens = 2048,
     reasoningEffort = 'medium',
   } = data;
 
@@ -1316,14 +1309,14 @@ function generateOrchestratorCode(
 
   if (hasMCPTools) {
     // When MCP tools are present, only define the model - agent creation happens in main()
-    const modelConfig = generateModelConfigForCode(orchestratorName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, thinkingBudgetTokens as number, reasoningEffort as string);
+    const modelConfig = generateModelConfigForCode(orchestratorName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, reasoningEffort as string);
     return `# ${label} Configuration
 ${modelConfig}
 
 # ${orchestratorName} will be created in main() with MCP tools`;
   } else {
     // Regular orchestrator without MCP tools
-    const modelConfig = generateModelConfigForCode(orchestratorName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, thinkingBudgetTokens as number, reasoningEffort as string);
+    const modelConfig = generateModelConfigForCode(orchestratorName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, reasoningEffort as string);
     return `# ${label} Configuration
 ${modelConfig}
 
@@ -1343,7 +1336,6 @@ function generateModelConfigForCode(
   maxTokens: number,
   baseUrl: string,
   thinkingEnabled?: boolean,
-  thinkingBudgetTokens?: number,
   reasoningEffort?: string
 ): string {
   // When thinking is enabled for Bedrock, temperature must be 1
@@ -1351,13 +1343,20 @@ function generateModelConfigForCode(
   const finalTemperature = thinkingEnabled && isBedrock ? 1 : temperature;
 
   if (modelProvider === MANTLE_PROVIDER) {
-    // Amazon Bedrock (Mantle): OpenAI-compatible endpoint via the Responses API
+    // Amazon Bedrock (Mantle): OpenAI-compatible endpoint via the Responses API.
+    // gpt/grok reasoning models take reasoning={"effort": ...}; when reasoning
+    // is on, temperature is omitted (reasoning models reject non-default temp).
     const clientArgs = [
       `"api_key": os.environ.get("BEDROCK_API_KEY")`,
       `"base_url": "${baseUrl}"`,
     ];
     const clientArgsStr = `\n    client_args={\n        ${clientArgs.join(',\n        ')}\n    },`;
-    const params = [`"max_output_tokens": ${maxTokens}`, `"temperature": ${finalTemperature}`];
+    const params = [`"max_output_tokens": ${maxTokens}`];
+    if (thinkingEnabled && reasoningEffort) {
+      params.push(`"reasoning": {"effort": "${reasoningEffort}"}`);
+    } else {
+      params.push(`"temperature": ${temperature}`);
+    }
     return `${varName}_model = OpenAIResponsesModel(${clientArgsStr}
     model_id="${modelIdentifier}",
     params={
@@ -1386,18 +1385,18 @@ function generateModelConfigForCode(
     }
 )`;
   } else {
-    // Default to Bedrock
+    // Default to Bedrock. Claude 4.6+ uses adaptive thinking (budget_tokens is
+    // rejected on Sonnet 5 / Opus 4.8); Bedrock requires temperature=1 with it.
     let bedrockCode = `${varName}_model = BedrockModel(
     model_id="${modelIdentifier}",
     temperature=${finalTemperature},
     max_tokens=${maxTokens}`;
 
-    if (thinkingEnabled && thinkingBudgetTokens) {
+    if (thinkingEnabled) {
       bedrockCode += `,
     additional_request_fields={
         "thinking": {
-            "type": "enabled",
-            "budget_tokens": ${thinkingBudgetTokens}
+            "type": "adaptive"
         }
     }`;
     }
@@ -1415,7 +1414,6 @@ function generateModelConfigForTool(
   maxTokens: number,
   baseUrl: string,
   thinkingEnabled?: boolean,
-  thinkingBudgetTokens?: number,
   reasoningEffort?: string
 ): string {
   // When thinking is enabled for Bedrock, temperature must be 1
@@ -1429,7 +1427,12 @@ function generateModelConfigForTool(
       `"base_url": "${baseUrl}"`,
     ];
     const clientArgsStr = `\n            client_args={\n                ${clientArgs.join(',\n                ')}\n            },`;
-    const params = [`"max_output_tokens": ${maxTokens}`, `"temperature": ${finalTemperature}`];
+    const params = [`"max_output_tokens": ${maxTokens}`];
+    if (thinkingEnabled && reasoningEffort) {
+      params.push(`"reasoning": {"effort": "${reasoningEffort}"}`);
+    } else {
+      params.push(`"temperature": ${temperature}`);
+    }
     return `${varName}_model = OpenAIResponsesModel(${clientArgsStr}
             model_id="${modelIdentifier}",
             params={
@@ -1458,18 +1461,17 @@ function generateModelConfigForTool(
             }
         )`;
   } else {
-    // Default to Bedrock
+    // Default to Bedrock — adaptive thinking (see generateModelConfigForCode)
     let bedrockCode = `${varName}_model = BedrockModel(
             model_id="${modelIdentifier}",
             temperature=${finalTemperature},
             max_tokens=${maxTokens}`;
 
-    if (thinkingEnabled && thinkingBudgetTokens) {
+    if (thinkingEnabled) {
       bedrockCode += `,
             additional_request_fields={
                 "thinking": {
-                    "type": "enabled",
-                    "budget_tokens": ${thinkingBudgetTokens}
+                    "type": "adaptive"
                 }
             }`;
     }

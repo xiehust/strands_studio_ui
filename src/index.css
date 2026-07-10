@@ -598,6 +598,11 @@
     padding: 10px 12px;
     line-height: 1.5;
   }
+  .lp-note-icon {
+    color: var(--amber);
+    font-family: var(--mono);
+    flex-shrink: 0;
+  }
 
   /* --- sidebar nav (node palette) --- */
   .lp-side-label {

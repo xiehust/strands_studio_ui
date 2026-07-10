@@ -390,30 +390,16 @@ export function PropertyPanel({
             <span className="text-[12px] font-medium text-ink-2">Enable Thinking</span>
           </label>
           <p className="font-mono text-[10px] text-ink-3 mt-1.5 leading-relaxed">
-            Enable extended thinking for more complex reasoning
+            Claude → adaptive thinking; GPT / Grok → reasoning effort
           </p>
         </div>
 
         {data.thinkingEnabled && (
           <>
             {data.modelProvider === 'AWS Bedrock' || !data.modelProvider ? (
-              <div className="mt-3">
-                <label className="lp-label">
-                  Thinking Budget Tokens: {data.thinkingBudgetTokens || 2048}
-                </label>
-                <input
-                  type="range"
-                  min="1024"
-                  max="8192"
-                  step="512"
-                  value={data.thinkingBudgetTokens || 2048}
-                  onChange={(e) => handleInputChange('thinkingBudgetTokens', parseInt(e.target.value))}
-                  className="w-full"
-                />
-                <div className="flex justify-between font-mono text-[10px] text-ink-3 mt-1">
-                  <span>1,024</span>
-                  <span>8,192</span>
-                </div>
+              <div className="mt-3 lp-note">
+                <span className="lp-note-icon">◇</span>
+                <span>Adaptive thinking — Claude decides thinking depth per request. Temperature is pinned to 1 while thinking is on.</span>
               </div>
             ) : (
               <div className="mt-3">
@@ -425,9 +411,11 @@ export function PropertyPanel({
                   onChange={(e) => handleInputChange('reasoningEffort', e.target.value)}
                   className="lp-input"
                 >
+                  <option value="minimal">Minimal</option>
                   <option value="low">Low</option>
                   <option value="medium">Medium</option>
                   <option value="high">High</option>
+                  <option value="xhigh">Extra High</option>
                 </select>
               </div>
             )}
@@ -963,30 +951,16 @@ export function PropertyPanel({
             <span className="text-[12px] font-medium text-ink-2">Enable Thinking</span>
           </label>
           <p className="font-mono text-[10px] text-ink-3 mt-1.5 leading-relaxed">
-            Enable extended thinking for more complex reasoning
+            Claude → adaptive thinking; GPT / Grok → reasoning effort
           </p>
         </div>
 
         {data.thinkingEnabled && (
           <>
             {data.modelProvider === 'AWS Bedrock' || !data.modelProvider ? (
-              <div className="mt-3">
-                <label className="lp-label">
-                  Thinking Budget Tokens: {data.thinkingBudgetTokens || 2048}
-                </label>
-                <input
-                  type="range"
-                  min="1024"
-                  max="8192"
-                  step="512"
-                  value={data.thinkingBudgetTokens || 2048}
-                  onChange={(e) => handleInputChange('thinkingBudgetTokens', parseInt(e.target.value))}
-                  className="w-full"
-                />
-                <div className="flex justify-between font-mono text-[10px] text-ink-3 mt-1">
-                  <span>1,024</span>
-                  <span>8,192</span>
-                </div>
+              <div className="mt-3 lp-note">
+                <span className="lp-note-icon">◇</span>
+                <span>Adaptive thinking — Claude decides thinking depth per request. Temperature is pinned to 1 while thinking is on.</span>
               </div>
             ) : (
               <div className="mt-3">
@@ -998,9 +972,11 @@ export function PropertyPanel({
                   onChange={(e) => handleInputChange('reasoningEffort', e.target.value)}
                   className="lp-input"
                 >
+                  <option value="minimal">Minimal</option>
                   <option value="low">Low</option>
                   <option value="medium">Medium</option>
                   <option value="high">High</option>
+                  <option value="xhigh">Extra High</option>
                 </select>
               </div>
             )}

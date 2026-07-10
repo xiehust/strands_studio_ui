@@ -43,7 +43,6 @@ function generateModelConfig(
   maxTokens: number,
   baseUrl: string,
   thinkingEnabled?: boolean,
-  thinkingBudgetTokens?: number,
   reasoningEffort?: string
 ): string {
   // When thinking is enabled for Bedrock, temperature must be 1
@@ -57,7 +56,12 @@ function generateModelConfig(
       `"base_url": "${baseUrl}"`,
     ];
     const clientArgsStr = `\n    client_args={\n        ${clientArgs.join(',\n        ')}\n    },`;
-    const params = [`"max_output_tokens": ${maxTokens}`, `"temperature": ${finalTemperature}`];
+    const params = [`"max_output_tokens": ${maxTokens}`];
+    if (thinkingEnabled && reasoningEffort) {
+      params.push(`"reasoning": {"effort": "${reasoningEffort}"}`);
+    } else {
+      params.push(`"temperature": ${temperature}`);
+    }
     return `${varName}_model = OpenAIResponsesModel(${clientArgsStr}
     model_id="${modelIdentifier}",
     params={
@@ -84,18 +88,17 @@ function generateModelConfig(
     }
 )`;
   } else {
-    // Default to Bedrock
+    // Default to Bedrock — Claude 4.6+ adaptive thinking (see code-generator.ts)
     let bedrockCode = `${varName}_model = BedrockModel(
     model_id="${modelIdentifier}",
     temperature=${finalTemperature},
     max_tokens=${maxTokens}`;
 
-    if (thinkingEnabled && thinkingBudgetTokens) {
+    if (thinkingEnabled) {
       bedrockCode += `,
     additional_request_fields={
         "thinking": {
-            "type": "enabled",
-            "budget_tokens": ${thinkingBudgetTokens}
+            "type": "adaptive"
         }
     }`;
     }
@@ -345,7 +348,6 @@ export function generateGraphCode(
       const maxTokens = data.maxTokens || 4000;
       const baseUrl = data.baseUrl || '';
       const thinkingEnabled = data.thinkingEnabled || false;
-      const thinkingBudgetTokens = data.thinkingBudgetTokens || 2048;
       const reasoningEffort = data.reasoningEffort || 'medium';
 
       const modelIdentifier = modelProvider === 'AWS Bedrock' ? modelId : modelName;
@@ -358,7 +360,7 @@ export function generateGraphCode(
         : '';
 
       // Generate model config
-      const modelConfig = generateModelConfig(agentVarName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, thinkingBudgetTokens as number, reasoningEffort as string);
+      const modelConfig = generateModelConfig(agentVarName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, reasoningEffort as string);
 
       code += `# ${label} Configuration\n`;
       code += modelConfig + '\n\n';
