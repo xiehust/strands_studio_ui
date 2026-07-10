@@ -9,6 +9,10 @@ import traceback
 import asyncio
 from typing import Dict, Any, Optional, AsyncGenerator
 
+# Harden runtime: skip strands tool consent prompts (would hang headless runs)
+os.environ.setdefault('BYPASS_TOOL_CONSENT', 'true')
+os.environ.setdefault('STRANDS_NON_INTERACTIVE', 'true')
+
 # Import AgentCore Runtime SDK
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 
@@ -136,13 +140,14 @@ async def execute_strands_agent(prompt: str, input_data: Optional[str] = None) -
             
         # Set bypass tool consent
         os.environ['BYPASS_TOOL_CONSENT'] = "true"
-        
+        os.environ['STRANDS_NON_INTERACTIVE'] = "true"
+
         # This is a placeholder - the actual generated code will be injected here
         # The generated code should define the main agent and its execution logic
-        
+
         # Default simple agent for testing
         model = BedrockModel(
-            model_id="us.anthropic.claude-3-haiku-20240307-v1:0",
+            model_id="us.anthropic.claude-haiku-4-5-20251001-v1:0",
             temperature=0.7,
             max_tokens=4000
         )
@@ -184,12 +189,13 @@ async def execute_strands_agent_streaming(prompt: str, input_data: Optional[str]
         
         # Set bypass tool consent
         os.environ['BYPASS_TOOL_CONSENT'] = "true"
-        
+        os.environ['STRANDS_NON_INTERACTIVE'] = "true"
+
         # This is a placeholder - the actual generated streaming code will be injected here
-        
+
         # Default streaming agent for testing
         model = BedrockModel(
-            model_id="us.anthropic.claude-3-haiku-20240307-v1:0",
+            model_id="us.anthropic.claude-haiku-4-5-20251001-v1:0",
             temperature=0.7,
             max_tokens=4000
         )

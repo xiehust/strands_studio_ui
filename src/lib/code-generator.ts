@@ -1,5 +1,6 @@
 import { type Node, type Edge } from '@xyflow/react';
 import { generateGraphCode } from './graph-code-generator';
+import { DEFAULT_MODEL_ID } from './models';
 
 interface CodeGenerationResult {
   code: string;
@@ -243,7 +244,7 @@ function generateAgentModelOnly(
   const {
     label = `Agent${index + 1}`,
     modelProvider = 'AWS Bedrock',
-    modelId = 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+    modelId = DEFAULT_MODEL_ID,
     modelName = 'Claude 3.7 Sonnet',
     temperature = 0.7,
     maxTokens = 4000,
@@ -276,7 +277,7 @@ function generateAgentCode(
   const {
     label = `Agent${index + 1}`,
     modelProvider = 'AWS Bedrock',
-    modelId = 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+    modelId = DEFAULT_MODEL_ID,
     modelName = 'Claude 3.7 Sonnet',
     systemPrompt = 'You are a helpful AI assistant.',
     temperature = 0.7,
@@ -325,7 +326,7 @@ function generateSwarmAgentCode(
   const {
     label = `Agent${index + 1}`,
     modelProvider = 'AWS Bedrock',
-    modelId = 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+    modelId = DEFAULT_MODEL_ID,
     modelName = 'Claude 3.7 Sonnet',
     systemPrompt = 'You are a helpful AI assistant.',
     temperature = 0.7,
@@ -1002,7 +1003,7 @@ function generateAgentAsToolCode(
   const {
     label = `Agent${index + 1}`,
     modelProvider = 'AWS Bedrock',
-    modelId = 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+    modelId = DEFAULT_MODEL_ID,
     modelName = 'Claude 3.7 Sonnet',
     systemPrompt = 'You are a helpful AI assistant.',
     temperature = 0.7,
@@ -1100,7 +1101,7 @@ function generateOrchestratorAsToolCode(
   const {
     label = `OrchestratorAgent${index + 1}`,
     modelProvider = 'AWS Bedrock',
-    modelId = 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+    modelId = DEFAULT_MODEL_ID,
     modelName = 'Claude 3.7 Sonnet',
     systemPrompt = 'You are an orchestrator agent that coordinates multiple specialized agents.',
     temperature = 0.7,
@@ -1215,7 +1216,7 @@ function generateOrchestratorModelOnly(
   const {
     label = `OrchestratorAgent${index + 1}`,
     modelProvider = 'AWS Bedrock',
-    modelId = 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+    modelId = DEFAULT_MODEL_ID,
     modelName = 'Claude 3.7 Sonnet',
     temperature = 0.7,
     maxTokens = 4000,
@@ -1246,7 +1247,7 @@ function generateOrchestratorCode(
   const {
     label = `OrchestratorAgent${index + 1}`,
     modelProvider = 'AWS Bedrock',
-    modelId = 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+    modelId = DEFAULT_MODEL_ID,
     modelName = 'Claude 3.7 Sonnet',
     systemPrompt = 'You are an orchestrator agent that coordinates multiple specialized agents.',
     temperature = 0.7,

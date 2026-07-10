@@ -31,6 +31,7 @@ import {
 } from './nodes';
 import { MCPToolNode } from './nodes/mcp-tool-node';
 import { isValidConnection } from '../lib/connection-validator';
+import { DEFAULT_MODEL_ID } from '../lib/models';
 
 const initialNodes: Node[] = [];
 const initialEdges: Edge[] = [];
@@ -201,8 +202,8 @@ export function FlowEditor({
         Object.assign(defaultData, {
           label: 'Agent',
           modelProvider: 'AWS Bedrock',
-          modelId: 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
-          modelName: 'Claude 3.7 Sonnet',
+          modelId: DEFAULT_MODEL_ID,
+          modelName: 'Claude Sonnet 4.6',
           systemPrompt: 'You are a helpful AI assistant.',
           temperature: 0.7,
           maxTokens: 4000,

@@ -134,6 +134,9 @@ class ConversationService:
 
             # Prepare environment with API key
             env = os.environ.copy()
+            # Skip strands tool consent prompts (would hang headless subprocess runs)
+            env["BYPASS_TOOL_CONSENT"] = "true"
+            env["STRANDS_NON_INTERACTIVE"] = "true"
             if session.openai_api_key:
                 env["OPENAI_API_KEY"] = session.openai_api_key
                 logger.info("OpenAI API key set in environment for conversation")
@@ -267,7 +270,14 @@ class ConversationService:
             messages_json = json.dumps(messages_list)
             logger.info(messages_list)
             # Prepare environment with API key
-            env = {**os.environ, 'PYTHONUNBUFFERED': '1'}
+            # BYPASS_TOOL_CONSENT / STRANDS_NON_INTERACTIVE: skip strands tool
+            # consent prompts (would hang headless subprocess runs)
+            env = {
+                **os.environ,
+                'PYTHONUNBUFFERED': '1',
+                'BYPASS_TOOL_CONSENT': 'true',
+                'STRANDS_NON_INTERACTIVE': 'true',
+            }
             if session.openai_api_key:
                 env["OPENAI_API_KEY"] = session.openai_api_key
                 logger.info("OpenAI API key set in environment for streaming conversation")

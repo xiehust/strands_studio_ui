@@ -36,6 +36,7 @@ This is a **visual agent flow builder** that allows users to create, configure, 
 - **Code Generation**: Automatically generates Python code from visual flows using the Strands Agent SDK
 - **Agent Execution**: Supports both regular and streaming execution of generated agent code
 - **Graph Mode**: DAG-based multi-agent orchestration using GraphBuilder for complex workflows with dependencies
+- **Swarm Mode**: Self-organizing multi-agent collaboration using the Strands `Swarm` class (agents connect to a Swarm node as members)
 - **Project Management**: Save, load, and manage multiple agent projects with persistent storage
 - **Execution History**: Track and replay previous agent executions with artifact storage
 
@@ -54,13 +55,15 @@ This is a **visual agent flow builder** that allows users to create, configure, 
 - **Pydantic** for data validation
 - **WebSockets** for real-time execution updates
 - **File-based storage system** for projects and execution artifacts
-- **strands-agents** and **strands-agents-tools** packages for AI agent functionality
+- **strands-agents** (>=1.46) and **strands-agents-tools** (>=0.8.3) packages for AI agent functionality; **bedrock-agentcore** (>=1.17) for AgentCore runtime
+- Default agent model: `global.anthropic.claude-sonnet-4-6` (defined in `src/lib/models.ts` as `DEFAULT_MODEL_ID`, along with the Bedrock model catalog)
 
 ### Key Application Components
 
 #### Node Types
-- **Agent Node**: Core AI agent with configurable LLM (AWS Bedrock Claude models)
+- **Agent Node**: Core AI agent with configurable LLM — AWS Bedrock Claude models or OpenAI-compatible endpoints (`modelProvider: 'OpenAI'` generates `OpenAIModel` code)
 - **Orchestrator Agent Node**: Coordinates multiple sub-agents
+- **Swarm Node**: Groups connected agents into a self-organizing swarm (`from strands.multiagent import Swarm`)
 - **Input Node**: Provides user input or data to agents
 - **Output Node**: Displays agent results
 - **Tool Nodes**: Built-in tools (calculator, file_read, shell, current_time)
@@ -101,9 +104,11 @@ This is a **visual agent flow builder** that allows users to create, configure, 
   - `connection-validator.ts` - Node connection rules and validation logic (includes Graph Mode constraints)
   - `validation.ts` - Data validation utilities
 - `/backend/` - Python FastAPI server
-  - `main.py` - FastAPI application with execution endpoints
-  - `/app/models/` - Pydantic data models
-  - `/app/services/` - Storage and business logic services
+  - `main.py` - FastAPI application with most endpoints (execution, storage, conversations, deployment history)
+  - `/app/models/` - Pydantic data models (storage, conversation, deployment)
+  - `/app/routers/` - APIRouter modules (deployment endpoints)
+  - `/app/services/` - Storage, conversation, and per-target invoke services (agentcore/lambda/ecs)
+  - `/deployment/` - Deployment services and templates per target: `agentcore/`, `lambda/`, `ecs-fargate/` (each with its own deployment service, code adapters/handlers, and CloudFormation/Docker templates)
   - `/storage/` - File-based artifact storage (generated at runtime)
 
 ### Configuration Files
@@ -281,7 +286,12 @@ result = graph(user_input)  # Returns GraphResult with execution details
    - Backend conversation service constructs full message history and passes via `--messages` parameter
    - Chat modal provides interactive conversation interface with semi-transparent backdrop
 
-5. **Deployment Storage Architecture**:
+5. **Swarm Constraints**:
+   - Tool/MCP nodes cannot connect to swarm nodes — tools attach to the individual agent nodes inside the swarm (enforced in `connection-validator.ts`)
+   - A swarm must have at least one connected agent; input/output nodes connect to the swarm node itself
+   - Swarm nodes participate in Graph Mode as graph nodes (swarm↔agent, swarm↔orchestrator, swarm↔swarm dependencies are valid)
+
+6. **Deployment Storage Architecture**:
    - AgentCore, Lambda, and ECS deployments are saved to backend via `/api/deployment-history`
    - Frontend `invoke-panel.tsx` loads all deployments from backend API (not localStorage)
    - localStorage is used only as fallback if backend API fails or returns no data

@@ -1,5 +1,6 @@
 import { type Node, type Edge } from '@xyflow/react';
 import { validateGraphStructure } from './graph-validator';
+import { DEFAULT_MODEL_ID } from './models';
 
 interface CodeGenerationResult {
   code: string;
@@ -319,7 +320,7 @@ export function generateGraphCode(
       const data = agentNode.data || {};
       const label = data.label || `Agent${index + 1}`;
       const modelProvider = data.modelProvider || 'AWS Bedrock';
-      const modelId = data.modelId || 'us.anthropic.claude-3-7-sonnet-20250219-v1:0';
+      const modelId = data.modelId || DEFAULT_MODEL_ID;
       const modelName = data.modelName || 'Claude 3.7 Sonnet';
       const systemPrompt = data.systemPrompt || 'You are a helpful AI assistant.';
       const temperature = data.temperature !== undefined ? data.temperature : 0.7;

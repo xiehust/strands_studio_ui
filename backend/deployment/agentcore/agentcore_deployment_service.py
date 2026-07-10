@@ -777,27 +777,19 @@ CMD ["opentelemetry-instrument", "python", "-m", "{agent_name}"]
             logger.warning(f"Error checking agentcore CLI: {e}")
 
         if not agentcore_available:
-            logger.warning("agentcore CLI not available - using mock deployment")
-
-        if not agentcore_available:
-            # Mock deployment for testing when agentcore CLI is not available
-            logger.info("Performing mock SDK deployment")
-            logs.append("Mock AgentCore SDK deployment (CLI not available)")
-
-            # Generate mock outputs
-            mock_outputs = {
-                "agent_runtime_arn": f"arn:aws:bedrock-agentcore:{config.region}:123456789012:agent-runtime/{config.agent_runtime_name}",
-                "agent_runtime_name": config.agent_runtime_name,
-                "invoke_endpoint": f"https://bedrock-agentcore.{config.region}.amazonaws.com/invoke/{config.agent_runtime_name}",
-                "deployment_method": config.deployment_method.value,
-                "region": config.region,
-                "network_mode": config.network_mode.value
-            }
-
+            # The bedrock-agentcore-starter-toolkit (provider of the `agentcore` CLI)
+            # has been removed from dependencies (CVE-2026-4269). The direct-deploy
+            # replacement is being implemented in a separate task; until it lands,
+            # return a clear migration error instead of attempting deployment.
+            logger.warning("agentcore CLI not available - deployment engine migration in progress")
+            logs.append("AgentCore deployment unavailable: deployment engine migration in progress")
             return {
-                "success": True,
-                "message": "Mock SDK deployment successful (for testing)",
-                "outputs": mock_outputs
+                "success": False,
+                "message": (
+                    "AgentCore deployment engine migration in progress (503): the "
+                    "bedrock-agentcore-starter-toolkit CLI has been removed and the "
+                    "direct-deploy replacement is not yet available."
+                ),
             }
 
         try:
