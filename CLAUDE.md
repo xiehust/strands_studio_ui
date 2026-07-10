@@ -38,6 +38,7 @@ This is a **visual agent flow builder** that allows users to create, configure, 
 - **Graph Mode**: DAG-based multi-agent orchestration using GraphBuilder for complex workflows with dependencies
 - **Swarm Mode**: Self-organizing multi-agent collaboration using the Strands `Swarm` class (agents connect to a Swarm node as members)
 - **Project Management**: Save, load, and manage multiple agent projects with persistent storage
+- **Sample Gallery**: Toolbar "Samples" button loads curated preset flows (`src/lib/sample-flows/`) — 6 basic patterns (single agent, tools, MCP, orchestrator, swarm, graph) plus advanced ones combining skills, prompt caching, and streaming; samples with `requiredSkills` offer one-click inline skill import before loading; loading replaces the canvas (confirmed) and resets CodeState to live template mode
 - **Execution History**: Track and replay previous agent executions with artifact storage
 
 ### Frontend Stack
