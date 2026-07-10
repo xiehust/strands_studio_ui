@@ -1,5 +1,5 @@
 from strands import Agent, tool
-from strands.models import BedrockModel
+from strands.models import BedrockModel, CacheConfig
 from strands_tools import calculator, file_read, shell, current_time, http_request, editor, retrieve
 import json
 import os
@@ -9,7 +9,7 @@ import argparse
 @tool
 def research_agent_8004(user_input: str) -> str:
     """Research Agent - You are a research specialist. Gather relevant facts and background information for the given topic."""
-    
+
     # Create model for Research Agent
     research_agent_8004_model = BedrockModel(
             model_id="global.anthropic.claude-sonnet-4-6",
@@ -31,7 +31,7 @@ def research_agent_8004(user_input: str) -> str:
 @tool
 def writer_agent_9004(user_input: str) -> str:
     """Writer Agent - You are a writing specialist. Turn provided facts into clear, well-structured prose."""
-    
+
     # Create model for Writer Agent
     writer_agent_9004_model = BedrockModel(
             model_id="global.anthropic.claude-sonnet-4-6",

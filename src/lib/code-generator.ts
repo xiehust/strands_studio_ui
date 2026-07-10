@@ -200,8 +200,15 @@ export function generateStrandsAgentCode(
       // Check if this orchestrator is the execution agent
       const isExecutionOrchestrator = executionAgent?.id === orchestratorNode.id;
 
-      if (isExecutionOrchestrator) {
-        // For execution orchestrators, only generate model configuration
+      // main() only constructs the coordinator inside an MCP context manager
+      // when the orchestrator itself has MCP tools; in every other case the
+      // instance must be constructed here at module level, or main() hits a
+      // NameError on the never-defined coordinator variable.
+      const orchestratorHasMCP = findConnectedMCPTools(orchestratorNode, nodes, edges).length > 0;
+
+      if (isExecutionOrchestrator && orchestratorHasMCP) {
+        // For execution orchestrators with MCP tools, only generate model
+        // configuration — the Agent is constructed inside main()'s MCP context
         const orchestratorModelCode = generateOrchestratorModelOnly(orchestratorNode, nodes, edges, index);
         code += orchestratorModelCode + '\n\n';
       } else {

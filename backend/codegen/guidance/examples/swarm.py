@@ -1,5 +1,5 @@
 from strands import Agent, tool
-from strands.models import BedrockModel
+from strands.models import BedrockModel, CacheConfig
 from strands_tools import calculator, file_read, shell, current_time, http_request, editor, retrieve
 import json
 import os

@@ -242,39 +242,12 @@ const flows: FlowDefinition[] = [
   },
 ];
 
-/**
- * Post-generation fixups applied to template generator output after human review.
- *
- * KNOWN GENERATOR BUG (documented, intentionally NOT fixed in src/lib/code-generator.ts):
- * When an orchestrator-agent is the execution agent (connected to the input node)
- * and the flow contains no MCP tools, `generateStrandsAgentCode` emits only the
- * orchestrator's model config (`generateOrchestratorModelOnly`) — the
- * `coordinator = Agent(...)` construction is only emitted inside main() on the
- * hasMCPTools branch (code-generator.ts:556+). The resulting code raises
- * NameError at runtime. Golden examples must be correct reference code for the
- * coding agent, so we insert the missing Agent construction here, mirroring the
- * exact style `generateOrchestratorCode` uses for non-execution orchestrators.
- */
-function applyFixups(key: string, code: string): string {
-  if (key === 'orchestrator' && !code.includes('coordinator = Agent(')) {
-    const anchor = '\n# Main execution\n';
-    const agentConstruction = `
-coordinator = Agent(
-    model=coordinator_model,
-    system_prompt="""You are an orchestrator agent that coordinates specialized agents to complete complex tasks.
-
-Coordination Instructions: Delegate research questions to the Research Agent tool and writing tasks to the Writer Agent tool, then combine their results into a final answer.""",
-    tools=[research_agent_8004, writer_agent_9004],
-    callback_handler=None
-)
-`;
-    if (code.includes(anchor)) {
-      return code.replace(anchor, agentConstruction + anchor);
-    }
-    console.warn('[orchestrator] fixup anchor not found; output left unpatched');
-  }
-  return code;
-}
+// Note: this script previously applied a post-generation fixup for the
+// orchestrator flow (an execution orchestrator without MCP tools got no
+// `coordinator = Agent(...)` construction, causing a NameError at runtime).
+// That generator bug is now fixed in src/lib/code-generator.ts (the model-only
+// path applies solely when the execution orchestrator itself has MCP tools),
+// so the generator output is written verbatim.
 
 function main() {
   fs.mkdirSync(FLOWS_DIR, { recursive: true });
@@ -293,7 +266,7 @@ function main() {
 
     // Assemble the full file the same way code-panel.tsx does:
     // imports joined by newline, blank line, then the generated body.
-    const fullCode = applyFixups(flow.key, result.imports.join('\n') + '\n\n' + result.code + '\n');
+    const fullCode = result.imports.join('\n') + '\n\n' + result.code + '\n';
 
     const pyPath = path.join(EXAMPLES_DIR, `${flow.key}.py`);
     fs.writeFileSync(pyPath, fullCode, 'utf-8');
