@@ -13,3 +13,4 @@ python-dotenv>=1.0.1
 psutil>=6.1.1
 boto3>=1.40.0
 bedrock-agentcore>=1.17.0,<2
+claude-agent-sdk>=0.1.0
