@@ -97,7 +97,7 @@ export const DEFAULT_MANTLE_REGION = 'us-east-1';
 
 /** Build the Mantle OpenAI-compatible base URL for a region. */
 export function mantleBaseUrl(region: string): string {
-  return `https://bedrock-mantle.${region || DEFAULT_MANTLE_REGION}.api.aws/open/v1`;
+  return `https://bedrock-mantle.${region || DEFAULT_MANTLE_REGION}.api.aws/openai/v1`;
 }
 
 export const MANTLE_MODELS: BedrockModelOption[] = [
