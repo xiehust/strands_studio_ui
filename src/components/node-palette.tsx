@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bot, Wrench, ArrowRight, ArrowLeft, Code, Server, Crown, Users } from 'lucide-react';
+import { Bot, Wrench, ArrowRight, ArrowLeft, Code, Server, Crown, Users, Sparkles } from 'lucide-react';
 
 interface NodeTypeItem {
   type: string;
@@ -66,6 +66,13 @@ const nodeTypes: NodeTypeItem[] = [
     description: 'Define custom tools with Python code',
     category: 'Core',
   },
+  {
+    type: 'skill',
+    label: 'Skill Node',
+    icon: Sparkles,
+    description: 'Attach a skill from the Studio skill library to agents',
+    category: 'Core',
+  },
 ];
 
 const categories = ['Core', 'IO', 'Advanced'];
@@ -81,6 +88,7 @@ const accentByType: Record<string, string> = {
   tool: 'text-s2',
   'custom-tool': 'text-s2',
   'mcp-tool': 'text-s1',
+  skill: 'text-s3',
   input: 'text-ink-2',
   output: 'text-ink-2',
 };

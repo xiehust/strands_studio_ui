@@ -28,6 +28,7 @@ import {
   InputNode,
   OutputNode,
   CustomToolNode,
+  SkillNode,
 } from './nodes';
 import { MCPToolNode } from './nodes/mcp-tool-node';
 import { isValidConnection } from '../lib/connection-validator';
@@ -45,6 +46,7 @@ const nodeTypes = {
   input: InputNode,
   output: OutputNode,
   'custom-tool': CustomToolNode,
+  skill: SkillNode,
 };
 
 interface FlowEditorProps {
@@ -210,6 +212,15 @@ export function FlowEditor({
         });
       }
       
+      // Set default values for skill nodes
+      if (type === 'skill') {
+        Object.assign(defaultData, {
+          label: 'Skill',
+          skillName: '',
+          description: '',
+        });
+      }
+
       // Set default values for MCP tool nodes
       if (type === 'mcp-tool') {
         Object.assign(defaultData, {

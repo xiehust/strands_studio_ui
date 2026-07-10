@@ -123,6 +123,17 @@ export function generateStrandsAgentCode(
       return { code: '', imports: Array.from(imports), errors };
     }
 
+    // Skills: emit the shared skills directory convention when any agent uses a skill
+    const hasConnectedSkills = allAgentNodes.some(
+      node => findConnectedSkills(node, nodes, edges).length > 0
+    );
+    if (hasConnectedSkills) {
+      imports.add('from pathlib import Path');
+      imports.add('from strands import AgentSkills');
+      code += '# Studio-managed skills directory (env override locally; packaged skills/ next to this file when deployed)\n';
+      code += '_skills_dir = os.environ.get("STUDIO_SKILLS_DIR") or str(Path(__file__).parent / "skills")\n\n';
+    }
+
     // Generate custom tool code first (needs to be before agents that use them)
     const customToolNodes = nodes.filter(node => node.type === 'custom-tool');
     if (customToolNodes.length > 0) {
@@ -307,6 +318,9 @@ function generateAgentCode(
     ? `,\n    tools=[${connectedTools.map(tool => tool.code).join(', ')}]`
     : '';
 
+  // Find connected skills
+  const skillsCode = buildSkillsPluginArg(findConnectedSkills(agentNode, allNodes, edges), '    ');
+
   // System prompt comes from agent property panel only (no input connections)
   const systemPromptValue = String(systemPrompt || 'You are a helpful AI assistant.');
 
@@ -319,7 +333,7 @@ ${modelConfig}
 ${agentVarName} = Agent(
     model=${agentVarName}_model,
     system_prompt="""${escapePythonTripleQuotedString(systemPromptValue)}"""${toolsCode},
-    callback_handler=None
+    callback_handler=None${skillsCode}
 )`;
 }
 
@@ -357,6 +371,9 @@ function generateSwarmAgentCode(
     ? `,\n    tools=[${connectedTools.map(tool => tool.code).join(', ')}]`
     : '';
 
+  // Find connected skills
+  const skillsCode = buildSkillsPluginArg(findConnectedSkills(agentNode, allNodes, edges), '    ');
+
   // System prompt comes from agent property panel only (no input connections)
   const systemPromptValue = String(systemPrompt || 'You are a helpful AI assistant.');
 
@@ -370,7 +387,7 @@ ${agentVarName} = Agent(
     name="${label}",
     model=${agentVarName}_model,
     system_prompt="""${escapePythonTripleQuotedString(systemPromptValue)}"""${toolsCode},
-    callback_handler=None
+    callback_handler=None${skillsCode}
 )`;
 }
 
@@ -492,10 +509,48 @@ function findConnectedMCPTools(
   const connectedToolEdges = edges.filter(
     edge => edge.target === agentNode.id && (edge.targetHandle === 'tools' || edge.targetHandle === 'mcp-tools')
   );
-  
+
   return connectedToolEdges
     .map(edge => allNodes.find(node => node.id === edge.source))
     .filter((node): node is Node => node?.type === 'mcp-tool');
+}
+
+/**
+ * Finds the names of all skills (skill nodes) connected to an agent node
+ */
+function findConnectedSkills(
+  agentNode: Node,
+  allNodes: Node[],
+  edges: Edge[]
+): string[] {
+  const connectedSkillEdges = edges.filter(
+    edge => edge.target === agentNode.id && edge.targetHandle === 'tools'
+  );
+
+  const skillNames: string[] = [];
+  connectedSkillEdges.forEach(edge => {
+    const skillNode = allNodes.find(node => node.id === edge.source);
+    if (skillNode?.type === 'skill') {
+      const name = (skillNode.data?.skillName as string) || '';
+      if (name && !skillNames.includes(name)) {
+        skillNames.push(name);
+      }
+    }
+  });
+
+  return skillNames;
+}
+
+/**
+ * Builds the plugins=[AgentSkills(...)] constructor argument for connected skills.
+ * Paths resolve against the module-level _skills_dir convention.
+ */
+function buildSkillsPluginArg(skillNames: string[], indent: string): string {
+  if (skillNames.length === 0) return '';
+  const skillPaths = skillNames
+    .map(name => `os.path.join(_skills_dir, "${name}")`)
+    .join(', ');
+  return `,\n${indent}plugins=[AgentSkills(skills=[${skillPaths}])]`;
 }
 
 
@@ -678,6 +733,7 @@ ${indentation}# Swarm ${agentName} is already configured with its agents`;
         : String(systemPrompt);
       
       const indentation = executionAgentMcpClientVars.length > 0 ? '        ' : '    ';
+      const skillsCode = buildSkillsPluginArg(findConnectedSkills(executionAgent, allNodes, edges), `${indentation}    `);
       mainCode += `
 ${indentation}
 ${indentation}# Create orchestrator agent ${executionAgentMcpClientVars.length > 0 ? 'with MCP tools' : ''}
@@ -685,7 +741,7 @@ ${indentation}${agentName} = Agent(
 ${indentation}    model=${agentName}_model,
 ${indentation}    system_prompt="""${escapePythonTripleQuotedString(fullSystemPrompt)}""",
 ${indentation}    tools=${toolsArrayCode},
-${indentation}    callback_handler=None
+${indentation}    callback_handler=None${skillsCode}
 ${indentation})`;
     } else {
       // Regular agent
@@ -697,6 +753,7 @@ ${indentation})`;
         : 'mcp_tools';
 
       const indentation = executionAgentMcpClientVars.length > 0 ? '        ' : '    ';
+      const skillsCode = buildSkillsPluginArg(findConnectedSkills(executionAgent, allNodes, edges), `${indentation}    `);
       mainCode += `
 ${indentation}
 ${indentation}# Create agent ${executionAgentMcpClientVars.length > 0 ? 'with MCP tools' : ''}
@@ -704,7 +761,7 @@ ${indentation}${agentName} = Agent(
 ${indentation}    model=${agentName}_model,
 ${indentation}    system_prompt="""${escapePythonTripleQuotedString(String(systemPrompt || 'You are a helpful AI agent.'))}""",
 ${indentation}    tools=${toolsArrayCode},
-${indentation}    callback_handler=None
+${indentation}    callback_handler=None${skillsCode}
 ${indentation})`;
     }
   } else {
@@ -1030,7 +1087,8 @@ function generateAgentAsToolCode(
   // Find connected tools (but not orchestrator connections)
   const connectedTools = findConnectedTools(agentNode, allNodes, edges);
   const connectedMCPTools = findConnectedMCPTools(agentNode, allNodes, edges);
-  
+  const connectedSkills = findConnectedSkills(agentNode, allNodes, edges);
+
   // Check if this agent has MCP tools - if so, it needs special handling
   const hasMCPTools = connectedMCPTools.length > 0;
   
@@ -1064,22 +1122,22 @@ def ${functionName}(user_input: str) -> str:
             model=${functionName}_model,
             system_prompt="""${escapePythonTripleQuotedString(String(systemPrompt || 'You are a helpful AI agent.'))}""",
             tools=${toolsArrayCode},
-            callback_handler=None
+            callback_handler=None${buildSkillsPluginArg(connectedSkills, '            ')}
         )
-        
+
         # Execute and return result
         response = agent(user_input)
     return str(response)`;
   } else {
     // Regular agent-as-tool function without MCP tools
-    const toolsCode = connectedTools.length > 0 
+    const toolsCode = connectedTools.length > 0
       ? `,\n        tools=[${connectedTools.map(tool => tool.code).join(', ')}]`
       : '';
 
     return `@tool
 def ${functionName}(user_input: str) -> str:
     """${label} - ${(systemPrompt as string).substring(0, 100)}${(systemPrompt as string).length > 100 ? '...' : ''}"""
-    
+
     # Create model for ${label}
     ${generateModelConfigForTool(functionName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, reasoningEffort as string, cacheMessages as boolean, cacheTools as boolean)}
 
@@ -1087,7 +1145,7 @@ def ${functionName}(user_input: str) -> str:
     agent = Agent(
         model=${functionName}_model,
         system_prompt="""${escapePythonTripleQuotedString(String(systemPrompt || 'You are a helpful AI agent.'))}"""${toolsCode},
-        callback_handler=None
+        callback_handler=None${buildSkillsPluginArg(connectedSkills, '        ')}
     )
 
     # Execute and return result
@@ -1141,14 +1199,15 @@ function generateOrchestratorAsToolCode(
     return `${baseName}_${subNode!.id.slice(-4)}`;
   });
   
-  // Find regular tools and MCP tools connected to orchestrator
+  // Find regular tools, MCP tools and skills connected to orchestrator
   const connectedTools = findConnectedTools(orchestratorNode, allNodes, edges);
   const connectedMCPTools = findConnectedMCPTools(orchestratorNode, allNodes, edges);
-  
+  const connectedSkills = findConnectedSkills(orchestratorNode, allNodes, edges);
+
   // Combine regular tools and sub-node functions
   const regularToolsList = connectedTools.map(tool => tool.code);
   const allRegularTools = [...regularToolsList, ...subFunctions];
-  
+
   const hasMCPTools = connectedMCPTools.length > 0;
   const fullSystemPrompt = coordinationPrompt
     ? `${String(systemPrompt)}\\n\\nCoordination Instructions: ${String(coordinationPrompt)}`
@@ -1183,22 +1242,22 @@ def ${functionName}(user_input: str) -> str:
             model=${functionName}_model,
             system_prompt="""${escapePythonTripleQuotedString(fullSystemPrompt)}""",
             tools=${toolsArrayCode},
-            callback_handler=None
+            callback_handler=None${buildSkillsPluginArg(connectedSkills, '            ')}
         )
-        
+
         # Execute and return result
         response = agent(user_input)
     return str(response)`;
   } else {
     // Regular orchestrator-as-tool function without MCP tools
-    const toolsCode = allRegularTools.length > 0 
+    const toolsCode = allRegularTools.length > 0
       ? `,\n        tools=[${allRegularTools.join(', ')}]`
       : '';
 
     return `@tool
 def ${functionName}(user_input: str) -> str:
     """${label} - ${(systemPrompt as string).substring(0, 100)}${(systemPrompt as string).length > 100 ? '...' : ''}"""
-    
+
     # Create model for ${label}
     ${generateModelConfigForTool(functionName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, reasoningEffort as string, cacheMessages as boolean, cacheTools as boolean)}
 
@@ -1206,7 +1265,7 @@ def ${functionName}(user_input: str) -> str:
     agent = Agent(
         model=${functionName}_model,
         system_prompt="""${escapePythonTripleQuotedString(fullSystemPrompt)}"""${toolsCode},
-        callback_handler=None
+        callback_handler=None${buildSkillsPluginArg(connectedSkills, '        ')}
     )
 
     # Execute and return result
@@ -1330,6 +1389,7 @@ ${modelConfig}
 # ${orchestratorName} will be created in main() with MCP tools`;
   } else {
     // Regular orchestrator without MCP tools
+    const skillsCode = buildSkillsPluginArg(findConnectedSkills(orchestratorNode, allNodes, edges), '    ');
     const modelConfig = generateModelConfigForCode(orchestratorName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, reasoningEffort as string, cacheMessages as boolean, cacheTools as boolean);
     return `# ${label} Configuration
 ${modelConfig}
@@ -1337,7 +1397,7 @@ ${modelConfig}
 ${orchestratorName} = Agent(
     model=${orchestratorName}_model,
     system_prompt="""${escapePythonTripleQuotedString(fullSystemPrompt)}"""${toolsCode},
-    callback_handler=None
+    callback_handler=None${skillsCode}
 )`;
   }
 }

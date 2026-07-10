@@ -266,6 +266,30 @@ export interface StorageStats {
   newest_artifact?: string;
 }
 
+// Skill Library
+export interface SkillInfo {
+  name: string;
+  description: string;
+  source_type?: string;
+  imported_at?: string;
+}
+
+export interface SkillImportRequest {
+  source_type: 'inline' | 'git' | 'https' | 's3';
+  // inline
+  name?: string;
+  description?: string;
+  instructions?: string;
+  // https
+  url?: string;
+  // git (public GitHub repos)
+  repo?: string;
+  ref?: string;
+  path?: string;
+  // s3
+  s3_uri?: string;
+}
+
 class ApiClient {
   private baseUrl: string;
   private wsConnection: WebSocket | null = null;
@@ -322,6 +346,46 @@ class ApiClient {
 
   async deleteProject(projectId: string): Promise<{ message: string }> {
     return this.request(`/api/projects/${projectId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // Skill Library
+  async listSkills(): Promise<SkillInfo[]> {
+    const result = await this.request<{ skills?: SkillInfo[] } | SkillInfo[]>('/api/skills');
+    if (Array.isArray(result)) {
+      return result;
+    }
+    return result.skills ?? [];
+  }
+
+  async importSkill(request: SkillImportRequest): Promise<SkillInfo> {
+    const response = await fetch(`${this.baseUrl}/api/skills/import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      let detail = `Import failed: ${response.status} ${response.statusText}`;
+      try {
+        const body = await response.json();
+        if (body?.detail) {
+          detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail);
+        }
+      } catch {
+        // keep generic message
+      }
+      throw new Error(detail);
+    }
+
+    // Backend wraps the payload: { "skill": {...} }
+    const body: { skill?: SkillInfo } | SkillInfo = await response.json();
+    return (body as { skill?: SkillInfo }).skill ?? (body as SkillInfo);
+  }
+
+  async deleteSkill(name: string): Promise<{ deleted?: string }> {
+    return this.request(`/api/skills/${encodeURIComponent(name)}`, {
       method: 'DELETE',
     });
   }

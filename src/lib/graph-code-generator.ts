@@ -188,6 +188,44 @@ function findConnectedMCPTools(
 }
 
 /**
+ * Find the names of all skills (skill nodes) connected to an agent node
+ */
+function findConnectedSkills(
+  agentNode: Node,
+  allNodes: Node[],
+  edges: Edge[]
+): string[] {
+  const connectedSkillEdges = edges.filter(
+    edge => edge.target === agentNode.id && edge.targetHandle === 'tools'
+  );
+
+  const skillNames: string[] = [];
+  connectedSkillEdges.forEach(edge => {
+    const skillNode = allNodes.find(node => node.id === edge.source);
+    if (skillNode?.type === 'skill') {
+      const name = (skillNode.data?.skillName as string) || '';
+      if (name && !skillNames.includes(name)) {
+        skillNames.push(name);
+      }
+    }
+  });
+
+  return skillNames;
+}
+
+/**
+ * Build the plugins=[AgentSkills(...)] constructor argument for connected skills.
+ * Paths resolve against the module-level _skills_dir convention.
+ */
+function buildSkillsPluginArg(skillNames: string[], indent: string): string {
+  if (skillNames.length === 0) return '';
+  const skillPaths = skillNames
+    .map(name => `os.path.join(_skills_dir, "${name}")`)
+    .join(', ');
+  return `,\n${indent}plugins=[AgentSkills(skills=[${skillPaths}])]`;
+}
+
+/**
  * Generate code for custom tools
  */
 function generateCustomToolCode(toolNode: Node): string {
@@ -336,6 +374,17 @@ export function generateGraphCode(
       imports.add('from strands.multiagent import Swarm');
     }
 
+    // Skills: emit the shared skills directory convention when any agent uses a skill
+    const hasConnectedSkills = agentNodes.some(
+      node => findConnectedSkills(node, nodes, edges).length > 0
+    );
+    if (hasConnectedSkills) {
+      imports.add('from pathlib import Path');
+      imports.add('from strands import AgentSkills');
+      code += '# Studio-managed skills directory (env override locally; packaged skills/ next to this file when deployed)\n';
+      code += '_skills_dir = os.environ.get("STUDIO_SKILLS_DIR") or str(Path(__file__).parent / "skills")\n\n';
+    }
+
     // Generate custom tool code
     if (customToolNodes.length > 0) {
       customToolNodes.forEach(toolNode => {
@@ -375,6 +424,9 @@ export function generateGraphCode(
         ? `,\n    tools=[${connectedTools.map(tool => tool.code).join(', ')}]`
         : '';
 
+      // Find connected skills
+      const skillsCode = buildSkillsPluginArg(findConnectedSkills(agentNode, nodes, edges), '    ');
+
       // Generate model config
       const modelConfig = generateModelConfig(agentVarName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, reasoningEffort as string, cacheMessages, cacheTools);
 
@@ -384,7 +436,7 @@ export function generateGraphCode(
       code += `    name="${label}",\n`;
       code += `    model=${agentVarName}_model,\n`;
       code += `    system_prompt="""${escapePythonTripleQuotedString(String(systemPrompt || 'You are a helpful AI agent.'))}"""${toolsCode},\n`;
-      code += `    callback_handler=None\n`;
+      code += `    callback_handler=None${skillsCode}\n`;
       code += `)\n\n`;
     });
 

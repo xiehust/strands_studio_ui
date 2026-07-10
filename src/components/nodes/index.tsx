@@ -6,4 +6,5 @@ export { InputNode } from './input-node';
 export { OutputNode } from './output-node';
 export { CustomToolNode } from './custom-tool-node';
 export { MCPToolNode } from './mcp-tool-node';
+export { SkillNode } from './skill-node';
 export { GraphBuilderNode } from './graph-builder-node';

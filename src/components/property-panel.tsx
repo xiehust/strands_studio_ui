@@ -1,6 +1,441 @@
+import { useCallback, useEffect, useState } from 'react';
 import { type Node, type Edge } from '@xyflow/react';
-import { Settings, X } from 'lucide-react';
+import { Settings, X, RefreshCw, Library, Trash2, AlertTriangle } from 'lucide-react';
 import { BEDROCK_MODELS, CUSTOM_MODEL_OPTION, CUSTOM_MODEL_NAME, isCustomModel, MANTLE_PROVIDER, MANTLE_MODELS, DEFAULT_MANTLE_REGION, DEFAULT_MANTLE_MODEL_ID, mantleBaseUrl, isCustomMantleModel } from '@/lib/models';
+import { apiClient, type SkillInfo, type SkillImportRequest } from '@/lib/api-client';
+
+const SKILL_TRUST_WARNING = 'Only import skills from sources you trust — skill instructions can direct the agent to run bundled scripts.';
+
+type SkillSourceType = SkillImportRequest['source_type'];
+
+interface SkillNodeData {
+  label?: string;
+  skillName?: string;
+  description?: string;
+}
+
+interface ManageSkillsModalProps {
+  skills: SkillInfo[];
+  onClose: () => void;
+  onRefresh: () => Promise<void> | void;
+}
+
+function ManageSkillsModal({ skills, onClose, onRefresh }: ManageSkillsModalProps) {
+  const [sourceType, setSourceType] = useState<SkillSourceType>('inline');
+  const [form, setForm] = useState({
+    name: '',
+    description: '',
+    instructions: '',
+    url: '',
+    repo: '',
+    ref: 'main',
+    path: '',
+    s3Uri: '',
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const setField = (field: keyof typeof form, value: string) =>
+    setForm(prev => ({ ...prev, [field]: value }));
+
+  const canImport = (() => {
+    switch (sourceType) {
+      case 'inline':
+        return form.name.trim() !== '' && form.instructions.trim() !== '';
+      case 'https':
+        return form.url.trim() !== '';
+      case 'git':
+        return form.repo.trim() !== '';
+      case 's3':
+        return form.s3Uri.trim() !== '';
+      default:
+        return false;
+    }
+  })();
+
+  const handleImport = async () => {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const request: SkillImportRequest = { source_type: sourceType };
+      if (sourceType === 'inline') {
+        request.name = form.name.trim();
+        request.description = form.description.trim();
+        request.instructions = form.instructions;
+      } else if (sourceType === 'https') {
+        request.url = form.url.trim();
+      } else if (sourceType === 'git') {
+        request.repo = form.repo.trim();
+        request.ref = form.ref.trim() || 'main';
+        request.path = form.path.trim();
+      } else if (sourceType === 's3') {
+        request.s3_uri = form.s3Uri.trim();
+      }
+
+      const imported = await apiClient.importSkill(request);
+      setNotice(`Imported skill "${imported?.name || request.name || ''}"`);
+      await onRefresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Import failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDelete = async (name: string) => {
+    setError(null);
+    setNotice(null);
+    try {
+      await apiClient.deleteSkill(name);
+      setNotice(`Deleted skill "${name}"`);
+      await onRefresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Delete failed');
+    }
+  };
+
+  const sourceTabs: Array<{ id: SkillSourceType; label: string }> = [
+    { id: 'inline', label: 'Inline' },
+    { id: 'https', label: 'HTTPS' },
+    { id: 'git', label: 'Git' },
+    { id: 's3', label: 'S3' },
+  ];
+
+  return (
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
+      <div className="lp-panel brk lp-rise w-full max-w-2xl max-h-[85vh] flex flex-col m-4">
+        {/* Header */}
+        <div className="lp-phead">
+          <Library className="w-4 h-4 text-s3" />
+          <h2 className="lp-ptitle">Manage Skills</h2>
+          <span className="lp-sub">studio skill library</span>
+          <button
+            onClick={onClose}
+            className="ml-auto text-ink-3 hover:text-ink transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-4 overflow-y-auto space-y-4">
+          {/* Trust warning */}
+          <div className="lp-note">
+            <span className="lp-note-icon">◇</span>
+            <span>{SKILL_TRUST_WARNING}</span>
+          </div>
+
+          {/* Status messages */}
+          {error && (
+            <div className="p-3 bg-crit/10 border border-crit/40 flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 text-crit flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-crit break-all">{error}</p>
+            </div>
+          )}
+          {notice && (
+            <div className="p-3 border border-line font-mono text-[11px] text-ink-2">
+              {notice}
+            </div>
+          )}
+
+          {/* Imported skills list */}
+          <div>
+            <label className="lp-label">Imported Skills ({skills.length})</label>
+            {skills.length === 0 ? (
+              <p className="font-mono text-[10px] text-ink-3 mt-1.5">
+                No skills imported yet. Use the form below to import one.
+              </p>
+            ) : (
+              <div className="border border-line divide-y divide-[var(--line)] mt-1.5">
+                {skills.map(skill => (
+                  <div key={skill.name} className="flex items-start gap-2 px-3 py-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[12px] font-medium text-ink">{skill.name}</div>
+                      {skill.description && (
+                        <div className="font-mono text-[10px] text-ink-3 mt-0.5 truncate">
+                          {skill.description}
+                        </div>
+                      )}
+                      <div className="font-mono text-[9.5px] text-ink-3 mt-0.5 uppercase tracking-wider">
+                        {skill.source_type || 'unknown'}
+                        {skill.imported_at ? ` · ${skill.imported_at}` : ''}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleDelete(skill.name)}
+                      className="p-1 text-ink-3 hover:text-crit transition-colors flex-shrink-0"
+                      title={`Delete skill "${skill.name}"`}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Import form */}
+          <div className="border-t pt-4">
+            <h4 className="lp-label !text-amber mb-3">Import Skill</h4>
+
+            {/* Source type tabs */}
+            <div className="flex gap-1 mb-3">
+              {sourceTabs.map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => { setSourceType(tab.id); setError(null); setNotice(null); }}
+                  className={`lp-btn sm ${sourceType === tab.id ? 'active' : ''}`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="space-y-3">
+              {sourceType === 'inline' && (
+                <>
+                  <div>
+                    <label className="lp-label">Name</label>
+                    <input
+                      type="text"
+                      value={form.name}
+                      onChange={(e) => setField('name', e.target.value)}
+                      className="lp-input"
+                      placeholder="my-skill (lowercase letters, digits, hyphens)"
+                    />
+                  </div>
+                  <div>
+                    <label className="lp-label">Description</label>
+                    <input
+                      type="text"
+                      value={form.description}
+                      onChange={(e) => setField('description', e.target.value)}
+                      className="lp-input"
+                      placeholder="What this skill teaches the agent"
+                    />
+                  </div>
+                  <div>
+                    <label className="lp-label">Instructions (SKILL.md body)</label>
+                    <textarea
+                      value={form.instructions}
+                      onChange={(e) => setField('instructions', e.target.value)}
+                      className="lp-input mono"
+                      placeholder="Step-by-step instructions for the agent..."
+                      rows={6}
+                    />
+                  </div>
+                </>
+              )}
+
+              {sourceType === 'https' && (
+                <div>
+                  <label className="lp-label">SKILL.md URL</label>
+                  <input
+                    type="url"
+                    value={form.url}
+                    onChange={(e) => setField('url', e.target.value)}
+                    className="lp-input"
+                    placeholder="https://raw.githubusercontent.com/.../SKILL.md"
+                  />
+                  <p className="font-mono text-[10px] text-ink-3 mt-1.5 leading-relaxed">
+                    URL must point to a raw SKILL.md file
+                  </p>
+                </div>
+              )}
+
+              {sourceType === 'git' && (
+                <>
+                  <div>
+                    <label className="lp-label">Repository (org/repo)</label>
+                    <input
+                      type="text"
+                      value={form.repo}
+                      onChange={(e) => setField('repo', e.target.value)}
+                      className="lp-input"
+                      placeholder="anthropics/skills"
+                    />
+                  </div>
+                  <div>
+                    <label className="lp-label">Ref (branch / tag / commit)</label>
+                    <input
+                      type="text"
+                      value={form.ref}
+                      onChange={(e) => setField('ref', e.target.value)}
+                      className="lp-input"
+                      placeholder="main"
+                    />
+                  </div>
+                  <div>
+                    <label className="lp-label">Path (skill directory in repo)</label>
+                    <input
+                      type="text"
+                      value={form.path}
+                      onChange={(e) => setField('path', e.target.value)}
+                      className="lp-input"
+                      placeholder="skills/my-skill"
+                    />
+                  </div>
+                  <p className="font-mono text-[10px] text-ink-3 leading-relaxed">
+                    Public GitHub repositories only
+                  </p>
+                </>
+              )}
+
+              {sourceType === 's3' && (
+                <div>
+                  <label className="lp-label">S3 URI (skill directory prefix)</label>
+                  <input
+                    type="text"
+                    value={form.s3Uri}
+                    onChange={(e) => setField('s3Uri', e.target.value)}
+                    className="lp-input"
+                    placeholder="s3://my-bucket/skills/my-skill"
+                  />
+                </div>
+              )}
+
+              <button
+                onClick={handleImport}
+                disabled={!canImport || busy}
+                className="lp-btn primary"
+              >
+                {busy ? 'Importing…' : 'Import Skill'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface SkillNodePropertiesProps {
+  nodeId: string;
+  data: SkillNodeData;
+  onUpdateNode: (nodeId: string, data: Record<string, unknown>) => void;
+}
+
+function SkillNodeProperties({ nodeId, data, onUpdateNode }: SkillNodePropertiesProps) {
+  const [skills, setSkills] = useState<SkillInfo[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [manageOpen, setManageOpen] = useState(false);
+
+  const loadSkills = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      setSkills(await apiClient.listSkills());
+    } catch {
+      // Degrade gracefully (e.g. backend not running yet): empty library
+      setSkills([]);
+      setLoadError('Skill library unavailable — is the backend running?');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadSkills();
+  }, [loadSkills]);
+
+  const handleSelect = (name: string) => {
+    const skill = skills.find(s => s.name === name);
+    onUpdateNode(nodeId, {
+      ...data,
+      skillName: name,
+      description: skill?.description || '',
+    });
+  };
+
+  const selectedMissing = !!data.skillName && !loading && !skills.some(s => s.name === data.skillName);
+
+  return (
+    <div className="space-y-4">
+      {/* Trust warning */}
+      <div className="lp-note">
+        <span className="lp-note-icon">◇</span>
+        <span>{SKILL_TRUST_WARNING}</span>
+      </div>
+
+      <div>
+        <label className="lp-label">Label</label>
+        <input
+          type="text"
+          value={data.label || ''}
+          onChange={(e) => onUpdateNode(nodeId, { ...data, label: e.target.value })}
+          className="lp-input"
+          placeholder="Skill"
+        />
+      </div>
+
+      <div>
+        <label className="lp-label">Skill</label>
+        <div className="flex items-center gap-2">
+          <select
+            value={data.skillName || ''}
+            onChange={(e) => handleSelect(e.target.value)}
+            className="lp-input flex-1"
+            disabled={loading}
+          >
+            <option value="">— Select a skill —</option>
+            {skills.map(skill => (
+              <option key={skill.name} value={skill.name}>
+                {skill.name}{skill.description ? ` — ${skill.description}` : ''}
+              </option>
+            ))}
+            {selectedMissing && (
+              <option value={data.skillName}>{data.skillName} (missing from library)</option>
+            )}
+          </select>
+          <button
+            onClick={loadSkills}
+            disabled={loading}
+            className="lp-btn sm flex-shrink-0"
+            title="Refresh skill library"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
+        {loadError && (
+          <p className="font-mono text-[10px] text-warn mt-1.5">{loadError}</p>
+        )}
+        {selectedMissing && !loadError && (
+          <p className="font-mono text-[10px] text-warn mt-1.5">
+            Skill "{data.skillName}" is not in the library. Re-import it or select another skill.
+          </p>
+        )}
+        {data.description && (
+          <p className="font-mono text-[10px] text-ink-3 mt-1.5 leading-relaxed">
+            {data.description}
+          </p>
+        )}
+      </div>
+
+      <div>
+        <button
+          onClick={() => setManageOpen(true)}
+          className="lp-btn"
+        >
+          <Library className="w-3.5 h-3.5" />
+          Manage Skills
+        </button>
+        <p className="font-mono text-[10px] text-ink-3 mt-1.5 leading-relaxed">
+          Import skills from inline text, HTTPS, public GitHub repos, or S3
+        </p>
+      </div>
+
+      {manageOpen && (
+        <ManageSkillsModal
+          skills={skills}
+          onClose={() => setManageOpen(false)}
+          onRefresh={loadSkills}
+        />
+      )}
+    </div>
+  );
+}
 
 interface PropertyPanelProps {
   selectedNode: Node | null;
@@ -1250,6 +1685,15 @@ export function PropertyPanel({
         return renderInputProperties();
       case 'custom-tool':
         return renderCustomToolProperties(selectedNode.data);
+      case 'skill':
+        return (
+          <SkillNodeProperties
+            key={selectedNode.id}
+            nodeId={selectedNode.id}
+            data={selectedNode.data as SkillNodeData}
+            onUpdateNode={onUpdateNode}
+          />
+        );
       default:
         return (
           <div className="text-ink-3 text-center py-8 text-sm">
