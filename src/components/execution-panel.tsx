@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Play, Square, Loader, CheckCircle, XCircle, Clock, Terminal, Zap, FolderOpen, FileText, AlertTriangle, RefreshCw, MessageSquare } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Play, Square, Loader, CheckCircle, XCircle, Clock, Terminal, Zap, FolderOpen, FileText, AlertTriangle, RefreshCw, MessageSquare, Wrench, Sparkles } from 'lucide-react';
 import { ChatModal } from './chat-modal';
-import { apiClient, type ExecutionRequest, type ExecutionResult, type ExecutionHistoryItem } from '../lib/api-client';
+import { apiClient, type ExecutionRequest, type ExecutionResult, type ExecutionHistoryItem, type FixDiagnosis } from '../lib/api-client';
 import { ValidationError, isExecutionResult } from '../lib/validation';
 
 interface ExecutionPanelProps {
@@ -11,6 +11,16 @@ interface ExecutionPanelProps {
   projectName?: string;
   projectVersion?: string;
   flowData?: { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[] };
+  graphMode?: boolean;
+  // Returns true when the fixed code was applied to the app code state
+  // (false when the user declined to overwrite manual edits).
+  onApplyFixedCode?: (code: string) => boolean;
+}
+
+interface FixProgressEvent {
+  id: number;
+  kind: 'progress' | 'activity' | 'validation' | 'error';
+  text: string;
 }
 
 
@@ -32,12 +42,14 @@ const setStoredInputData = (data: string): void => {
   }
 };
 
-export function ExecutionPanel({ 
-  code, 
-  className = '', 
+export function ExecutionPanel({
+  code,
+  className = '',
   projectName = 'Untitled Project',
   projectVersion = '1.0.0',
-  flowData
+  flowData,
+  graphMode = false,
+  onApplyFixedCode
 }: ExecutionPanelProps) {
   const [isExecuting, setIsExecuting] = useState(false);
   const [currentExecution, setCurrentExecution] = useState<ExecutionResult | null>(null);
@@ -52,6 +64,16 @@ export function ExecutionPanel({
   const [error, setError] = useState<string | null>(null);
   const [storageError, setStorageError] = useState<string | null>(null);
   const [showChatModal, setShowChatModal] = useState(false);
+
+  // AI Fix state (backend coding agent, POST /api/fix-code/stream)
+  const [codegenAvailable, setCodegenAvailable] = useState(false);
+  const [isFixing, setIsFixing] = useState(false);
+  const [fixEvents, setFixEvents] = useState<FixProgressEvent[]>([]);
+  const [fixError, setFixError] = useState<string | null>(null);
+  const [fixDiagnosis, setFixDiagnosis] = useState<FixDiagnosis | null>(null);
+  const [fixApplied, setFixApplied] = useState(false);
+  const fixEventIdRef = useRef(0);
+  const fixProgressScrollRef = useRef<HTMLDivElement | null>(null);
 
   // Extract OpenAI API key from agent nodes
   const getOpenAIApiKey = (): string | undefined => {
@@ -74,6 +96,93 @@ export function ExecutionPanel({
   useEffect(() => {
     checkBackendHealth();
   }, []);
+
+  // Check codegen backend availability on mount (drives AI Fix button visibility)
+  useEffect(() => {
+    let cancelled = false;
+    apiClient
+      .getCodegenStatus()
+      .then((status) => {
+        if (!cancelled) setCodegenAvailable(status.available);
+      })
+      .catch(() => {
+        if (!cancelled) setCodegenAvailable(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Auto-scroll AI Fix progress list
+  useEffect(() => {
+    if (fixProgressScrollRef.current) {
+      fixProgressScrollRef.current.scrollTop = fixProgressScrollRef.current.scrollHeight;
+    }
+  }, [fixEvents]);
+
+  const appendFixEvent = (kind: FixProgressEvent['kind'], text: string) => {
+    fixEventIdRef.current += 1;
+    const id = fixEventIdRef.current;
+    setFixEvents((prev) => [...prev, { id, kind, text }]);
+  };
+
+  const resetFixState = () => {
+    setFixEvents([]);
+    setFixError(null);
+    setFixDiagnosis(null);
+    setFixApplied(false);
+  };
+
+  // Full error text for the fix request (backend truncates to the traceback tail)
+  const buildFixErrorText = (result: ExecutionResult): string => {
+    const parts: string[] = [];
+    if (result.output?.trim()) parts.push(result.output);
+    if (result.error?.trim()) parts.push(result.error);
+    return parts.join('\n\n');
+  };
+
+  const handleAiFix = () => {
+    if (isFixing || !currentExecution || currentExecution.success !== false) return;
+
+    setIsFixing(true);
+    resetFixState();
+    appendFixEvent('progress', 'Starting AI fix...');
+
+    apiClient.fixCodeStream(
+      {
+        code,
+        error: buildFixErrorText(currentExecution),
+        flow_data: flowData || { nodes: [], edges: [] },
+        graph_mode: graphMode,
+        input_data: inputData.trim() || undefined,
+      },
+      {
+        onProgress: (message) => appendFixEvent('progress', message),
+        onAgentActivity: (summary) => appendFixEvent('activity', summary),
+        onValidation: (round, errors) => {
+          if (errors.length > 0) {
+            appendFixEvent('validation', `Validation round ${round}: ${errors.length} error(s)`);
+            errors.forEach((err) => appendFixEvent('validation', `[${err.stage}] ${err.message}`));
+          } else {
+            appendFixEvent('progress', `Validation round ${round}: passed`);
+          }
+        },
+        onDone: (result) => {
+          setIsFixing(false);
+          setFixDiagnosis(result.diagnosis ?? null);
+          if (result.changed && onApplyFixedCode) {
+            const applied = onApplyFixedCode(result.code);
+            setFixApplied(applied);
+          }
+        },
+        onError: (message) => {
+          setIsFixing(false);
+          setFixError(message);
+          appendFixEvent('error', message);
+        },
+      }
+    );
+  };
 
   // Load stored executions when backend becomes available
   useEffect(() => {
@@ -193,6 +302,7 @@ export function ExecutionPanel({
       setCurrentExecution(execution.result);
       setSelectedStoredExecution(execution);
       setError(null); // Clear any previous errors
+      resetFixState(); // Diagnosis from a previous fix no longer applies
 
       // Set input data from the execution history item
       if (execution.input_data !== undefined && execution.input_data !== null) {
@@ -292,7 +402,8 @@ export function ExecutionPanel({
 
     setIsExecuting(true);
     setCurrentExecution(null);
-    
+    resetFixState();
+
     // Extract API keys from agent nodes for secure backend handling
     const extractApiKeys = () => {
       const allNodes = flowData?.nodes || [];
@@ -659,12 +770,117 @@ export function ExecutionPanel({
             )}
 
             {/* Error */}
-            {currentExecution.error && (
+            {(currentExecution.error || currentExecution.success === false) && (
               <div className="p-4 border-b border-line">
-                <h4 className="lp-label !text-crit">Error</h4>
-                <pre className="lp-code !text-red-700 !border-crit/40 whitespace-pre-wrap break-words overflow-y-auto">
-                  {currentExecution.error}
-                </pre>
+                <div className="flex items-center justify-between mb-1">
+                  <h4 className="lp-label !text-crit !mb-0">Error</h4>
+                  {codegenAvailable && currentExecution.success === false && (
+                    <button
+                      onClick={handleAiFix}
+                      disabled={isFixing}
+                      className="lp-btn sm"
+                      title="Diagnose and fix this failure with the backend coding agent"
+                    >
+                      {isFixing ? (
+                        <Loader className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <Wrench className="w-3 h-3" />
+                      )}
+                      AI Fix
+                    </button>
+                  )}
+                </div>
+                {currentExecution.error && (
+                  <pre className="lp-code !text-red-700 !border-crit/40 whitespace-pre-wrap break-words overflow-y-auto">
+                    {currentExecution.error}
+                  </pre>
+                )}
+
+                {/* AI Fix progress */}
+                {(isFixing || fixError) && (
+                  <div className="mt-3 border border-line">
+                    <div className="px-3 py-2 flex items-center gap-2 bg-panel2">
+                      {isFixing ? (
+                        <Loader className="w-3.5 h-3.5 text-amber animate-spin" />
+                      ) : (
+                        <AlertTriangle className="w-3.5 h-3.5 text-crit" />
+                      )}
+                      <span className="font-mono text-[10px] uppercase tracking-wider text-ink-2">
+                        {isFixing ? 'AI Fixing…' : 'AI Fix Failed'}
+                      </span>
+                      {!isFixing && fixError && (
+                        <button
+                          onClick={resetFixState}
+                          className="ml-auto font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-ink"
+                        >
+                          Dismiss
+                        </button>
+                      )}
+                    </div>
+                    <div ref={fixProgressScrollRef} className="max-h-36 overflow-auto px-3 py-2 space-y-0.5">
+                      {fixEvents.map((event) => (
+                        <div
+                          key={event.id}
+                          className={`font-mono text-[10px] break-words ${
+                            event.kind === 'validation' || event.kind === 'error'
+                              ? 'text-red-500'
+                              : event.kind === 'activity'
+                                ? 'text-ink-3'
+                                : 'text-ink-2'
+                          }`}
+                        >
+                          {event.text}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Fixed code applied notice */}
+                {fixApplied && (
+                  <div className="mt-3 bg-good/10 border border-good/40 p-3 flex items-start gap-2">
+                    <Sparkles className="w-4 h-4 text-good mt-0.5 flex-shrink-0" />
+                    <p className="text-sm text-ink-2">Code fixed by AI — re-run to verify.</p>
+                  </div>
+                )}
+
+                {/* AI diagnosis card */}
+                {fixDiagnosis && (
+                  <div className="mt-3 border border-line p-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3">AI Diagnosis</span>
+                      {fixDiagnosis.category === 'code' ? (
+                        <span className="lp-chip violet"><Wrench className="w-3 h-3" />CODE</span>
+                      ) : fixDiagnosis.category === 'config' ? (
+                        <span className="lp-chip warn"><AlertTriangle className="w-3 h-3" />CONFIG</span>
+                      ) : (
+                        <span className="lp-chip crit"><XCircle className="w-3 h-3" />ENVIRONMENT</span>
+                      )}
+                      <button
+                        onClick={() => setFixDiagnosis(null)}
+                        className="ml-auto font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-ink"
+                        title="Dismiss"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    <p className="text-sm text-ink-2 mb-2">{fixDiagnosis.summary}</p>
+                    {fixDiagnosis.suggestions && fixDiagnosis.suggestions.length > 0 && (
+                      <ul className="space-y-1">
+                        {fixDiagnosis.suggestions.map((suggestion, index) => (
+                          <li key={index} className="text-xs text-ink-2 break-words">
+                            •{' '}
+                            {suggestion.node_label && suggestion.property
+                              ? `Node '${suggestion.node_label}' → property '${suggestion.property}': ${suggestion.action}`
+                              : suggestion.node_label
+                                ? `Node '${suggestion.node_label}': ${suggestion.action}`
+                                : suggestion.action}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>

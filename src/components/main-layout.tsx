@@ -190,6 +190,20 @@ export function MainLayout() {
     setCodeErrors([]);
   }, [nodes, edges, graphMode]);
 
+  // Apply AI-fixed code from the execution panel. Unlike a fresh AI generation,
+  // this preserves flowStale (the fix corresponds to the same flow the failing
+  // code did) and does NOT reset the flow baseline. Returns whether it applied.
+  const handleApplyFixedCode = useCallback((code: string): boolean => {
+    if (codeSourceRef.current === 'manual') {
+      if (!confirm('This will replace your manual edits with AI-fixed code. Continue?')) {
+        return false;
+      }
+    }
+    setCodeState(prev => ({ code, source: 'ai', flowStale: prev.flowStale }));
+    setCodeErrors([]);
+    return true;
+  }, []);
+
   const handleRegenerateTemplate = useCallback(() => {
     const { code, errors } = buildTemplateCode(nodes, edges, graphMode);
     codeFlowBaselineRef.current = { nodes, edges, graphMode };
@@ -599,6 +613,8 @@ export function MainLayout() {
                   projectName={currentProject?.name || 'Untitled Project'}
                   projectVersion={currentProject?.version || '1.0.0'}
                   flowData={{ nodes, edges }}
+                  graphMode={graphMode}
+                  onApplyFixedCode={handleApplyFixedCode}
                 />
               ) : rightPanelMode === 'deploy' ? (
                 <DeployPanel

@@ -87,6 +87,43 @@ export interface GenerateCodeStreamCallbacks {
   onError: (message: string) => void;
 }
 
+// AI fix for failed executions (backend coding agent)
+export interface FixCodeRequest {
+  code: string;
+  error: string;
+  flow_data: { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[] };
+  graph_mode: boolean;
+  input_data?: string;
+}
+
+export interface FixSuggestion {
+  node_label?: string;
+  property?: string;
+  action: string;
+}
+
+export interface FixDiagnosis {
+  category: 'code' | 'config' | 'environment';
+  summary: string;
+  suggestions: FixSuggestion[];
+}
+
+export interface FixResult {
+  code: string;
+  changed: boolean;
+  diagnosis: FixDiagnosis;
+  validation_report?: CodegenValidationReport;
+  duration_ms?: number;
+}
+
+export interface FixCodeStreamCallbacks {
+  onProgress?: (message: string) => void;
+  onAgentActivity?: (summary: string) => void;
+  onValidation?: (round: number, errors: CodegenValidationError[]) => void;
+  onDone: (result: FixResult) => void;
+  onError: (message: string) => void;
+}
+
 export interface ExecutionResponse {
   execution_id: string;
   result: ExecutionResult;
@@ -405,110 +442,157 @@ class ApiClient {
     return this.request('/api/generate-code/status');
   }
 
+  // Shared SSE POST parser: handles fetch, `event:`/`data:` framing, and decoding.
+  // Calls onEvent(eventType, dataText) for every complete event in the stream.
+  private async postSseStream(
+    path: string,
+    body: unknown,
+    onEvent: (eventType: string, dataText: string) => void,
+    requestLabel: string = 'SSE'
+  ): Promise<void> {
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      throw new Error(`${requestLabel} request failed: ${response.status} ${response.statusText}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error('Response body is not readable');
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      // Process complete SSE events (separated by \n\n)
+      const events = buffer.split('\n\n');
+      buffer = events.pop() || '';
+
+      for (const rawEvent of events) {
+        if (!rawEvent.trim()) continue;
+
+        let eventType = 'message';
+        const dataLines: string[] = [];
+        for (const line of rawEvent.split('\n')) {
+          if (line.startsWith('event: ')) {
+            eventType = line.substring(7).trim();
+          } else if (line.startsWith('data: ')) {
+            dataLines.push(line.substring(6));
+          } else if (line === 'data:') {
+            dataLines.push('');
+          }
+        }
+
+        onEvent(eventType, dataLines.join('\n'));
+      }
+    }
+  }
+
+  // Shared dispatcher for the codegen SSE event vocabulary
+  // (progress / agent_activity / validation / done / error / end).
+  private async runCodegenSseStream<TDone>(
+    path: string,
+    body: unknown,
+    callbacks: {
+      onProgress?: (message: string) => void;
+      onAgentActivity?: (summary: string) => void;
+      onValidation?: (round: number, errors: CodegenValidationError[]) => void;
+      onDone: (result: TDone) => void;
+      onError: (message: string) => void;
+    },
+    context: string
+  ): Promise<void> {
+    const { onProgress, onAgentActivity, onValidation, onDone, onError } = callbacks;
+    const unknownError = `Unknown ${context.toLowerCase()} error`;
+    let doneReceived = false;
+    let errorReceived = false;
+
+    const handleEvent = (eventType: string, dataText: string) => {
+      if (eventType === 'end') return;
+
+      let data: Record<string, unknown> = {};
+      if (dataText) {
+        try {
+          data = JSON.parse(dataText);
+        } catch {
+          // Non-JSON payload (e.g. empty end-event data) - ignore
+          return;
+        }
+      }
+
+      switch (eventType) {
+        case 'progress':
+          onProgress?.(String(data.message ?? ''));
+          break;
+        case 'agent_activity':
+          onAgentActivity?.(String(data.summary ?? ''));
+          break;
+        case 'validation':
+          onValidation?.(
+            Number(data.round ?? 0),
+            (data.errors as CodegenValidationError[]) || []
+          );
+          break;
+        case 'done':
+          doneReceived = true;
+          onDone(data as unknown as TDone);
+          break;
+        case 'error':
+          errorReceived = true;
+          onError(String(data.message ?? unknownError));
+          break;
+      }
+    };
+
+    try {
+      await this.postSseStream(path, body, handleEvent, context);
+
+      if (!doneReceived && !errorReceived) {
+        onError(`${context} stream ended unexpectedly`);
+      }
+    } catch (error) {
+      if (!doneReceived && !errorReceived) {
+        onError(error instanceof Error ? error.message : unknownError);
+      }
+    }
+  }
+
   // AI Code Generation via backend coding agent (SSE stream)
   async generateCodeStream(
     request: GenerateCodeRequest,
     callbacks: GenerateCodeStreamCallbacks
   ): Promise<void> {
-    const { onProgress, onAgentActivity, onValidation, onDone, onError } = callbacks;
-    let doneReceived = false;
-    let errorReceived = false;
+    return this.runCodegenSseStream<GenerateCodeResult>(
+      '/api/generate-code/stream',
+      request,
+      callbacks,
+      'Code generation'
+    );
+  }
 
-    try {
-      const response = await fetch(`${this.baseUrl}/api/generate-code/stream`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(request),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Code generation request failed: ${response.status} ${response.statusText}`);
-      }
-
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error('Response body is not readable');
-      }
-
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      const handleEvent = (eventType: string, dataText: string) => {
-        if (eventType === 'end') return;
-
-        let data: Record<string, unknown> = {};
-        if (dataText) {
-          try {
-            data = JSON.parse(dataText);
-          } catch {
-            // Non-JSON payload (e.g. empty end-event data) - ignore
-            return;
-          }
-        }
-
-        switch (eventType) {
-          case 'progress':
-            onProgress?.(String(data.message ?? ''));
-            break;
-          case 'agent_activity':
-            onAgentActivity?.(String(data.summary ?? ''));
-            break;
-          case 'validation':
-            onValidation?.(
-              Number(data.round ?? 0),
-              (data.errors as CodegenValidationError[]) || []
-            );
-            break;
-          case 'done':
-            doneReceived = true;
-            onDone(data as unknown as GenerateCodeResult);
-            break;
-          case 'error':
-            errorReceived = true;
-            onError(String(data.message ?? 'Unknown code generation error'));
-            break;
-        }
-      };
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-
-        // Process complete SSE events (separated by \n\n)
-        const events = buffer.split('\n\n');
-        buffer = events.pop() || '';
-
-        for (const rawEvent of events) {
-          if (!rawEvent.trim()) continue;
-
-          let eventType = 'message';
-          const dataLines: string[] = [];
-          for (const line of rawEvent.split('\n')) {
-            if (line.startsWith('event: ')) {
-              eventType = line.substring(7).trim();
-            } else if (line.startsWith('data: ')) {
-              dataLines.push(line.substring(6));
-            } else if (line === 'data:') {
-              dataLines.push('');
-            }
-          }
-
-          handleEvent(eventType, dataLines.join('\n'));
-        }
-      }
-
-      if (!doneReceived && !errorReceived) {
-        onError('Code generation stream ended unexpectedly');
-      }
-    } catch (error) {
-      if (!doneReceived && !errorReceived) {
-        onError(error instanceof Error ? error.message : 'Unknown code generation error');
-      }
-    }
+  // AI Fix for failed executions via backend coding agent (SSE stream)
+  async fixCodeStream(
+    request: FixCodeRequest,
+    callbacks: FixCodeStreamCallbacks
+  ): Promise<void> {
+    return this.runCodegenSseStream<FixResult>(
+      '/api/fix-code/stream',
+      request,
+      callbacks,
+      'Code fix'
+    );
   }
 
   // WebSocket connection for real-time updates
