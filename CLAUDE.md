@@ -259,12 +259,11 @@ result = graph(user_input)  # Returns GraphResult with execution details
 - **MCP Support**: Full MCP tool integration in Graph Mode with proper context manager handling
 
 ### Deployment Features
-- **AWS Bedrock AgentCore Deployment**: Deploy agents to AWS Bedrock AgentCore for managed, serverless AI agent execution
-- **AWS Lambda Deployment**: Deploy agents to AWS Lambda with CloudFormation stack management
-- **AWS ECS Fargate Deployment**: Deploy agents to AWS ECS Fargate for containerized, scalable agent execution with CloudFormation-based infrastructure
-- **Deployment History**: Unified storage system for AgentCore, Lambda, and ECS deployments in backend (`/api/deployment-history`)
+- **AWS Bedrock AgentCore Deployment** (the only active deployment target): Direct code deploy via boto3 `bedrock-agentcore-control` — generated flow code is shipped VERBATIM as `generated_agent.py` next to a static `agent_runtime.py` entrypoint (from `agent_runtime_template.py`) that lazily imports it and calls `generated_agent.main(user_input_arg=..., messages_arg=...)`; sync responses come from main()'s return value (stdout capture as fallback), streaming responses are produced by redirecting main()'s printed chunks into an asyncio.Queue and yielding contentBlockDelta-shaped dicts. Dependencies are vendored for aarch64-manylinux2014/Python 3.13 with uv (cached by requirements hash), zipped, uploaded to S3 (`bedrock-agentcore-code-{account}-{region}`), and deployed with `create_agent_runtime`/`update_agent_runtime` (auto-update when the runtime name already exists). No Docker, CodeBuild, starter-toolkit CLI, or generated-code text surgery. Implementation: `backend/deployment/agentcore/` (`agentcore_deployment_service.py`, `package_builder.py`, `agent_runtime_template.py`; `code_adapter.py` is deprecated/unused)
+- **AWS Lambda / ECS Fargate Deployment (DISABLED)**: Hidden from the UI and gated off in the backend. Routes return HTTP 501 unless the `ENABLE_LEGACY_DEPLOY_TARGETS=true` env var is set. Code under `deployment/lambda/` and `deployment/ecs-fargate/` is retained but not on the active path
+- **Deployment History**: Unified storage system in backend (`/api/deployment-history`); legacy lambda/ecs records remain readable
 - **Cross-Browser Persistence**: All deployments stored in backend API, with localStorage as fallback
-- **Deployment Invoke Panel**: Unified interface in `invoke-panel.tsx` for invoking AgentCore, Lambda, and ECS agents
+- **Deployment Invoke Panel**: `invoke-panel.tsx` lists AgentCore deployments only (legacy lambda/ecs history records are filtered out of the invoke list)
 
 ### Critical Architecture Rules
 1. **MCP Connection Constraints**: Each MCP server node can only connect to one agent node. This prevents resource conflicts and ensures proper context management in generated code.
@@ -292,12 +291,12 @@ result = graph(user_input)  # Returns GraphResult with execution details
    - Swarm nodes participate in Graph Mode as graph nodes (swarm↔agent, swarm↔orchestrator, swarm↔swarm dependencies are valid)
 
 6. **Deployment Storage Architecture**:
-   - AgentCore, Lambda, and ECS deployments are saved to backend via `/api/deployment-history`
-   - Frontend `invoke-panel.tsx` loads all deployments from backend API (not localStorage)
+   - AgentCore deployments are saved to backend via `/api/deployment-history` (legacy lambda/ecs records remain readable there)
+   - Frontend `invoke-panel.tsx` loads deployments from backend API (not localStorage) and shows agentcore entries only
    - localStorage is used only as fallback if backend API fails or returns no data
    - Deployment history save operations are non-blocking and use `Promise.resolve().then()` to prevent save failures from affecting deployment success
-   - AgentCore deployment outputs are extracted from `deployment_result.status.deployment_outputs`
-   - ECS deployments use CloudFormation for infrastructure provisioning (VPC, ALB, ECS cluster, Fargate service)
+   - AgentCore deployment outputs are extracted from `deployment_result.status.deployment_outputs` (keys: `agent_runtime_arn`, `agent_runtime_id`, `agent_runtime_name`, `invoke_endpoint`, `region`, `s3_bucket`, `s3_key`, `streaming_capable`)
+   - AgentCore direct-code runtime limits: 250 MB zipped / 750 MB unzipped package; ARM64 wheels only (`--only-binary=:all:`); stdio MCP servers inside a deployed runtime are unsupported/at-risk (a warning is logged at deploy time — use HTTP/SSE MCP for deployed agents)
 
 ### Development Rules
 1. Always use context7 when I need code generation, setup or configuration steps, or library/API documentation. This means you should automatically use the Context7 MCP tools to resolve library id and get library docs without me having to explicitly ask.

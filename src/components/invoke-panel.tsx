@@ -249,13 +249,16 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
     try {
       const allDeployments: DeploymentHistory[] = [];
 
-      // Load all deployments (both AgentCore and Lambda) from backend API
+      // Load deployments from backend API.
+      // NOTE: Lambda/ECS deployment targets are disabled - only AgentCore deployments
+      // are shown. Legacy lambda/ecs history records are filtered out here (they remain
+      // readable in the deployment history view).
       try {
         const response = await fetch('/api/deployment-history?limit=50');
         if (response.ok) {
           const historyData = await response.json();
           const successfulDeployments = historyData.deployments?.filter(
-            (dep: any) => dep.success
+            (dep: any) => dep.success && dep.deployment_target === 'agentcore'
           ) || [];
 
           // Process each deployment by type

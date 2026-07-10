@@ -1,14 +1,9 @@
 """
-AgentCore deployment configuration classes and utilities
+AgentCore deployment configuration classes and utilities (direct code deploy)
 """
 from dataclasses import dataclass, asdict
 from typing import Dict, Any, Optional, List
 from enum import Enum
-
-class DeploymentMethod(str, Enum):
-    """Available AgentCore deployment methods"""
-    SDK = "sdk"  # Using bedrock-agentcore-starter-toolkit
-    MANUAL = "manual"  # Manual deployment with boto3
 
 class NetworkMode(str, Enum):
     """AgentCore network modes"""
@@ -17,45 +12,37 @@ class NetworkMode(str, Enum):
 
 @dataclass
 class AgentCoreDeploymentConfig:
-    """Configuration for AgentCore deployment"""
+    """Configuration for AgentCore direct code deployment"""
     # Required fields
-    agent_runtime_name: str  # Internal field name for compatibility
-    
+    agent_runtime_name: str
+
     # Basic configuration
     region: str = "us-east-1"
-    deployment_method: DeploymentMethod = DeploymentMethod.SDK
     network_mode: NetworkMode = NetworkMode.PUBLIC
-    
-    # Container configuration (for manual deployment)
-    container_uri: Optional[str] = None
-    
-    # IAM configuration
+
+    # IAM configuration (role ARN or role name; default role is ensured if unset)
     role_arn: Optional[str] = None
-    
+
     # Environment and API keys
     api_keys: Optional[Dict[str, str]] = None
     environment_variables: Optional[Dict[str, str]] = None
-    
-    # Resource configuration
-    timeout_seconds: int = 300
-    startup_timeout: int = 60
-    
+
     # Metadata
     tags: Optional[Dict[str, str]] = None
     streaming_capable: Optional[bool] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert config to dictionary"""
         return asdict(self)
-    
+
     def get_environment_variables(self) -> Dict[str, str]:
         """Get all environment variables including API keys"""
         env_vars = {}
-        
+
         # Add custom environment variables
         if self.environment_variables:
             env_vars.update(self.environment_variables)
-        
+
         # Add API keys as environment variables
         if self.api_keys:
             for key, value in self.api_keys.items():
@@ -63,30 +50,32 @@ class AgentCoreDeploymentConfig:
                 if not env_key.endswith('_API_KEY'):
                     env_key += '_API_KEY'
                 env_vars[env_key] = value
-        
+
         # Add AgentCore specific environment variables
         env_vars['BYPASS_TOOL_CONSENT'] = "true"
+        env_vars['STRANDS_NON_INTERACTIVE'] = "true"
         env_vars['PYTHONUNBUFFERED'] = "1"
-        
-        return env_vars
-    
+
+        # Drop empty values (AgentCore rejects empty env var values)
+        return {k: v for k, v in env_vars.items() if v is not None and str(v).strip()}
+
     def get_tags(self) -> Dict[str, str]:
         """Get resource tags with defaults"""
         default_tags = {
             "Project": "StrandsStudio",
             "DeploymentType": "AgentCore",
-            "DeploymentMethod": self.deployment_method.value
+            "DeploymentMethod": "direct-code-deploy"
         }
-        
+
         if self.tags:
             default_tags.update(self.tags)
-        
+
         return default_tags
-    
+
     def validate(self) -> List[str]:
         """Validate configuration and return list of errors"""
         errors = []
-        
+
         # Validate agent runtime name
         if not self.agent_runtime_name:
             errors.append("agent_runtime_name is required")
@@ -94,19 +83,17 @@ class AgentCoreDeploymentConfig:
             errors.append("agent_runtime_name must be 63 characters or less")
         elif not self.agent_runtime_name.replace('-', '').replace('_', '').isalnum():
             errors.append("agent_runtime_name must contain only alphanumeric characters, hyphens, and underscores")
-        
-        # Validate manual deployment requirements
-        if self.deployment_method == DeploymentMethod.MANUAL:
-            if not self.container_uri:
-                errors.append("container_uri is required for manual deployment")
-        
-        # Validate timeout values
-        if self.timeout_seconds < 30 or self.timeout_seconds > 900:
-            errors.append("timeout_seconds must be between 30 and 900")
-        
-        if self.startup_timeout < 10 or self.startup_timeout > 300:
-            errors.append("startup_timeout must be between 10 and 300")
-        
+
+        # Validate environment variable limits (AgentCore: max 50 entries, 100-char keys, 5000-char values)
+        env_vars = self.get_environment_variables()
+        if len(env_vars) > 50:
+            errors.append(f"Too many environment variables ({len(env_vars)}); AgentCore allows at most 50")
+        for key, value in env_vars.items():
+            if len(key) > 100:
+                errors.append(f"Environment variable key too long (>100 chars): {key[:50]}...")
+            if len(str(value)) > 5000:
+                errors.append(f"Environment variable value too long (>5000 chars) for key: {key}")
+
         return errors
 
 @dataclass
@@ -121,7 +108,7 @@ class AgentCoreDeploymentResult:
     deployment_time: Optional[float] = None
     deployment_outputs: Optional[Dict[str, Any]] = None
     streaming_capable: Optional[bool] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert result to dictionary"""
         return asdict(self)
