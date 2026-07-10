@@ -16,7 +16,7 @@ interface AgentNodeData {
   // Thinking settings
   thinkingEnabled?: boolean;
   thinkingBudgetTokens?: number;
-  reasoningEffort?: 'low' | 'medium' | 'high';
+  reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 }
 
 export function AgentNode({ data, selected, id }: NodeProps) {

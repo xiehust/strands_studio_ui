@@ -1338,6 +1338,8 @@ function generateModelConfigForCode(
   thinkingEnabled?: boolean,
   reasoningEffort?: string
 ): string {
+  // Legacy projects may still carry 'minimal' (removed from the effort scale)
+  if (reasoningEffort === 'minimal') reasoningEffort = 'low';
   // When thinking is enabled for Bedrock, temperature must be 1
   const isBedrock = modelProvider === 'AWS Bedrock' || modelProvider === undefined;
   const finalTemperature = thinkingEnabled && isBedrock ? 1 : temperature;
@@ -1416,6 +1418,8 @@ function generateModelConfigForTool(
   thinkingEnabled?: boolean,
   reasoningEffort?: string
 ): string {
+  // Legacy projects may still carry 'minimal' (removed from the effort scale)
+  if (reasoningEffort === 'minimal') reasoningEffort = 'low';
   // When thinking is enabled for Bedrock, temperature must be 1
   const isBedrock = modelProvider === 'AWS Bedrock' || modelProvider === undefined;
   const finalTemperature = thinkingEnabled && isBedrock ? 1 : temperature;

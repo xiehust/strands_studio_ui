@@ -38,7 +38,7 @@ Unset fields fall back to the defaults shown in parentheses.
 | `maxTokens` | int (4000) |
 | `streaming` | bool (false). If true AND this agent is the execution agent → use `stream_async` (contract rule 5) |
 | `thinkingEnabled` | bool (false). Enables extended thinking / reasoning |
-| `reasoningEffort` | `"minimal"|"low"|"medium"|"high"|"xhigh"` (`"medium"`); only meaningful with `thinkingEnabled` on non-Bedrock providers |
+| `reasoningEffort` | `"low"|"medium"|"high"|"xhigh"|"max"` (`"medium"`; legacy `"minimal"` normalizes to `"low"`); only meaningful with `thinkingEnabled` on non-Bedrock providers |
 | `apiKey` | Never emit its value — always read keys from env (contract rule 8) |
 | `baseUrl` | Optional custom endpoint (OpenAI); auto-set regional endpoint for Mantle |
 | `region` | Mantle only; informational (already baked into `baseUrl`) |

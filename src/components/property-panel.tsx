@@ -407,15 +407,15 @@ export function PropertyPanel({
                   Reasoning Effort
                 </label>
                 <select
-                  value={data.reasoningEffort || 'medium'}
+                  value={data.reasoningEffort === 'minimal' ? 'low' : (data.reasoningEffort || 'medium')}
                   onChange={(e) => handleInputChange('reasoningEffort', e.target.value)}
                   className="lp-input"
                 >
-                  <option value="minimal">Minimal</option>
                   <option value="low">Low</option>
                   <option value="medium">Medium</option>
                   <option value="high">High</option>
                   <option value="xhigh">Extra High</option>
+                  <option value="max">Max</option>
                 </select>
               </div>
             )}
@@ -968,15 +968,15 @@ export function PropertyPanel({
                   Reasoning Effort
                 </label>
                 <select
-                  value={data.reasoningEffort || 'medium'}
+                  value={data.reasoningEffort === 'minimal' ? 'low' : (data.reasoningEffort || 'medium')}
                   onChange={(e) => handleInputChange('reasoningEffort', e.target.value)}
                   className="lp-input"
                 >
-                  <option value="minimal">Minimal</option>
                   <option value="low">Low</option>
                   <option value="medium">Medium</option>
                   <option value="high">High</option>
                   <option value="xhigh">Extra High</option>
+                  <option value="max">Max</option>
                 </select>
               </div>
             )}
