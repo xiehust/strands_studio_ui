@@ -997,7 +997,20 @@ class ApiClient {
           }
 
           if (eventData !== '' || lines.some(line => line === 'data:' || line.startsWith('data: '))) {
-            if (eventData.startsWith('[CHAT_COMPLETE:')) {
+            if (eventData.startsWith('[CHAT_ERROR:')) {
+              // Structured error sentinel: [CHAT_ERROR:<json-encoded error text>]
+              // (JSON encoding keeps multiline tracebacks on a single SSE data line)
+              const match = eventData.match(/^\[CHAT_ERROR:([\s\S]+)\]$/);
+              if (match) {
+                try {
+                  errorMessage = JSON.parse(match[1]);
+                } catch {
+                  errorMessage = match[1];
+                }
+              } else {
+                errorMessage = eventData;
+              }
+            } else if (eventData.startsWith('[CHAT_COMPLETE:')) {
               // Parse message ID from format: [CHAT_COMPLETE:message_id_here]
               const match = eventData.match(/^\[CHAT_COMPLETE:([^\]]+)\]$/);
               messageId = match ? match[1] : '';
@@ -1017,10 +1030,23 @@ class ApiClient {
         }
       }
 
-      onComplete(accumulatedOutput, messageId);
+      // Stream ended without a [CHAT_COMPLETE:] marker (e.g. the backend endpoint's
+      // fallback path yields only [CHAT_ERROR:...] before closing the stream).
+      if (errorMessage) {
+        onError(errorMessage, accumulatedOutput);
+      } else {
+        onComplete(accumulatedOutput, messageId);
+      }
     } catch (error) {
       onError(error instanceof Error ? error.message : 'Unknown streaming error', '');
     }
+  }
+
+  async updateConversationCode(sessionId: string, generatedCode: string): Promise<ConversationSession> {
+    return this.request(`/api/conversations/${sessionId}/code`, {
+      method: 'PUT',
+      body: JSON.stringify({ generated_code: generatedCode }),
+    });
   }
 
   async getConversationMessages(sessionId: string): Promise<ChatMessage[]> {

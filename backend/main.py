@@ -46,7 +46,8 @@ from app.models.conversation import (
     ChatResponse,
     ConversationListResponse,
     ConversationHistoryResponse,
-    MessageListResponse
+    MessageListResponse,
+    UpdateSessionCodeRequest
 )
 from app.services.conversation_service import conversation_service
 
@@ -1678,10 +1679,10 @@ async def send_chat_message_stream(session_id: str, request: ChatRequest):
                 yield f"data: {chunk}\n\n"
         except ValueError as e:
             logger.warning(f"Session not found for streaming message: {session_id}")
-            yield f"data: Error: {str(e)}\n\n"
+            yield f"data: [CHAT_ERROR:{json.dumps(str(e))}]\n\n"
         except Exception as e:
             logger.error(f"Error in streaming chat message: {e}")
-            yield f"data: Error: {str(e)}\n\n"
+            yield f"data: [CHAT_ERROR:{json.dumps(str(e))}]\n\n"
 
     try:
         return StreamingResponse(
@@ -1695,6 +1696,21 @@ async def send_chat_message_stream(session_id: str, request: ChatRequest):
         )
     except Exception as e:
         logger.error(f"Error setting up streaming response: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/conversations/{session_id}/code", response_model=ConversationSession)
+async def update_conversation_code(session_id: str, request: UpdateSessionCodeRequest):
+    """Update the agent code for an existing session in place (messages are kept)"""
+    logger.info(f"Updating agent code for session: {session_id}")
+    try:
+        session = await conversation_service.update_session_code(session_id, request.generated_code)
+        logger.info(f"Updated agent code for session: {session_id}")
+        return session
+    except ValueError as e:
+        logger.warning(f"Session not found for code update: {session_id}")
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error updating conversation code: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/conversations/{session_id}/messages", response_model=MessageListResponse)

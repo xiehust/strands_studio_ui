@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 import uuid
 from datetime import datetime
-from typing import Dict, List, Optional, AsyncGenerator, Any
+from typing import Dict, List, Optional, AsyncGenerator, Any, Tuple
 from pathlib import Path
 
 from ..models.conversation import (
@@ -67,6 +67,27 @@ class ConversationService:
             print(f"Failed to initialize agent for session {session_id}: {e}")
             raise
 
+    async def update_session_code(self, session_id: str, generated_code: str) -> ConversationSession:
+        """Rewrite the session's agent code in place, keeping session and messages intact."""
+        if session_id not in self.sessions:
+            raise ValueError(f"Session {session_id} not found")
+        if session_id not in self.agent_processes:
+            raise ValueError(f"Agent not initialized for session {session_id}")
+
+        agent_info = self.agent_processes[session_id]
+        agent_info['agent_file'].write_text(generated_code)
+
+        session = self.sessions[session_id]
+        session.updated_at = datetime.now()
+        return session
+
+    @staticmethod
+    def _mark_turn_failed(user_message: ChatMessage, agent_message: ChatMessage) -> None:
+        """Mark both messages of a failed turn so history replay skips them as a pair
+        (keeps user/assistant role alternation intact)."""
+        for msg in (user_message, agent_message):
+            msg.metadata = {**(msg.metadata or {}), "error": True}
+
     async def send_message(
         self,
         session_id: str,
@@ -86,6 +107,8 @@ class ConversationService:
         self.messages[session_id].append(user_message)
 
         # Get agent response
+        success = True
+        error_text: Optional[str] = None
         if stream:
             # For now, return a placeholder - streaming will be handled by the endpoint
             agent_response = ChatMessage(
@@ -94,12 +117,15 @@ class ConversationService:
                 content="",  # Will be populated by streaming
             )
         else:
-            response_content = await self._execute_agent(session_id, message)
+            success, response_text = await self._execute_agent(session_id, message)
             agent_response = ChatMessage(
                 session_id=session_id,
                 sender="agent",
-                content=response_content,
+                content=response_text,
             )
+            if not success:
+                error_text = response_text
+                self._mark_turn_failed(user_message, agent_response)
             self.messages[session_id].append(agent_response)
 
         # Update session
@@ -109,12 +135,14 @@ class ConversationService:
 
         return ChatResponse(
             message_id=agent_response.message_id,
-            content=agent_response.content,
+            content=agent_response.content if success else "",
             timestamp=agent_response.timestamp,
-            streaming_complete=not stream
+            streaming_complete=not stream,
+            success=success,
+            error=error_text
         )
 
-    async def _execute_agent(self, session_id: str, user_input: str) -> str:
+    async def _execute_agent(self, session_id: str, user_input: str) -> Tuple[bool, str]:
         """Execute the agent with user input and return response."""
         if session_id not in self.agent_processes:
             raise ValueError(f"Agent not initialized for session {session_id}")
@@ -154,17 +182,17 @@ class ConversationService:
             )
 
             if result.returncode == 0:
-                return result.stdout.strip()
+                return True, result.stdout.strip()
             else:
                 error_msg = result.stderr.strip() or "Agent execution failed"
                 logger.error(f"Agent execution error for session {session_id}: {error_msg}")
-                return f"Error: {error_msg}"
+                return False, error_msg
 
         except subprocess.TimeoutExpired:
-            return "Error: Agent execution timed out"
+            return False, "Agent execution timed out"
         except Exception as e:
             print(f"Exception during agent execution for session {session_id}: {e}")
-            return f"Error: {str(e)}"
+            return False, str(e)
 
     def _construct_messages_list(self, session_id: str, new_user_input: str) -> list:
         """Construct messages list according to the schema:
@@ -175,8 +203,12 @@ class ConversationService:
         # Get existing messages for this session
         existing_messages = self.messages.get(session_id, [])
         # logger.info(f"self.messages:{self.messages}")
-        # Convert existing messages to the required schema
+        # Convert existing messages to the required schema.
+        # Failed turns are marked in pairs (user + agent), so skipping them
+        # keeps the user/assistant role alternation intact.
         for message in existing_messages:
+            if message.metadata and message.metadata.get("error"):
+                continue
             role = "user" if message.sender == "user" else "assistant"
             messages_list.append({
                 "role": role,
@@ -210,51 +242,49 @@ class ConversationService:
 
         # Stream agent response
         full_response = ""
+        error_text: Optional[str] = None
         agent_message_id = str(uuid.uuid4())
 
         try:
-            async for chunk in self._execute_agent_stream(session_id, message):
-                full_response += chunk
-                yield chunk
-
-            # Add completed agent message
-            agent_message = ChatMessage(
-                message_id=agent_message_id,
-                session_id=session_id,
-                sender="agent",
-                content=full_response,
-            )
-            self.messages[session_id].append(agent_message)
-
-            # Update session
-            session = self.sessions[session_id]
-            session.message_count += 2  # user + agent message
-            session.updated_at = datetime.now()
-
-            # Send completion signal with message ID
-            yield f"[CHAT_COMPLETE:{agent_message_id}]"
-
+            async for kind, text in self._execute_agent_stream(session_id, message):
+                if kind == "error":
+                    error_text = text
+                else:
+                    full_response += text
+                    yield text
         except Exception as e:
-            error_msg = f"Error: {str(e)}"
-            yield error_msg
+            error_text = str(e)
 
-            # Add error message
-            error_message = ChatMessage(
-                message_id=agent_message_id,
-                session_id=session_id,
-                sender="agent",
-                content=error_msg,
-            )
-            self.messages[session_id].append(error_message)
+        # Add completed agent message (error text on failure, kept for history)
+        agent_message = ChatMessage(
+            message_id=agent_message_id,
+            session_id=session_id,
+            sender="agent",
+            content=error_text if error_text is not None else full_response,
+        )
+        if error_text is not None:
+            self._mark_turn_failed(user_message, agent_message)
+        self.messages[session_id].append(agent_message)
 
-            yield f"[CHAT_COMPLETE:{agent_message_id}]"
+        # Update session
+        session = self.sessions[session_id]
+        session.message_count += 2  # user + agent message
+        session.updated_at = datetime.now()
+
+        if error_text is not None:
+            # Structured error sentinel: JSON-encoded to a single line so multiline
+            # tracebacks survive SSE `data:` framing.
+            yield f"[CHAT_ERROR:{json.dumps(error_text)}]"
+
+        # Send completion signal with message ID
+        yield f"[CHAT_COMPLETE:{agent_message_id}]"
 
     async def _execute_agent_stream(
         self,
         session_id: str,
         user_input: str
-    ) -> AsyncGenerator[str, None]:
-        """Execute the agent with streaming and yield response chunks."""
+    ) -> AsyncGenerator[Tuple[str, str], None]:
+        """Execute the agent with streaming and yield ("chunk", text) / ("error", text) tuples."""
         if session_id not in self.agent_processes:
             raise ValueError(f"Agent not initialized for session {session_id}")
 
@@ -300,19 +330,18 @@ class ConversationService:
 
                 text_chunk = chunk.decode('utf-8', errors='ignore')
                 if text_chunk:
-                    yield text_chunk
+                    yield ("chunk", text_chunk)
 
             # Wait for process to complete
             await process.wait()
 
             if process.returncode != 0:
                 stderr_output = await process.stderr.read()
-                error_msg = stderr_output.decode('utf-8', errors='ignore').strip()
-                if error_msg:
-                    yield f"\nError: {error_msg}"
+                error_msg = stderr_output.decode('utf-8', errors='ignore').strip() or "Agent execution failed"
+                yield ("error", error_msg)
 
         except Exception as e:
-            yield f"Error: {str(e)}"
+            yield ("error", str(e))
 
     async def get_sessions(self) -> ConversationListResponse:
         """Get all conversation sessions."""

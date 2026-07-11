@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, MessageSquare, User, Bot, Send, Loader, Zap, AlertTriangle } from 'lucide-react';
+import { X, MessageSquare, User, Bot, Send, Loader, Zap, AlertTriangle, Wrench } from 'lucide-react';
 import { apiClient } from '../lib/api-client';
+import { AiFixProgress } from './ai-fix-progress';
+import { useAiFix } from '../hooks/use-ai-fix';
 import type { ConversationSession, ChatMessage, CreateConversationRequest } from '../lib/conversation-types';
 
 interface ChatModalProps {
@@ -14,6 +16,11 @@ interface ChatModalProps {
   projectId: string;
   projectVersion: string;
   openaiApiKey?: string;
+  codegenAvailable?: boolean;
+  graphMode?: boolean;
+  // Returns true when the fixed code was applied to the app code state
+  // (false when the user declined to overwrite manual edits).
+  onApplyFixedCode?: (code: string) => boolean;
 }
 
 export function ChatModal({
@@ -23,7 +30,10 @@ export function ChatModal({
   generatedCode,
   projectId,
   projectVersion,
-  openaiApiKey
+  openaiApiKey,
+  codegenAvailable = false,
+  graphMode = false,
+  onApplyFixedCode
 }: ChatModalProps) {
   const [session, setSession] = useState<ConversationSession | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -32,7 +42,31 @@ export function ChatModal({
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [streamingContent, setStreamingContent] = useState('');
+  const [lastChatError, setLastChatError] = useState<{ messageId: string; text: string } | null>(null);
+  const [fixNotice, setFixNotice] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // AI Fix for failed chat executions (backend coding agent, POST /api/fix-code/stream)
+  const aiFix = useAiFix({
+    onApplied: (fixedCode) => {
+      const applied = onApplyFixedCode ? onApplyFixedCode(fixedCode) : false;
+      if (applied && session) {
+        // Rewrite the session's agent code in place so the conversation
+        // (and its history) continues with the fixed code.
+        apiClient
+          .updateConversationCode(session.session_id, fixedCode)
+          .then(() => setFixNotice('Code fixed — send your message again.'))
+          .catch((err) => {
+            aiFix.reportFixError(
+              `Failed to update session code: ${err instanceof Error ? err.message : 'Unknown error'}`
+            );
+          });
+      }
+      return applied;
+    },
+  });
+
+  const { resetFixState: resetAiFixState } = aiFix;
 
   // Check if the agent has streaming enabled
   const isStreamingAgent = flowData?.nodes?.some(node =>
@@ -61,8 +95,11 @@ export function ChatModal({
       setError(null);
       setStreamingContent('');
       setIsStreaming(false);
+      setLastChatError(null);
+      setFixNotice(null);
+      resetAiFixState();
     }
-  }, [isOpen]);
+  }, [isOpen, resetAiFixState]);
 
   const initializeSession = async () => {
     try {
@@ -87,12 +124,29 @@ export function ChatModal({
     }
   };
 
+  const appendErrorMessage = (sessionId: string, errorText: string) => {
+    const messageId = `error_${Date.now()}`;
+    const errorMessage: ChatMessage = {
+      message_id: messageId,
+      session_id: sessionId,
+      sender: 'agent',
+      content: errorText,
+      timestamp: new Date().toISOString(),
+      metadata: { error: true },
+    };
+    setMessages(prev => [...prev, errorMessage]);
+    setLastChatError({ messageId, text: errorText });
+  };
+
   const sendMessage = async () => {
-    if (!inputMessage.trim() || !session || isStreaming) return;
+    if (!inputMessage.trim() || !session || isStreaming || aiFix.isFixing) return;
 
     const userMessage = inputMessage.trim();
     setInputMessage('');
     setError(null);
+    setLastChatError(null);
+    setFixNotice(null);
+    aiFix.resetFixState();
 
     // Add user message to local state
     const userChatMessage: ChatMessage = {
@@ -136,18 +190,18 @@ export function ChatModal({
           },
           (error: string, partialOutput: string) => {
             setIsStreaming(false);
-            setError(`Chat error: ${error}`);
 
             if (partialOutput) {
-              const errorMessage: ChatMessage = {
-                message_id: `error_${Date.now()}`,
+              const partialMessage: ChatMessage = {
+                message_id: `partial_${Date.now()}`,
                 session_id: session.session_id,
                 sender: 'agent',
                 content: partialOutput,
                 timestamp: new Date().toISOString(),
               };
-              setMessages(prev => [...prev, errorMessage]);
+              setMessages(prev => [...prev, partialMessage]);
             }
+            appendErrorMessage(session.session_id, error);
             setStreamingContent('');
           }
         );
@@ -159,15 +213,19 @@ export function ChatModal({
           message: userMessage,
         });
 
-        const agentMessage: ChatMessage = {
-          message_id: response.message_id,
-          session_id: session.session_id,
-          sender: 'agent',
-          content: response.content,
-          timestamp: response.timestamp,
-        };
+        if (response.success === false) {
+          appendErrorMessage(session.session_id, response.error || 'Agent execution failed');
+        } else {
+          const agentMessage: ChatMessage = {
+            message_id: response.message_id,
+            session_id: session.session_id,
+            sender: 'agent',
+            content: response.content,
+            timestamp: response.timestamp,
+          };
 
-        setMessages(prev => [...prev, agentMessage]);
+          setMessages(prev => [...prev, agentMessage]);
+        }
       }
     } catch (error) {
       console.error('Failed to send message:', error);
@@ -175,6 +233,18 @@ export function ChatModal({
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleAiFix = () => {
+    if (!lastChatError || aiFix.isFixing) return;
+
+    setFixNotice(null);
+    aiFix.startFix({
+      code: generatedCode,
+      error: lastChatError.text,
+      flow_data: flowData,
+      graph_mode: graphMode,
+    });
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -258,43 +328,101 @@ export function ChatModal({
             </div>
           )}
 
-          {messages.map((message) => (
-            <div
-              key={message.message_id}
-              className={`flex items-start gap-3 ${
-                message.sender === 'user' ? 'justify-end' : 'justify-start'
-              }`}
-            >
-              {message.sender === 'agent' && (
-                <div className="flex-shrink-0 pt-4">
-                  <Bot className="w-5 h-5 text-amber" />
-                </div>
-              )}
+          {messages.map((message) => {
+            const isErrorMessage = Boolean(message.metadata?.error);
+            const isLastError = lastChatError?.messageId === message.message_id;
 
+            if (isErrorMessage) {
+              return (
+                <div key={message.message_id} className="flex items-start gap-3 justify-start">
+                  <div className="flex-shrink-0 pt-4">
+                    <Bot className="w-5 h-5 text-crit" />
+                  </div>
+                  <div className="max-w-sm lg:max-w-2xl">
+                    <div className="lp-who !text-crit">
+                      EXECUTION ERROR · {new Date(message.timestamp).toLocaleTimeString()}
+                    </div>
+                    <div className="lp-bub !border-crit/40 bg-crit/10">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5 text-crit flex-shrink-0" />
+                        <span className="font-mono text-[10px] uppercase tracking-wider text-crit">
+                          Agent execution failed
+                        </span>
+                        {codegenAvailable && isLastError && (
+                          <button
+                            onClick={handleAiFix}
+                            disabled={aiFix.isFixing}
+                            className="lp-btn sm ml-auto"
+                            title="Diagnose and fix this failure with the backend coding agent"
+                          >
+                            {aiFix.isFixing ? (
+                              <Loader className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <Wrench className="w-3 h-3" />
+                            )}
+                            AI Fix
+                          </button>
+                        )}
+                      </div>
+                      <pre className="whitespace-pre-wrap text-[12px] break-words font-mono text-red-700 max-h-48 overflow-y-auto">
+                        {message.content}
+                      </pre>
+                      {isLastError && (
+                        <AiFixProgress
+                          isFixing={aiFix.isFixing}
+                          fixEvents={aiFix.fixEvents}
+                          fixError={aiFix.fixError}
+                          fixDiagnosis={aiFix.fixDiagnosis}
+                          fixApplied={aiFix.fixApplied && fixNotice !== null}
+                          appliedMessage={fixNotice ?? undefined}
+                          onDismissError={aiFix.resetFixState}
+                          onDismissDiagnosis={aiFix.dismissDiagnosis}
+                        />
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+
+            return (
               <div
-                className={`${
-                  message.sender === 'user'
-                    ? 'max-w-xs lg:max-w-md text-right'
-                    : 'max-w-sm lg:max-w-2xl'
+                key={message.message_id}
+                className={`flex items-start gap-3 ${
+                  message.sender === 'user' ? 'justify-end' : 'justify-start'
                 }`}
               >
-                <div className="lp-who">
-                  {message.sender === 'user' ? 'YOU' : 'AGENT'} · {new Date(message.timestamp).toLocaleTimeString()}
-                </div>
-                <div className={`lp-bub ${message.sender === 'user' ? 'user text-left' : ''}`}>
-                  <pre className="whitespace-pre-wrap text-[13.5px] break-words font-sans">
-                    {message.content}
-                  </pre>
-                </div>
-              </div>
+                {message.sender === 'agent' && (
+                  <div className="flex-shrink-0 pt-4">
+                    <Bot className="w-5 h-5 text-amber" />
+                  </div>
+                )}
 
-              {message.sender === 'user' && (
-                <div className="flex-shrink-0 pt-4">
-                  <User className="w-5 h-5 text-ink-3" />
+                <div
+                  className={`${
+                    message.sender === 'user'
+                      ? 'max-w-xs lg:max-w-md text-right'
+                      : 'max-w-sm lg:max-w-2xl'
+                  }`}
+                >
+                  <div className="lp-who">
+                    {message.sender === 'user' ? 'YOU' : 'AGENT'} · {new Date(message.timestamp).toLocaleTimeString()}
+                  </div>
+                  <div className={`lp-bub ${message.sender === 'user' ? 'user text-left' : ''}`}>
+                    <pre className="whitespace-pre-wrap text-[13.5px] break-words font-sans">
+                      {message.content}
+                    </pre>
+                  </div>
                 </div>
-              )}
-            </div>
-          ))}
+
+                {message.sender === 'user' && (
+                  <div className="flex-shrink-0 pt-4">
+                    <User className="w-5 h-5 text-ink-3" />
+                  </div>
+                )}
+              </div>
+            );
+          })}
 
           {/* Streaming response */}
           {isStreaming && (
@@ -327,14 +455,14 @@ export function ChatModal({
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
                 onKeyPress={handleKeyPress}
-                placeholder="Message your agent…"
+                placeholder={aiFix.isFixing ? 'AI Fix in progress…' : 'Message your agent…'}
                 className="lp-input flex-1 resize-none"
                 rows={1}
-                disabled={isLoading || isStreaming}
+                disabled={isLoading || isStreaming || aiFix.isFixing}
               />
               <button
                 onClick={sendMessage}
-                disabled={!inputMessage.trim() || isLoading || isStreaming}
+                disabled={!inputMessage.trim() || isLoading || isStreaming || aiFix.isFixing}
                 className="lp-btn primary"
               >
                 {isLoading || isStreaming ? (

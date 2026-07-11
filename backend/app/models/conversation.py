@@ -37,6 +37,11 @@ class ChatResponse(BaseModel):
     content: str
     timestamp: datetime
     streaming_complete: bool = True
+    success: bool = True
+    error: Optional[str] = None
+
+class UpdateSessionCodeRequest(BaseModel):
+    generated_code: str
 
 class ConversationListResponse(BaseModel):
     sessions: List[ConversationSession]
