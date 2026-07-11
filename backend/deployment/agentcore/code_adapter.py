@@ -1,6 +1,13 @@
 """
-Code Adapter for AgentCore Deployment
-Handles adaptation of Strands agent code to AgentCore Runtime format.
+DEPRECATED - Code Adapter for AgentCore Deployment (no longer on the deploy path)
+
+The direct-code-deploy engine ships the generated flow code VERBATIM as
+generated_agent.py and imports it from a static entrypoint
+(agent_runtime_template.py). The heuristic text-splicing in this module targeted
+an obsolete generated-code shape (`async def main():` with no args) and produced
+broken runtimes with the current generator signature
+(`async def main(user_input_arg=None, messages_arg=None)`). It is retained only
+for reference and is not imported by any active code.
 """
 import re
 import ast

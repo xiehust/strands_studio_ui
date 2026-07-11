@@ -1,5 +1,6 @@
 import { type Node, type Edge } from '@xyflow/react';
 import { validateGraphStructure } from './graph-validator';
+import { DEFAULT_MODEL_ID, MANTLE_PROVIDER } from './models';
 
 interface CodeGenerationResult {
   code: string;
@@ -42,14 +43,36 @@ function generateModelConfig(
   maxTokens: number,
   baseUrl: string,
   thinkingEnabled?: boolean,
-  thinkingBudgetTokens?: number,
-  reasoningEffort?: string
+  reasoningEffort?: string,
+  cacheMessages?: boolean,
+  cacheTools?: boolean
 ): string {
+  // Legacy projects may still carry 'minimal' (removed from the effort scale)
+  if (reasoningEffort === 'minimal') reasoningEffort = 'low';
   // When thinking is enabled for Bedrock, temperature must be 1
   const isBedrock = modelProvider === 'AWS Bedrock' || modelProvider === undefined;
   const finalTemperature = thinkingEnabled && isBedrock ? 1 : temperature;
 
-  if (modelProvider === 'OpenAI') {
+  if (modelProvider === MANTLE_PROVIDER) {
+    // Amazon Bedrock (Mantle): OpenAI-compatible endpoint via the Responses API
+    const clientArgs = [
+      `"api_key": os.environ.get("BEDROCK_API_KEY")`,
+      `"base_url": "${baseUrl}"`,
+    ];
+    const clientArgsStr = `\n    client_args={\n        ${clientArgs.join(',\n        ')}\n    },`;
+    const params = [`"max_output_tokens": ${maxTokens}`];
+    if (thinkingEnabled && reasoningEffort) {
+      params.push(`"reasoning": {"effort": "${reasoningEffort}"}`);
+    } else {
+      params.push(`"temperature": ${temperature}`);
+    }
+    return `${varName}_model = OpenAIResponsesModel(${clientArgsStr}
+    model_id="${modelIdentifier}",
+    params={
+        ${params.join(',\n        ')},
+    }
+)`;
+  } else if (modelProvider === 'OpenAI') {
     const clientArgs = [];
     clientArgs.push(`"api_key": os.environ.get("OPENAI_API_KEY")`);
     if (baseUrl) {
@@ -69,20 +92,29 @@ function generateModelConfig(
     }
 )`;
   } else {
-    // Default to Bedrock
+    // Default to Bedrock — Claude 4.6+ adaptive thinking (see code-generator.ts)
     let bedrockCode = `${varName}_model = BedrockModel(
     model_id="${modelIdentifier}",
     temperature=${finalTemperature},
     max_tokens=${maxTokens}`;
 
-    if (thinkingEnabled && thinkingBudgetTokens) {
+    if (thinkingEnabled) {
       bedrockCode += `,
     additional_request_fields={
         "thinking": {
-            "type": "enabled",
-            "budget_tokens": ${thinkingBudgetTokens}
+            "type": "adaptive"
         }
     }`;
+    }
+
+    // Bedrock prompt caching (Claude): auto message caching / tool caching
+    if (cacheMessages) {
+      bedrockCode += `,
+    cache_config=CacheConfig(strategy="auto")`;
+    }
+    if (cacheTools) {
+      bedrockCode += `,
+    cache_tools="default"`;
     }
 
     bedrockCode += '\n)';
@@ -153,6 +185,44 @@ function findConnectedMCPTools(
       return { node: toolNode, clientVarName, toolsVarName };
     })
     .filter((item): item is { node: Node; clientVarName: string; toolsVarName: string } => item !== null);
+}
+
+/**
+ * Find the names of all skills (skill nodes) connected to an agent node
+ */
+function findConnectedSkills(
+  agentNode: Node,
+  allNodes: Node[],
+  edges: Edge[]
+): string[] {
+  const connectedSkillEdges = edges.filter(
+    edge => edge.target === agentNode.id && edge.targetHandle === 'tools'
+  );
+
+  const skillNames: string[] = [];
+  connectedSkillEdges.forEach(edge => {
+    const skillNode = allNodes.find(node => node.id === edge.source);
+    if (skillNode?.type === 'skill') {
+      const name = (skillNode.data?.skillName as string) || '';
+      if (name && !skillNames.includes(name)) {
+        skillNames.push(name);
+      }
+    }
+  });
+
+  return skillNames;
+}
+
+/**
+ * Build the plugins=[AgentSkills(...)] constructor argument for connected skills.
+ * Paths resolve against the module-level _skills_dir convention.
+ */
+function buildSkillsPluginArg(skillNames: string[], indent: string): string {
+  if (skillNames.length === 0) return '';
+  const skillPaths = skillNames
+    .map(name => `os.path.join(_skills_dir, "${name}")`)
+    .join(', ');
+  return `,\n${indent}plugins=[AgentSkills(skills=[${skillPaths}])]`;
 }
 
 /**
@@ -244,7 +314,7 @@ export function generateGraphCode(
 ): CodeGenerationResult {
   const imports = new Set<string>([
     'from strands import Agent, tool',
-    'from strands.models import BedrockModel',
+    'from strands.models import BedrockModel, CacheConfig',
     'from strands.multiagent import GraphBuilder',
     'from strands_tools import calculator, file_read, shell, current_time',
     'import json',
@@ -285,6 +355,10 @@ export function generateGraphCode(
     if (hasOpenAIProvider) {
       imports.add('from strands.models.openai import OpenAIModel');
     }
+    const hasMantleProvider = agentNodes.some(node => node.data?.modelProvider === MANTLE_PROVIDER);
+    if (hasMantleProvider) {
+      imports.add('from strands.models.openai_responses import OpenAIResponsesModel');
+    }
 
     // Check if MCP tools are used
     if (mcpNodes.length > 0) {
@@ -298,6 +372,17 @@ export function generateGraphCode(
     const hasSwarmNodes = agentNodes.some(node => node.type === 'swarm');
     if (hasSwarmNodes) {
       imports.add('from strands.multiagent import Swarm');
+    }
+
+    // Skills: emit the shared skills directory convention when any agent uses a skill
+    const hasConnectedSkills = agentNodes.some(
+      node => findConnectedSkills(node, nodes, edges).length > 0
+    );
+    if (hasConnectedSkills) {
+      imports.add('from pathlib import Path');
+      imports.add('from strands import AgentSkills');
+      code += '# Studio-managed skills directory (env override locally; packaged skills/ next to this file when deployed)\n';
+      code += '_skills_dir = os.environ.get("STUDIO_SKILLS_DIR") or str(Path(__file__).parent / "skills")\n\n';
     }
 
     // Generate custom tool code
@@ -319,15 +404,16 @@ export function generateGraphCode(
       const data = agentNode.data || {};
       const label = data.label || `Agent${index + 1}`;
       const modelProvider = data.modelProvider || 'AWS Bedrock';
-      const modelId = data.modelId || 'us.anthropic.claude-3-7-sonnet-20250219-v1:0';
+      const modelId = data.modelId || DEFAULT_MODEL_ID;
       const modelName = data.modelName || 'Claude 3.7 Sonnet';
       const systemPrompt = data.systemPrompt || 'You are a helpful AI assistant.';
       const temperature = data.temperature !== undefined ? data.temperature : 0.7;
       const maxTokens = data.maxTokens || 4000;
       const baseUrl = data.baseUrl || '';
       const thinkingEnabled = data.thinkingEnabled || false;
-      const thinkingBudgetTokens = data.thinkingBudgetTokens || 2048;
       const reasoningEffort = data.reasoningEffort || 'medium';
+      const cacheMessages = (data.cacheMessages as boolean) || false;
+      const cacheTools = (data.cacheTools as boolean) || false;
 
       const modelIdentifier = modelProvider === 'AWS Bedrock' ? modelId : modelName;
       const agentVarName = sanitizePythonVariableName(label as string);
@@ -338,8 +424,11 @@ export function generateGraphCode(
         ? `,\n    tools=[${connectedTools.map(tool => tool.code).join(', ')}]`
         : '';
 
+      // Find connected skills
+      const skillsCode = buildSkillsPluginArg(findConnectedSkills(agentNode, nodes, edges), '    ');
+
       // Generate model config
-      const modelConfig = generateModelConfig(agentVarName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, thinkingBudgetTokens as number, reasoningEffort as string);
+      const modelConfig = generateModelConfig(agentVarName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, reasoningEffort as string, cacheMessages, cacheTools);
 
       code += `# ${label} Configuration\n`;
       code += modelConfig + '\n\n';
@@ -347,7 +436,7 @@ export function generateGraphCode(
       code += `    name="${label}",\n`;
       code += `    model=${agentVarName}_model,\n`;
       code += `    system_prompt="""${escapePythonTripleQuotedString(String(systemPrompt || 'You are a helpful AI agent.'))}"""${toolsCode},\n`;
-      code += `    callback_handler=None\n`;
+      code += `    callback_handler=None${skillsCode}\n`;
       code += `)\n\n`;
     });
 

@@ -27,26 +27,20 @@ export function ToolNode({ data, selected, id }: NodeProps) {
 
   const isBuiltIn = toolType === 'built-in';
   const IconComponent = isBuiltIn ? Package : Code;
-  const bgColor = isBuiltIn ? 'bg-orange-50' : 'bg-purple-50';
-  const borderColor = isBuiltIn ? 'border-orange-200' : 'border-purple-200';
-  const iconColor = isBuiltIn ? 'text-orange-600' : 'text-purple-600';
-  const textColor = isBuiltIn ? 'text-orange-800' : 'text-purple-800';
 
   return (
-    <div className={`
-      bg-white rounded-lg border-2 shadow-sm min-w-[180px]
-      ${selected ? 'border-blue-500 shadow-lg' : `border-gray-200 hover:${borderColor}`}
-    `}>
+    <div className={`lp-node min-w-[180px] ${selected ? 'sel' : ''}`}>
       {/* Node Header */}
-      <div className={`${bgColor} px-4 py-2 border-b ${borderColor} rounded-t-lg flex items-center`}>
-        <Wrench className={`w-4 h-4 ${iconColor} mr-2`} />
-        <span className={`text-sm font-semibold ${textColor}`}>{label}</span>
-        <div className="ml-auto flex items-center space-x-1">
-          <IconComponent className="w-3 h-3 text-gray-400" />
+      <div className="lp-node-head" style={{ boxShadow: 'inset 2px 0 0 var(--s2)' }}>
+        <Wrench className="w-4 h-4 text-s2 flex-shrink-0" />
+        <span className="text-[13px] font-semibold text-ink flex-1 truncate">{label}</span>
+        <span className="lp-node-type text-s2">TOOL</span>
+        <div className="flex items-center gap-1">
+          <IconComponent className="w-3 h-3 text-ink-3" />
           {selected && (
             <button
               onClick={handleDelete}
-              className="w-4 h-4 flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+              className="w-4 h-4 flex items-center justify-center text-ink-3 hover:text-crit transition-colors"
               title="Delete node"
             >
               <X className="w-3 h-3" />
@@ -56,20 +50,14 @@ export function ToolNode({ data, selected, id }: NodeProps) {
       </div>
 
       {/* Node Content */}
-      <div className="p-3">
-        <div className="space-y-1 text-xs text-gray-600">
-          <div>
-            <span className="font-medium">Type:</span> {toolType}
+      <div className="px-3 py-2.5">
+        <div className="lp-node-kv"><span className="k">TYPE</span><span className="v">{toolType}</span></div>
+        <div className="lp-node-kv"><span className="k">TOOL</span><span className="v">{toolName}</span></div>
+        {description && (
+          <div className="font-mono text-[10px] text-ink-3 mt-1.5 truncate">
+            {description}
           </div>
-          <div>
-            <span className="font-medium">Tool:</span> {toolName}
-          </div>
-          {description && (
-            <div className="text-xs text-gray-500 mt-2 truncate">
-              {description}
-            </div>
-          )}
-        </div>
+        )}
       </div>
 
       {/* Input Handle */}
@@ -87,10 +75,10 @@ export function ToolNode({ data, selected, id }: NodeProps) {
           type="source"
           position={Position.Right}
           id="tool-output"
-          className={isBuiltIn ? '!bg-orange-500 !w-3 !h-3 !relative !transform-none' : '!bg-purple-500 !w-3 !h-3 !relative !transform-none'}
+          className="!bg-s3 !w-3 !h-3 !relative !transform-none"
           style={{ position: 'relative', right: 0, top: 0 }}
         />
-        <span className={`text-[10px] font-medium bg-white px-1 rounded ml-0.5 ${isBuiltIn ? 'text-orange-600' : 'text-purple-600'}`}>Tool</span>
+        <span className="lp-handle-tag text-s3 ml-0.5">Tool</span>
       </div>
     </div>
   );

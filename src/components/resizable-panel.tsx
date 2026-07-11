@@ -111,9 +111,9 @@ export function ResizablePanel({
       >
         {/* Visual indicator */}
         <div className={`h-full w-1 transition-colors ${
-          isResizing 
-            ? 'bg-blue-500' 
-            : 'bg-transparent group-hover:bg-gray-300'
+          isResizing
+            ? 'bg-amber'
+            : 'bg-transparent group-hover:bg-line2'
         }`} />
         
         {/* Wider hit area for easier grabbing */}

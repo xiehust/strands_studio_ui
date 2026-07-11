@@ -1,6 +1,6 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { type Node, type Edge } from '@xyflow/react';
-import { Code, Eye, EyeOff, FolderOpen, Terminal, Save, Plus, Download, Upload, Rocket, Play, GithubIcon, Star } from 'lucide-react';
+import { Code, Eye, EyeOff, FolderOpen, Terminal, Save, Plus, Download, Upload, Rocket, Play, GithubIcon, Star, LayoutGrid } from 'lucide-react';
 import { FlowEditor } from './flow-editor';
 import { NodePalette } from './node-palette';
 import { PropertyPanel } from './property-panel';
@@ -9,24 +9,26 @@ import { ExecutionPanel } from './execution-panel';
 import { DeployPanel } from './deploy-panel';
 import { InvokePanel } from './invoke-panel';
 import { ProjectManagerComponent } from './project-manager';
+import { SampleGalleryModal } from './sample-gallery-modal';
+import { type SampleFlow } from '../lib/sample-flows';
 import { ResizablePanel } from './resizable-panel';
-import { type StrandsProject, ProjectManager } from '../lib/project-manager';
+import { type StrandsProject, type ProjectCodeState, type CodeState, ProjectManager } from '../lib/project-manager';
 import { generateStrandsAgentCode } from '../lib/code-generator';
 
 // Auto-save key for localStorage
 const AUTOSAVE_FLOW_KEY = 'strands_autosave_flow';
 
 // Helper functions for auto-save
-const saveFlowToAutoSave = (nodes: Node[], edges: Edge[], graphMode: boolean) => {
+const saveFlowToAutoSave = (nodes: Node[], edges: Edge[], graphMode: boolean, codeState: ProjectCodeState) => {
   try {
-    const flowData = { nodes, edges, graphMode, timestamp: Date.now() };
+    const flowData = { nodes, edges, graphMode, codeState, timestamp: Date.now() };
     localStorage.setItem(AUTOSAVE_FLOW_KEY, JSON.stringify(flowData));
   } catch (error) {
     console.error('Failed to auto-save flow:', error);
   }
 };
 
-const loadFlowFromAutoSave = (): { nodes: Node[], edges: Edge[], graphMode?: boolean } | null => {
+const loadFlowFromAutoSave = (): { nodes: Node[], edges: Edge[], graphMode?: boolean, codeState?: ProjectCodeState } | null => {
   try {
     const stored = localStorage.getItem(AUTOSAVE_FLOW_KEY);
     if (!stored) return null;
@@ -34,7 +36,8 @@ const loadFlowFromAutoSave = (): { nodes: Node[], edges: Edge[], graphMode?: boo
     return {
       nodes: flowData.nodes || [],
       edges: flowData.edges || [],
-      graphMode: flowData.graphMode || false
+      graphMode: flowData.graphMode || false,
+      codeState: flowData.codeState
     };
   } catch (error) {
     console.error('Failed to load auto-saved flow:', error);
@@ -46,41 +49,175 @@ const clearAutoSavedFlow = () => {
   localStorage.removeItem(AUTOSAVE_FLOW_KEY);
 };
 
+// Run the template generator and join imports + code (fast path)
+const buildTemplateCode = (nodes: Node[], edges: Edge[], graphMode: boolean): { code: string; errors: string[] } => {
+  const result = generateStrandsAgentCode(nodes, edges, graphMode);
+  return {
+    code: result.imports.join('\n') + '\n\n' + result.code,
+    errors: result.errors,
+  };
+};
+
+// Restore a persisted code state; legacy projects without codeState (or with
+// template source) fall back to live template generation - identical to old behavior.
+const restoreCodeState = (
+  saved: ProjectCodeState | undefined,
+  nodes: Node[],
+  edges: Edge[],
+  graphMode: boolean
+): { codeState: CodeState; codeErrors: string[] } => {
+  if (saved && saved.source !== 'template' && typeof saved.code === 'string' &&
+      (saved.source === 'ai' || saved.source === 'manual')) {
+    return {
+      codeState: { code: saved.code, source: saved.source, flowStale: false },
+      codeErrors: [],
+    };
+  }
+  const { code, errors } = buildTemplateCode(nodes, edges, graphMode);
+  return {
+    codeState: { code, source: 'template', flowStale: false },
+    codeErrors: errors,
+  };
+};
+
+interface InitialAppState {
+  nodes: Node[];
+  edges: Edge[];
+  graphMode: boolean;
+  project: StrandsProject | null;
+  codeState: CodeState;
+  codeErrors: string[];
+}
+
+// Compute initial state synchronously so the flow-change effect never observes
+// a half-restored project (nodes loaded but code state still default).
+const computeInitialState = (): InitialAppState => {
+  const current = ProjectManager.getCurrentProject();
+  if (current) {
+    const graphMode = current.graphMode || false;
+    const restored = restoreCodeState(current.codeState, current.nodes, current.edges, graphMode);
+    return { nodes: current.nodes, edges: current.edges, graphMode, project: current, ...restored };
+  }
+  const autoSaved = loadFlowFromAutoSave();
+  if (autoSaved) {
+    const graphMode = autoSaved.graphMode || false;
+    const restored = restoreCodeState(autoSaved.codeState, autoSaved.nodes, autoSaved.edges, graphMode);
+    return { nodes: autoSaved.nodes, edges: autoSaved.edges, graphMode, project: null, ...restored };
+  }
+  const { code, errors } = buildTemplateCode([], [], false);
+  return {
+    nodes: [],
+    edges: [],
+    graphMode: false,
+    project: null,
+    codeState: { code, source: 'template', flowStale: false },
+    codeErrors: errors,
+  };
+};
+
 export function MainLayout() {
+  const [initialState] = useState<InitialAppState>(computeInitialState);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
-  const [nodes, setNodes] = useState<Node[]>([]);
-  const [edges, setEdges] = useState<Edge[]>([]);
-  const [graphMode, setGraphMode] = useState(false);
+  const [nodes, setNodes] = useState<Node[]>(initialState.nodes);
+  const [edges, setEdges] = useState<Edge[]>(initialState.edges);
+  const [graphMode, setGraphMode] = useState(initialState.graphMode);
   const [showCodePanel, setShowCodePanel] = useState(true);
   const [rightPanelMode, setRightPanelMode] = useState<'code' | 'execution' | 'deploy' | 'invoke'>('code');
   const [showProjectManager, setShowProjectManager] = useState(false);
-  const [currentProject, setCurrentProject] = useState<StrandsProject | null>(null);
+  const [showSampleGallery, setShowSampleGallery] = useState(false);
+  const [currentProject, setCurrentProject] = useState<StrandsProject | null>(initialState.project);
   const [showNewProjectDialog, setShowNewProjectDialog] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectDescription, setNewProjectDescription] = useState('');
-  const [lastSaveTime, setLastSaveTime] = useState<Date | null>(null);
+  const [lastSaveTime, setLastSaveTime] = useState<Date | null>(
+    initialState.project ? new Date(initialState.project.updatedAt) : null
+  );
 
-  // Load current project on mount, or load auto-saved flow if no project
+  // Single source of truth for the code shown/executed/deployed (design 3.1)
+  const [codeState, setCodeState] = useState<CodeState>(initialState.codeState);
+  const [codeErrors, setCodeErrors] = useState<string[]>(initialState.codeErrors);
+  // Read the current source inside the flow-change effect without re-triggering
+  // it when the source changes (e.g. a manual edit must not mark the flow stale).
+  const codeSourceRef = useRef(codeState.source);
+  codeSourceRef.current = codeState.source;
+  // The flow (by reference) that the current non-template code corresponds to.
+  // Canvas edits always produce new arrays, so reference comparison detects real
+  // changes while surviving mount re-runs (StrictMode) and programmatic loads.
+  const codeFlowBaselineRef = useRef<{ nodes: Node[]; edges: Edge[]; graphMode: boolean }>({
+    nodes: initialState.nodes,
+    edges: initialState.edges,
+    graphMode: initialState.graphMode,
+  });
+
+  // Clear auto-save on mount if a project was restored
   useEffect(() => {
-    const current = ProjectManager.getCurrentProject();
-    if (current) {
-      setCurrentProject(current);
-      setNodes(current.nodes);
-      setEdges(current.edges);
-      setGraphMode(current.graphMode || false);
-      setLastSaveTime(new Date(current.updatedAt)); // Set timestamp to project's last updated time
-      // Clear auto-save since we have a project loaded
+    if (initialState.project) {
       clearAutoSavedFlow();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // React to canvas changes according to the code source:
+  // - template: regenerate immediately (existing fast-path behavior)
+  // - ai/manual: never overwrite the code, only flag it as stale
+  useEffect(() => {
+    if (codeSourceRef.current === 'template') {
+      const { code, errors } = buildTemplateCode(nodes, edges, graphMode);
+      setCodeState({ code, source: 'template', flowStale: false });
+      setCodeErrors(errors);
+      codeFlowBaselineRef.current = { nodes, edges, graphMode };
     } else {
-      // No current project, try to load auto-saved flow
-      const autoSaved = loadFlowFromAutoSave();
-      if (autoSaved) {
-        setNodes(autoSaved.nodes);
-        setEdges(autoSaved.edges);
-        setGraphMode(autoSaved.graphMode || false);
+      const baseline = codeFlowBaselineRef.current;
+      if (baseline.nodes !== nodes || baseline.edges !== edges || baseline.graphMode !== graphMode) {
+        setCodeState(prev =>
+          prev.source === 'template' || prev.flowStale ? prev : { ...prev, flowStale: true }
+        );
       }
     }
+  }, [nodes, edges, graphMode]);
+
+  // Code state transitions
+  const handleManualCodeEdit = useCallback((code: string) => {
+    setCodeState(prev => {
+      if (prev.source === 'template' && !prev.flowStale) {
+        // Entering manual mode from a template that matches the current canvas
+        codeFlowBaselineRef.current = { nodes, edges, graphMode };
+      }
+      return { ...prev, code, source: 'manual' };
+    });
+  }, [nodes, edges, graphMode]);
+
+  const handleAiCodeGenerated = useCallback((code: string) => {
+    codeFlowBaselineRef.current = { nodes, edges, graphMode };
+    setCodeState({ code, source: 'ai', flowStale: false });
+    setCodeErrors([]);
+  }, [nodes, edges, graphMode]);
+
+  // Apply AI-fixed code from the execution panel. Unlike a fresh AI generation,
+  // this preserves flowStale (the fix corresponds to the same flow the failing
+  // code did) and does NOT reset the flow baseline. Returns whether it applied.
+  const handleApplyFixedCode = useCallback((code: string): boolean => {
+    if (codeSourceRef.current === 'manual') {
+      if (!confirm('This will replace your manual edits with AI-fixed code. Continue?')) {
+        return false;
+      }
+    }
+    setCodeState(prev => ({ code, source: 'ai', flowStale: prev.flowStale }));
+    setCodeErrors([]);
+    return true;
   }, []);
+
+  const handleRegenerateTemplate = useCallback(() => {
+    const { code, errors } = buildTemplateCode(nodes, edges, graphMode);
+    codeFlowBaselineRef.current = { nodes, edges, graphMode };
+    setCodeState({ code, source: 'template', flowStale: false });
+    setCodeErrors(errors);
+  }, [nodes, edges, graphMode]);
+
+  // Template code for the current canvas (used as AI fallback reference)
+  const getTemplateCode = useCallback(() => {
+    return buildTemplateCode(nodes, edges, graphMode).code;
+  }, [nodes, edges, graphMode]);
 
   // Keep selectedNode synchronized with nodes array
   useEffect(() => {
@@ -92,17 +229,17 @@ export function MainLayout() {
     }
   }, [nodes, selectedNode]);
 
-  // Auto-save flow when nodes, edges, or graphMode change (only if no current project)
+  // Auto-save flow when nodes, edges, graphMode, or code state change (only if no current project)
   useEffect(() => {
     if (!currentProject && (nodes.length > 0 || edges.length > 0)) {
       // Debounce the auto-save to avoid too frequent localStorage writes
       const timer = setTimeout(() => {
-        saveFlowToAutoSave(nodes, edges, graphMode);
+        saveFlowToAutoSave(nodes, edges, graphMode, { code: codeState.code, source: codeState.source });
       }, 500);
 
       return () => clearTimeout(timer);
     }
-  }, [nodes, edges, graphMode, currentProject]);
+  }, [nodes, edges, graphMode, currentProject, codeState.code, codeState.source]);
 
   // Listen for switch to execution panel event
   useEffect(() => {
@@ -164,6 +301,10 @@ export function MainLayout() {
     setNodes(project.nodes);
     setEdges(project.edges);
     setGraphMode(project.graphMode || false);
+    const restored = restoreCodeState(project.codeState, project.nodes, project.edges, project.graphMode || false);
+    codeFlowBaselineRef.current = { nodes: project.nodes, edges: project.edges, graphMode: project.graphMode || false };
+    setCodeState(restored.codeState);
+    setCodeErrors(restored.codeErrors);
     setCurrentProject(project);
     setLastSaveTime(new Date(project.updatedAt)); // Set timestamp to project's last updated time
     // Clear auto-save since we now have a project loaded
@@ -178,6 +319,7 @@ export function MainLayout() {
         nodes,
         edges,
         graphMode,
+        codeState: { code: codeState.code, source: codeState.source },
       });
       if (updated) {
         setCurrentProject(updated);
@@ -187,7 +329,7 @@ export function MainLayout() {
       // Save as new project
       setShowNewProjectDialog(true);
     }
-  }, [currentProject, nodes, edges, graphMode]);
+  }, [currentProject, nodes, edges, graphMode, codeState.code, codeState.source]);
 
   const handleCreateNewProject = useCallback(() => {
     if (!newProjectName.trim()) {
@@ -201,6 +343,7 @@ export function MainLayout() {
       nodes,
       edges,
       graphMode,
+      codeState: { code: codeState.code, source: codeState.source },
     });
 
     ProjectManager.setCurrentProject(newProject.id);
@@ -211,18 +354,50 @@ export function MainLayout() {
     setShowNewProjectDialog(false);
     // Clear auto-save since we now have a saved project
     clearAutoSavedFlow();
-  }, [newProjectName, newProjectDescription, nodes, edges, graphMode]);
+  }, [newProjectName, newProjectDescription, nodes, edges, graphMode, codeState.code, codeState.source]);
 
   const handleNewProject = useCallback(() => {
     if (nodes.length > 0 || edges.length > 0) {
       if (confirm('Creating a new project will clear the current flow. Continue?')) {
-        setNodes([]);
-        setEdges([]);
+        const emptyNodes: Node[] = [];
+        const emptyEdges: Edge[] = [];
+        setNodes(emptyNodes);
+        setEdges(emptyEdges);
+        const { code, errors } = buildTemplateCode(emptyNodes, emptyEdges, graphMode);
+        codeFlowBaselineRef.current = { nodes: emptyNodes, edges: emptyEdges, graphMode };
+        setCodeState({ code, source: 'template', flowStale: false });
+        setCodeErrors(errors);
         setCurrentProject(null);
         ProjectManager.clearCurrentProject();
       }
     }
-  }, [nodes, edges]);
+  }, [nodes, edges, graphMode]);
+
+  // Load a preset sample onto the canvas (equivalent to starting a fresh,
+  // unsaved canvas: template code state, no current project pointer).
+  const handleLoadSample = useCallback((sample: SampleFlow) => {
+    if (nodes.length > 0) {
+      if (!confirm('Loading a sample will replace the current canvas. Continue?')) {
+        return;
+      }
+    }
+    // Deep-copy so canvas edits never mutate the shared sample constants
+    const sampleNodes = structuredClone(sample.nodes);
+    const sampleEdges = structuredClone(sample.edges);
+    setGraphMode(sample.graphMode);
+    setNodes(sampleNodes);
+    setEdges(sampleEdges);
+    setSelectedNode(null);
+    // Reset code state to a freshly generated template for the sample flow
+    const { code, errors } = buildTemplateCode(sampleNodes, sampleEdges, sample.graphMode);
+    codeFlowBaselineRef.current = { nodes: sampleNodes, edges: sampleEdges, graphMode: sample.graphMode };
+    setCodeState({ code, source: 'template', flowStale: false });
+    setCodeErrors(errors);
+    // Detach from any open project (saved project data stays untouched)
+    setCurrentProject(null);
+    ProjectManager.clearCurrentProject();
+    setShowSampleGallery(false);
+  }, [nodes]);
 
   const handleExportCurrentProject = useCallback(() => {
     if (currentProject) {
@@ -253,6 +428,10 @@ export function MainLayout() {
         setNodes(imported.nodes);
         setEdges(imported.edges);
         setGraphMode(imported.graphMode || false);
+        const restored = restoreCodeState(imported.codeState, imported.nodes, imported.edges, imported.graphMode || false);
+        codeFlowBaselineRef.current = { nodes: imported.nodes, edges: imported.edges, graphMode: imported.graphMode || false };
+        setCodeState(restored.codeState);
+        setCodeErrors(restored.codeErrors);
         setLastSaveTime(new Date(imported.updatedAt)); // Set timestamp to imported project's time
         // Clear auto-save since we now have an imported project
         clearAutoSavedFlow();
@@ -267,196 +446,159 @@ export function MainLayout() {
     event.target.value = '';
   }, []);
 
-  // Generate current code for execution
-  const getCurrentCode = useCallback(() => {
-    const result = generateStrandsAgentCode(nodes, edges, graphMode);
-    return result.imports.join('\n') + '\n\n' + result.code;
-  }, [nodes, edges, graphMode]);
-
   return (
-    <div className="h-screen w-screen flex bg-gray-50">
+    <div className="h-screen w-screen flex bg-bg text-ink">
       {/* Node Palette Sidebar */}
-      <NodePalette className="w-80 flex-shrink-0" />
-      
+      <NodePalette className="w-64 flex-shrink-0" />
+
       {/* Main Content */}
-      <div className="flex-1 flex flex-col">
-        {/* Header */}
-        <header className="bg-white border-b border-gray-200 px-6 py-4">
-          {/* First row - Title and Project Management */}
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center space-x-6">
-              <div>
-                <h1 className="text-xl font-semibold text-gray-900">Open Studio for Strands Agent SDK</h1>
-                <p className="text-sm text-gray-500 mt-1">
-                  Visually create and configure AI agents using drag-and-drop interface
-                </p>
-              </div>
-              <div className="flex items-center space-x-1 pl-6 border-l border-gray-200">
-                <span className="text-sm text-gray-600">Project:</span>
-                <span className="text-sm font-medium text-gray-900">
-                  {currentProject ? currentProject.name : 'Untitled Project'}
-                </span>
-              </div>
-            </div>
-            <div className="flex items-center space-x-2">
-              {/* Save timestamp indicator */}
-              {lastSaveTime && (
-                <span className="text-xs text-blue-600 mr-2">
-                  Saved at {lastSaveTime.toLocaleTimeString()}
-                </span>
-              )}
-
-              <button
-                onClick={handleSaveCurrentProject}
-                className="flex items-center px-3 py-2 rounded-md text-sm font-medium bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors"
-                title="Save current project"
-              >
-                <Save className="w-4 h-4 mr-2" />
-                Save
-              </button>
-
-              <button
-                onClick={handleNewProject}
-                className="flex items-center px-3 py-2 rounded-md text-sm font-medium bg-green-100 text-green-700 hover:bg-green-200 transition-colors"
-                title="Create new project"
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                New
-              </button>
-
-              <label className="flex items-center px-3 py-2 rounded-md text-sm font-medium bg-purple-100 text-purple-700 hover:bg-purple-200 transition-colors cursor-pointer"
-                     title="Import project">
-                <Upload className="w-4 h-4 mr-2" />
-                Import
-                <input
-                  type="file"
-                  accept=".json"
-                  onChange={handleImportProject}
-                  className="hidden"
-                />
-              </label>
-
-              <button
-                onClick={handleExportCurrentProject}
-                disabled={!currentProject}
-                className={`flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                  currentProject
-                    ? 'bg-orange-100 text-orange-700 hover:bg-orange-200'
-                    : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                }`}
-                title="Export current project"
-              >
-                <Download className="w-4 h-4 mr-2" />
-                Export
-              </button>
-
-              <button
-                onClick={() => setShowProjectManager(true)}
-                className="flex items-center px-3 py-2 rounded-md text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors"
-              >
-                <FolderOpen className="w-4 h-4 mr-2" />
-                Open
-              </button>
-
-              <a
-                href="https://github.com/xiehust/strands_studio_ui"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center px-3 py-2 rounded-md text-sm font-medium bg-gray-900 text-white hover:bg-gray-800 transition-colors"
-                title="Star us on GitHub"
-              >
-                <GithubIcon className="w-4 h-4 mr-1" />
-                <Star className="w-4 h-4 mr-2" />
-                Star
-              </a>
-            </div>
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Topbar — Launchpad chrome */}
+        <header className="lp-topbar flex-shrink-0">
+          <div className="lp-brand">
+            <span className="glyph">▲</span>
+            AGENTCORE<em>//</em>LAUNCHPAD
+            <span className="text-ink-3 font-normal tracking-normal">·</span>
+            <span className="text-ink-2">STRANDS STUDIO</span>
           </div>
-
-          {/* Second row - Panel Controls */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-6">
-              {/* Empty space to match left side of first row */}
-              <div className="invisible">
-                <h1 className="text-xl font-semibold text-gray-900">Open Studio for Strands Agent SDK</h1>
-              </div>
-              <div className="invisible flex items-center space-x-1 pl-6 border-l border-gray-200">
-                <span className="text-sm text-gray-600">Project:</span>
-                <span className="text-sm font-medium text-gray-900">Untitled Project</span>
-              </div>
-            </div>
-            <div className="flex items-center space-x-2">
-              <button
-                onClick={() => {
-                  setRightPanelMode('code');
-                  setShowCodePanel(true);
-                }}
-                className={`flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                  showCodePanel && rightPanelMode === 'code'
-                    ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                <Code className="w-4 h-4 mr-2" />
-                Code
-              </button>
-
-              <button
-                onClick={() => {
-                  setRightPanelMode('execution');
-                  setShowCodePanel(true);
-                }}
-                className={`flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                  showCodePanel && rightPanelMode === 'execution'
-                    ? 'bg-green-100 text-green-700 hover:bg-green-200'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                <Terminal className="w-4 h-4 mr-2" />
-                Local Invoke
-              </button>
-
-              <button
-                onClick={() => {
-                  setRightPanelMode('deploy');
-                  setShowCodePanel(true);
-                }}
-                className={`flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                  showCodePanel && rightPanelMode === 'deploy'
-                    ? 'bg-purple-100 text-purple-700 hover:bg-purple-200'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                <Rocket className="w-4 h-4 mr-2" />
-                Deploy to Cloud
-              </button>
-
-              <button
-                onClick={() => {
-                  setRightPanelMode('invoke');
-                  setShowCodePanel(true);
-                }}
-                className={`flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                  showCodePanel && rightPanelMode === 'invoke'
-                    ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                <Play className="w-4 h-4 mr-2" />
-                Cloud Invoke
-              </button>
-
-              <div className="w-px h-6 bg-gray-300 mx-2" />
-
-              <button
-                onClick={() => setShowCodePanel(!showCodePanel)}
-                className="flex items-center px-2 py-2 rounded-md text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors"
-                title={showCodePanel ? 'Hide Panel' : 'Show Panel'}
-              >
-                {showCodePanel ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
+          <div className="lp-crumb hidden md:block">
+            CONSOLE / STUDIO / <b>{(currentProject ? currentProject.name : 'UNTITLED PROJECT').toUpperCase()}</b>
+          </div>
+          <div className="ml-auto flex items-center gap-2.5">
+            {lastSaveTime && (
+              <span className="lp-syschip hidden lg:flex" title="Last save time">
+                SAVED {lastSaveTime.toLocaleTimeString()}
+              </span>
+            )}
+            <span className="lp-syschip"><span className="lp-led" />STUDIO READY</span>
+            <a
+              href="https://github.com/xiehust/strands_studio_ui"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="lp-syschip hover:border-line2 hover:text-ink transition-colors"
+              title="Star us on GitHub"
+            >
+              <GithubIcon className="w-3 h-3" />
+              <Star className="w-3 h-3" />
+              STAR
+            </a>
           </div>
         </header>
+
+        {/* Toolbar — project actions + panel controls */}
+        <div className="flex items-center gap-2 px-4 py-2 border-b border-line bg-panel/60 flex-shrink-0 flex-wrap">
+          <button
+            onClick={handleSaveCurrentProject}
+            className="lp-btn sm"
+            title="Save current project"
+          >
+            <Save className="w-3 h-3" />
+            Save
+          </button>
+
+          <button
+            onClick={handleNewProject}
+            className="lp-btn sm"
+            title="Create new project"
+          >
+            <Plus className="w-3 h-3" />
+            New
+          </button>
+
+          <label className="lp-btn sm" title="Import project">
+            <Upload className="w-3 h-3" />
+            Import
+            <input
+              type="file"
+              accept=".json"
+              onChange={handleImportProject}
+              className="hidden"
+            />
+          </label>
+
+          <button
+            onClick={handleExportCurrentProject}
+            disabled={!currentProject}
+            className="lp-btn sm"
+            title="Export current project"
+          >
+            <Download className="w-3 h-3" />
+            Export
+          </button>
+
+          <button
+            onClick={() => setShowProjectManager(true)}
+            className="lp-btn sm"
+          >
+            <FolderOpen className="w-3 h-3" />
+            Open
+          </button>
+
+          <button
+            onClick={() => setShowSampleGallery(true)}
+            className="lp-btn sm"
+            title="Browse preset sample flows"
+          >
+            <LayoutGrid className="w-3 h-3" />
+            Samples
+          </button>
+
+          <div className="ml-auto flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => {
+                setRightPanelMode('code');
+                setShowCodePanel(true);
+              }}
+              className={`lp-btn sm ${showCodePanel && rightPanelMode === 'code' ? 'active' : ''}`}
+            >
+              <Code className="w-3 h-3" />
+              Code
+            </button>
+
+            <button
+              onClick={() => {
+                setRightPanelMode('execution');
+                setShowCodePanel(true);
+              }}
+              className={`lp-btn sm ${showCodePanel && rightPanelMode === 'execution' ? 'active' : ''}`}
+            >
+              <Terminal className="w-3 h-3" />
+              Local Invoke
+            </button>
+
+            <button
+              onClick={() => {
+                setRightPanelMode('deploy');
+                setShowCodePanel(true);
+              }}
+              className={`lp-btn sm ${showCodePanel && rightPanelMode === 'deploy' ? 'active' : ''}`}
+            >
+              <Rocket className="w-3 h-3" />
+              Deploy
+            </button>
+
+            <button
+              onClick={() => {
+                setRightPanelMode('invoke');
+                setShowCodePanel(true);
+              }}
+              className={`lp-btn sm ${showCodePanel && rightPanelMode === 'invoke' ? 'active' : ''}`}
+            >
+              <Play className="w-3 h-3" />
+              Cloud Invoke
+            </button>
+
+            <div className="w-px h-5 bg-line mx-1" />
+
+            <button
+              onClick={() => setShowCodePanel(!showCodePanel)}
+              className="lp-btn sm"
+              title={showCodePanel ? 'Hide Panel' : 'Show Panel'}
+            >
+              {showCodePanel ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+            </button>
+          </div>
+        </div>
         
         {/* Flow Editor, Property Panel, and Code Panel */}
         <div className="flex-1 flex">
@@ -495,20 +637,27 @@ export function MainLayout() {
                   nodes={nodes}
                   edges={edges}
                   graphMode={graphMode}
+                  codeState={codeState}
+                  codeErrors={codeErrors}
+                  onManualEdit={handleManualCodeEdit}
+                  onAiGenerated={handleAiCodeGenerated}
+                  onRegenerateTemplate={handleRegenerateTemplate}
+                  getTemplateCode={getTemplateCode}
                 />
               ) : rightPanelMode === 'execution' ? (
                 <ExecutionPanel
-                  code={getCurrentCode()}
+                  code={codeState.code}
                   projectId={currentProject?.id || 'default-project'}
                   projectName={currentProject?.name || 'Untitled Project'}
                   projectVersion={currentProject?.version || '1.0.0'}
                   flowData={{ nodes, edges }}
+                  graphMode={graphMode}
+                  onApplyFixedCode={handleApplyFixedCode}
                 />
               ) : rightPanelMode === 'deploy' ? (
                 <DeployPanel
                   nodes={nodes}
-                  edges={edges}
-                  graphMode={graphMode}
+                  code={codeState.code}
                 />
               ) : (
                 <InvokePanel />
@@ -520,7 +669,7 @@ export function MainLayout() {
 
       {/* Project Manager Modal */}
       {showProjectManager && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
           <ProjectManagerComponent
             className="w-96 max-h-96 m-4"
             onLoadProject={handleLoadProject}
@@ -529,52 +678,61 @@ export function MainLayout() {
         </div>
       )}
 
+      {/* Sample Gallery Modal */}
+      {showSampleGallery && (
+        <SampleGalleryModal
+          onClose={() => setShowSampleGallery(false)}
+          onLoadSample={handleLoadSample}
+        />
+      )}
+
       {/* New Project Dialog */}
       {showNewProjectDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-80 mx-4">
-            <h4 className="text-lg font-semibold text-gray-900 mb-4">Create New Project</h4>
-            
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="lp-panel brk lp-rise p-6 w-80 mx-4">
+            <div className="lp-kicker mb-1">// NEW PROJECT</div>
+            <h4 className="lp-title text-lg text-ink mb-4">Create New Project</h4>
+
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="lp-label">
                   Project Name *
                 </label>
                 <input
                   type="text"
                   value={newProjectName}
                   onChange={(e) => setNewProjectName(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                  className="lp-input"
                   placeholder="Enter project name"
                 />
               </div>
-              
+
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="lp-label">
                   Description
                 </label>
                 <textarea
                   value={newProjectDescription}
                   onChange={(e) => setNewProjectDescription(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                  className="lp-input"
                   placeholder="Optional description"
                   rows={3}
                 />
               </div>
             </div>
 
-            <div className="flex justify-end space-x-2 mt-6">
+            <div className="flex justify-end gap-2 mt-6">
               <button
                 onClick={() => setShowNewProjectDialog(false)}
-                className="px-3 py-2 text-sm text-gray-600 hover:text-gray-800"
+                className="lp-btn"
               >
                 Cancel
               </button>
               <button
                 onClick={handleCreateNewProject}
-                className="px-3 py-2 text-sm bg-blue-500 text-white rounded hover:bg-blue-600"
+                className="lp-btn primary"
               >
-                Create Project
+                ▲ Create
               </button>
             </div>
           </div>

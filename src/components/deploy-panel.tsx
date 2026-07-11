@@ -1,85 +1,30 @@
-import { useState } from 'react';
-import { type Node, type Edge } from '@xyflow/react';
-import { Rocket, Cloud, Server, Container } from 'lucide-react';
-import { LambdaDeployPanel } from './lambda-deploy-panel';
+import { type Node } from '@xyflow/react';
+import { Rocket } from 'lucide-react';
 import { AgentCoreDeployPanel } from './agentcore-deploy-panel';
-import { ECSDeployPanel } from './ecs-deploy-panel';
 
+// NOTE: Lambda and ECS Fargate deployment targets are disabled.
+// Their panel components (lambda-deploy-panel.tsx, ecs-deploy-panel.tsx) are kept
+// on disk but intentionally unimported. Backend routes are gated by the
+// ENABLE_LEGACY_DEPLOY_TARGETS env var.
 
 interface DeployPanelProps {
   nodes: Node[];
-  edges: Edge[];
-  graphMode?: boolean;
+  code: string;
   className?: string;
 }
 
-export function DeployPanel({ nodes, edges, graphMode = false, className = '' }: DeployPanelProps) {
-  const [deploymentTarget, setDeploymentTarget] = useState<'agentcore' | 'lambda' | 'ecs-fargate'>('agentcore');
-
-  const handleTargetChange = (target: 'agentcore' | 'lambda' | 'ecs-fargate') => {
-    setDeploymentTarget(target);
-  };
-
+export function DeployPanel({ nodes, code, className = '' }: DeployPanelProps) {
   return (
-    <div className={`bg-white border-l border-gray-200 flex flex-col h-full ${className}`}>
+    <div className={`bg-panel border-l border-line flex flex-col h-full ${className}`}>
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-gray-200">
-        <div className="flex items-center">
-          <Rocket className="w-4 h-4 text-purple-600 mr-2" />
-          <h3 className="text-lg font-semibold text-gray-900">Deploy Agent</h3>
-        </div>
+      <div className="lp-phead">
+        <Rocket className="w-4 h-4 text-amber" />
+        <h3 className="lp-ptitle">Deploy Agent</h3>
+        <span className="lp-sub">aws bedrock agentcore</span>
       </div>
 
-      {/* Deployment Target Selection */}
-      <div className="p-4 border-b border-gray-200">
-        <div className="space-y-3">
-          <label className="text-sm font-medium text-gray-900">Deployment Target</label>
-          <div className="grid grid-cols-3 gap-3">
-            <button
-              onClick={() => handleTargetChange('agentcore')}
-              className={`flex items-center p-3 border rounded-lg transition-colors ${
-                deploymentTarget === 'agentcore'
-                  ? 'border-purple-500 bg-purple-50 text-purple-700'
-                  : 'border-gray-200 hover:border-gray-300'
-              }`}
-            >
-              <Server className="w-4 h-4 mr-2" />
-              <span className="text-sm font-medium">AWS AgentCore</span>
-            </button>
-            <button
-              onClick={() => handleTargetChange('lambda')}
-              className={`flex items-center p-3 border rounded-lg transition-colors ${
-                deploymentTarget === 'lambda'
-                  ? 'border-orange-500 bg-orange-50 text-orange-700'
-                  : 'border-gray-200 hover:border-gray-300'
-              }`}
-            >
-              <Cloud className="w-4 h-4 mr-2" />
-              <span className="text-sm font-medium">AWS Lambda</span>
-            </button>
-            <button
-              onClick={() => handleTargetChange('ecs-fargate')}
-              className={`flex items-center p-3 border rounded-lg transition-colors ${
-                deploymentTarget === 'ecs-fargate'
-                  ? 'border-blue-500 bg-blue-50 text-blue-700'
-                  : 'border-gray-200 hover:border-gray-300'
-              }`}
-            >
-              <Container className="w-4 h-4 mr-2" />
-              <span className="text-sm font-medium">ECS Fargate</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Conditional Panel Content */}
-      {deploymentTarget === 'lambda' ? (
-        <LambdaDeployPanel nodes={nodes} edges={edges} graphMode={graphMode} />
-      ) : deploymentTarget === 'ecs-fargate' ? (
-        <ECSDeployPanel nodes={nodes} edges={edges} graphMode={graphMode} />
-      ) : (
-        <AgentCoreDeployPanel nodes={nodes} edges={edges} graphMode={graphMode} />
-      )}
+      {/* AgentCore Deployment Panel */}
+      <AgentCoreDeployPanel nodes={nodes} code={code} />
     </div>
   );
 }

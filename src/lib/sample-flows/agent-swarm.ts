@@ -1,0 +1,125 @@
+import type { SampleFlow } from './types';
+
+export const agentSwarm: SampleFlow = {
+  id: 'agent-swarm',
+  name: 'Self-Organizing Swarm',
+  description:
+    'A swarm of three member agents (researcher, analyst, writer) that collaborate by handing work off to each other until the task is done.',
+  level: 'basic',
+  graphMode: false,
+  nodes: [
+    {
+      id: 'input-1005',
+      type: 'input',
+      position: { x: 40, y: 100 },
+      data: {
+        label: 'User Input',
+        inputType: 'user-prompt',
+      },
+    },
+    {
+      id: 'swarm-A005',
+      type: 'swarm',
+      position: { x: 360, y: 80 },
+      data: {
+        label: 'Research Swarm',
+        maxHandoffs: 20,
+        maxIterations: 20,
+        executionTimeout: 900,
+        nodeTimeout: 300,
+        repetitiveHandoffDetectionWindow: 0,
+        repetitiveHandoffMinUniqueAgents: 0,
+      },
+    },
+    {
+      id: 'agent-B005',
+      type: 'agent',
+      position: { x: 80, y: 380 },
+      data: {
+        label: 'Researcher',
+        modelProvider: 'AWS Bedrock',
+        modelId: 'global.anthropic.claude-sonnet-4-6',
+        modelName: 'Claude Sonnet 4.6',
+        systemPrompt: 'You are a researcher in a swarm. Gather facts about the topic and hand off to the analyst when done.',
+        temperature: 0.7,
+        maxTokens: 4000,
+        streaming: false,
+      },
+    },
+    {
+      id: 'agent-C005',
+      type: 'agent',
+      position: { x: 380, y: 380 },
+      data: {
+        label: 'Analyst',
+        modelProvider: 'AWS Bedrock',
+        modelId: 'global.anthropic.claude-sonnet-4-6',
+        modelName: 'Claude Sonnet 4.6',
+        systemPrompt: 'You are an analyst in a swarm. Analyze the gathered facts and hand off to the writer for the final summary.',
+        temperature: 0.7,
+        maxTokens: 4000,
+        streaming: false,
+      },
+    },
+    {
+      id: 'agent-D005',
+      type: 'agent',
+      position: { x: 680, y: 380 },
+      data: {
+        label: 'Writer',
+        modelProvider: 'AWS Bedrock',
+        modelId: 'global.anthropic.claude-sonnet-4-6',
+        modelName: 'Claude Sonnet 4.6',
+        systemPrompt: 'You are a writer in a swarm. Produce the final, polished answer from the analysis.',
+        temperature: 0.7,
+        maxTokens: 4000,
+        streaming: false,
+      },
+    },
+    {
+      id: 'output-3005',
+      type: 'output',
+      position: { x: 720, y: 100 },
+      data: {
+        label: 'Output',
+      },
+    },
+  ],
+  edges: [
+    {
+      id: 'e-1005-A005',
+      source: 'input-1005',
+      target: 'swarm-A005',
+      sourceHandle: 'output',
+      targetHandle: 'user-input',
+    },
+    {
+      id: 'e-A005-B005',
+      source: 'swarm-A005',
+      target: 'agent-B005',
+      sourceHandle: 'sub-agents',
+      targetHandle: 'orchestrator-input',
+    },
+    {
+      id: 'e-A005-C005',
+      source: 'swarm-A005',
+      target: 'agent-C005',
+      sourceHandle: 'sub-agents',
+      targetHandle: 'orchestrator-input',
+    },
+    {
+      id: 'e-A005-D005',
+      source: 'swarm-A005',
+      target: 'agent-D005',
+      sourceHandle: 'sub-agents',
+      targetHandle: 'orchestrator-input',
+    },
+    {
+      id: 'e-A005-3005',
+      source: 'swarm-A005',
+      target: 'output-3005',
+      sourceHandle: 'output',
+      targetHandle: 'input',
+    },
+  ],
+};

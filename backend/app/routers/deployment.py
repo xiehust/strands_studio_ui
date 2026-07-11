@@ -2,6 +2,7 @@
 Deployment API routes
 """
 import logging
+import os
 from typing import Dict, List, Union, Optional
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse
@@ -34,6 +35,19 @@ logger = logging.getLogger(__name__)
 # Create router
 router = APIRouter(prefix="/api/deploy", tags=["deployment"])
 
+# Feature flag: Lambda/ECS deployment targets are disabled by default.
+# Set ENABLE_LEGACY_DEPLOY_TARGETS=true to re-enable them.
+def _legacy_targets_enabled() -> bool:
+    return os.getenv("ENABLE_LEGACY_DEPLOY_TARGETS", "").strip().lower() in ("1", "true", "yes", "on")
+
+async def require_legacy_deploy_targets():
+    """FastAPI dependency gating Lambda/ECS routes behind ENABLE_LEGACY_DEPLOY_TARGETS."""
+    if not _legacy_targets_enabled():
+        raise HTTPException(
+            status_code=501,
+            detail="Deployment target disabled. Set ENABLE_LEGACY_DEPLOY_TARGETS=true to re-enable Lambda/ECS deployments."
+        )
+
 # Global service instances
 deployment_service = DeploymentService()
 agentcore_invoke_service = AgentCoreInvokeService()
@@ -45,6 +59,12 @@ async def deploy_agent(request: Union[LambdaDeploymentRequest, AgentCoreDeployme
     """Deploy Strands agent to specified target"""
     logger.info(f"Deployment request: {request.deployment_type}")
 
+    if request.deployment_type != DeploymentType.AGENT_CORE and not _legacy_targets_enabled():
+        raise HTTPException(
+            status_code=501,
+            detail="Deployment target disabled. Set ENABLE_LEGACY_DEPLOY_TARGETS=true to re-enable Lambda/ECS deployments."
+        )
+
     try:
         result = await deployment_service.deploy(request)
         return result
@@ -53,7 +73,7 @@ async def deploy_agent(request: Union[LambdaDeploymentRequest, AgentCoreDeployme
         raise HTTPException(status_code=500, detail=str(e))
 
 # Backward compatibility endpoint for Lambda deployments
-@router.post("/lambda", response_model=DeploymentResponse)
+@router.post("/lambda", response_model=DeploymentResponse, dependencies=[Depends(require_legacy_deploy_targets)])
 async def deploy_to_lambda(request: LambdaDeploymentRequest):
     """Deploy Strands agent to AWS Lambda (backward compatibility)"""
     logger.info(f"Lambda deployment request: {request.function_name}")
@@ -77,7 +97,7 @@ async def deploy_to_agentcore(request: AgentCoreDeploymentRequest):
         logger.error(f"AgentCore deployment error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/ecs-fargate", response_model=DeploymentResponse)
+@router.post("/ecs-fargate", response_model=DeploymentResponse, dependencies=[Depends(require_legacy_deploy_targets)])
 async def deploy_to_ecs_fargate(request: ECSFargateDeploymentRequest):
     """Deploy Strands agent to ECS Fargate using CloudFormation"""
     logger.info(f"ECS Fargate deployment request: {request.service_name}")
@@ -89,7 +109,7 @@ async def deploy_to_ecs_fargate(request: ECSFargateDeploymentRequest):
         logger.error(f"ECS Fargate deployment error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.delete("/ecs-fargate/{stack_name}")
+@router.delete("/ecs-fargate/{stack_name}", dependencies=[Depends(require_legacy_deploy_targets)])
 async def delete_ecs_fargate_deployment(stack_name: str, region: str = "us-east-1"):
     """Delete ECS Fargate CloudFormation stack and all resources"""
     logger.info(f"ECS Fargate deletion request: {stack_name}")
@@ -154,8 +174,18 @@ async def deployment_health():
 @router.get("/types")
 async def get_deployment_types():
     """Get available deployment types and their requirements"""
-    return {
-        "deployment_types": [
+    deployment_types = [
+        {
+            "type": DeploymentType.AGENT_CORE,
+            "name": "AgentCore",
+            "description": "Deploy to AWS Bedrock AgentCore (direct code deploy via boto3)",
+            "status": "implemented",
+            "requirements": ["AWS credentials", "uv"]
+        }
+    ]
+
+    if _legacy_targets_enabled():
+        deployment_types.extend([
             {
                 "type": DeploymentType.LAMBDA,
                 "name": "AWS Lambda",
@@ -164,21 +194,15 @@ async def get_deployment_types():
                 "requirements": ["SAM CLI", "AWS CLI", "AWS credentials"]
             },
             {
-                "type": DeploymentType.AGENT_CORE,
-                "name": "AgentCore",
-                "description": "Deploy to AgentCore platform",
-                "status": "planned",
-                "requirements": ["AgentCore endpoint", "AgentCore credentials"]
-            },
-            {
                 "type": DeploymentType.ECS_FARGATE,
                 "name": "ECS Fargate",
                 "description": "Containerized deployment using AWS ECS Fargate",
-                "status": "planned",
+                "status": "implemented",
                 "requirements": ["Docker", "AWS CLI", "ECS cluster"]
             }
-        ]
-    }
+        ])
+
+    return {"deployment_types": deployment_types}
 
 # AgentCore invoke endpoint
 @router.post("/agentcore/invoke")
@@ -288,7 +312,6 @@ async def delete_agentcore_agent(agent_runtime_arn: str):
             sys.path.insert(0, str(deployment_path))
 
         from agentcore_deployment_service import AgentCoreDeploymentService
-        from agentcore_config import AgentCoreDeploymentConfig, DeploymentMethod, NetworkMode
 
         # Parse region from ARN for client initialization
         # ARN format: arn:aws:bedrock-agentcore:region:account:runtime/agent-name
@@ -318,7 +341,7 @@ async def delete_agentcore_agent(agent_runtime_arn: str):
         logger.error(f"AgentCore deletion error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.delete("/lambda/{function_name}")
+@router.delete("/lambda/{function_name}", dependencies=[Depends(require_legacy_deploy_targets)])
 async def delete_lambda_agent(function_name: str, region: str = "us-east-1", stack_name: Optional[str] = None):
     """Delete Lambda deployment and AWS resources"""
     logger.info(f"Deleting Lambda agent: {function_name} in region: {region}")
@@ -406,7 +429,7 @@ class FunctionUrlInvokeRequest(BaseModel):
 
 
 # Lambda Function URL invoke endpoints (with AWS IAM authentication)
-@router.post("/lambda/invoke-url", response_model=LambdaInvokeResponse)
+@router.post("/lambda/invoke-url", response_model=LambdaInvokeResponse, dependencies=[Depends(require_legacy_deploy_targets)])
 async def invoke_lambda_function_url(request: FunctionUrlInvokeRequest):
     """Invoke a Lambda Function URL with AWS IAM authentication"""
     logger.info(f"Lambda Function URL invoke request: {request.function_url}")
@@ -425,7 +448,7 @@ async def invoke_lambda_function_url(request: FunctionUrlInvokeRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/lambda/invoke-url/stream")
+@router.post("/lambda/invoke-url/stream", dependencies=[Depends(require_legacy_deploy_targets)])
 async def invoke_lambda_function_url_stream(request: FunctionUrlInvokeRequest):
     """Invoke a Lambda Function URL with AWS IAM authentication (streaming)"""
     logger.info(f"Lambda Function URL streaming invoke request: {request.function_url}")
@@ -452,7 +475,7 @@ async def invoke_lambda_function_url_stream(request: FunctionUrlInvokeRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 # ECS invoke endpoints
-@router.post("/ecs/invoke", response_model=ECSInvokeResponse)
+@router.post("/ecs/invoke", response_model=ECSInvokeResponse, dependencies=[Depends(require_legacy_deploy_targets)])
 async def invoke_ecs_service(request: ECSInvokeRequest):
     """Invoke a deployed ECS Fargate service synchronously"""
     logger.info(f"ECS service invoke request: {request.service_endpoint}")
@@ -464,7 +487,7 @@ async def invoke_ecs_service(request: ECSInvokeRequest):
         logger.error(f"ECS service invoke error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/ecs/invoke/stream")
+@router.post("/ecs/invoke/stream", dependencies=[Depends(require_legacy_deploy_targets)])
 async def invoke_ecs_service_stream(request: ECSInvokeRequest):
     """Invoke a deployed ECS Fargate service with streaming response"""
     logger.info(f"ECS service streaming invoke request: {request.service_endpoint}")
@@ -488,7 +511,7 @@ async def invoke_ecs_service_stream(request: ECSInvokeRequest):
         logger.error(f"ECS service streaming invoke error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/build-logs/{deployment_id}")
+@router.get("/build-logs/{deployment_id}", dependencies=[Depends(require_legacy_deploy_targets)])
 async def get_build_logs(deployment_id: str, lines: int = 10):
     """Get recent build logs for an ECS deployment"""
     logger.info(f"Getting build logs for ECS deployment: {deployment_id}, lines: {lines}")

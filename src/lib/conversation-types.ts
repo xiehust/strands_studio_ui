@@ -39,6 +39,8 @@ export interface ChatResponse {
   content: string;
   timestamp: string;
   streaming_complete?: boolean;
+  success?: boolean;
+  error?: string;
 }
 
 export interface ConversationListResponse {

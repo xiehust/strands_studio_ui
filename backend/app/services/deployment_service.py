@@ -307,8 +307,8 @@ class DeploymentService:
             }
 
     async def deploy_to_agentcore(self, request: AgentCoreDeploymentRequest) -> DeploymentResponse:
-        """Deploy Strands agent to AWS Bedrock AgentCore"""
-        deployment_id = str(uuid.uuid4())
+        """Deploy Strands agent to AWS Bedrock AgentCore (direct code deploy)"""
+        deployment_id = request.deployment_id if request.deployment_id else str(uuid.uuid4())
 
         # Create initial deployment status
         status = DeploymentStatus(
@@ -339,7 +339,6 @@ class DeploymentService:
             )
             from agentcore_config import (
                 AgentCoreDeploymentConfig,
-                DeploymentMethod,
                 NetworkMode
             )
 
@@ -347,8 +346,8 @@ class DeploymentService:
             config = AgentCoreDeploymentConfig(
                 agent_runtime_name=request.agent_name,  # Use agent_name (normalized)
                 region=request.region,
-                deployment_method=DeploymentMethod.SDK,  # Always use SDK method
                 network_mode=NetworkMode.PUBLIC,        # Default to PUBLIC
+                role_arn=getattr(request, 'execute_role', None),  # Optional role name/ARN
                 api_keys=request.api_keys,              # Pass through API keys if provided
                 streaming_capable=getattr(request, 'streaming_capable', None),  # Pass through streaming capability
                 # All other parameters use defaults or are auto-generated
@@ -367,8 +366,11 @@ class DeploymentService:
             status.message = "Deploying to AWS Bedrock AgentCore"
             self.deployments[deployment_id] = status
 
-            # Perform deployment
-            result = await agentcore_service.deploy_agent(request.code, config)
+            # Perform deployment (flow_data lets the service bundle referenced skills)
+            result = await agentcore_service.deploy_agent(
+                request.code, config, deployment_id,
+                flow_data=getattr(request, 'flow_data', None),
+            )
 
             # Update final status
             if result.success:
@@ -377,11 +379,11 @@ class DeploymentService:
                 status.resource_arn = result.agent_runtime_arn
                 status.endpoint_url = result.invoke_endpoint
                 status.deployment_time = result.deployment_time
-                status.deployment_outputs = {
+                status.deployment_outputs = result.deployment_outputs or {
                     "agent_runtime_arn": result.agent_runtime_arn,
                     "agent_runtime_name": result.agent_runtime_name,
                     "invoke_endpoint": result.invoke_endpoint,
-                    "deployment_method": "sdk",  # Always use SDK method in simplified API
+                    "deployment_method": "direct-code-deploy",
                     "region": request.region,
                     "network_mode": "PUBLIC",  # Default network mode in simplified API
                     "streaming_capable": result.streaming_capable

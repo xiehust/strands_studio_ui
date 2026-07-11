@@ -33,10 +33,12 @@ This is a **visual agent flow builder** that allows users to create, configure, 
 
 ### Core Functionality
 - **Visual Flow Editor**: Drag-and-drop interface for building agent workflows using XYFlow/React
-- **Code Generation**: Automatically generates Python code from visual flows using the Strands Agent SDK
+- **Code Generation**: Automatically generates Python code from visual flows using the Strands Agent SDK — template-based (frontend, default/instant) plus an optional AI mode where a backend coding agent generates the code (see "AI Code Generation")
 - **Agent Execution**: Supports both regular and streaming execution of generated agent code
 - **Graph Mode**: DAG-based multi-agent orchestration using GraphBuilder for complex workflows with dependencies
+- **Swarm Mode**: Self-organizing multi-agent collaboration using the Strands `Swarm` class (agents connect to a Swarm node as members)
 - **Project Management**: Save, load, and manage multiple agent projects with persistent storage
+- **Sample Gallery**: Toolbar "Samples" button loads curated preset flows (`src/lib/sample-flows/`) — 6 basic patterns (single agent, tools, MCP, orchestrator, swarm, graph) plus advanced ones combining skills, prompt caching, and streaming; samples with `requiredSkills` offer one-click inline skill import before loading; loading replaces the canvas (confirmed) and resets CodeState to live template mode
 - **Execution History**: Track and replay previous agent executions with artifact storage
 
 ### Frontend Stack
@@ -54,18 +56,21 @@ This is a **visual agent flow builder** that allows users to create, configure, 
 - **Pydantic** for data validation
 - **WebSockets** for real-time execution updates
 - **File-based storage system** for projects and execution artifacts
-- **strands-agents** and **strands-agents-tools** packages for AI agent functionality
+- **strands-agents** (>=1.46) and **strands-agents-tools** (>=0.8.3) packages for AI agent functionality; **bedrock-agentcore** (>=1.17) for AgentCore runtime
+- Default agent model: `global.anthropic.claude-sonnet-4-6` (defined in `src/lib/models.ts` as `DEFAULT_MODEL_ID`, along with the Bedrock model catalog)
 
 ### Key Application Components
 
 #### Node Types
-- **Agent Node**: Core AI agent with configurable LLM (AWS Bedrock Claude models)
+- **Agent Node**: Core AI agent with configurable LLM — AWS Bedrock Claude models or OpenAI-compatible endpoints (`modelProvider: 'OpenAI'` generates `OpenAIModel` code)
 - **Orchestrator Agent Node**: Coordinates multiple sub-agents
+- **Swarm Node**: Groups connected agents into a self-organizing swarm (`from strands.multiagent import Swarm`)
 - **Input Node**: Provides user input or data to agents
 - **Output Node**: Displays agent results
 - **Tool Nodes**: Built-in tools (calculator, file_read, shell, current_time)
 - **Custom Tool Node**: User-defined Python functions with @tool decorator
 - **MCP Tool Node**: Model Context Protocol tool integration
+- **Skill Node**: Attaches a Strands Skill (Agent Skills spec) from the Studio-managed skill library to an agent — emits `plugins=[AgentSkills(...)]`
 
 #### Core Panels
 - **Flow Editor**: Main visual canvas for building agent workflows
@@ -101,9 +106,11 @@ This is a **visual agent flow builder** that allows users to create, configure, 
   - `connection-validator.ts` - Node connection rules and validation logic (includes Graph Mode constraints)
   - `validation.ts` - Data validation utilities
 - `/backend/` - Python FastAPI server
-  - `main.py` - FastAPI application with execution endpoints
-  - `/app/models/` - Pydantic data models
-  - `/app/services/` - Storage and business logic services
+  - `main.py` - FastAPI application with most endpoints (execution, storage, conversations, deployment history)
+  - `/app/models/` - Pydantic data models (storage, conversation, deployment)
+  - `/app/routers/` - APIRouter modules (deployment endpoints)
+  - `/app/services/` - Storage, conversation, and per-target invoke services (agentcore/lambda/ecs)
+  - `/deployment/` - Deployment services and templates per target: `agentcore/`, `lambda/`, `ecs-fargate/` (each with its own deployment service, code adapters/handlers, and CloudFormation/Docker templates)
   - `/storage/` - File-based artifact storage (generated at runtime)
 
 ### Configuration Files
@@ -253,13 +260,37 @@ result = graph(user_input)  # Returns GraphResult with execution details
 - **Validation Integration**: `isValidConnection()` accepts `graphMode` parameter for enhanced validation
 - **MCP Support**: Full MCP tool integration in Graph Mode with proper context manager handling
 
+### AI Code Generation (coding-agent backend)
+
+Hybrid architecture — "same contract, swappable emitter". The frontend template generator remains the default fast path; an explicit "AI Generate" button in the Code Panel asks a backend coding agent to generate the code from `flow_data` instead.
+
+- **Backend module**: `backend/codegen/` — pluggable `CodingAgentBackend` interface (`backends/base.py` + `backends/registry.py`); first implementation `backends/claude_sdk.py` uses the Claude Agent SDK (`claude-agent-sdk`, bundles its own Claude Code CLI) authenticated via Bedrock (`CLAUDE_CODE_USE_BEDROCK=1`, inherits backend AWS credentials). The agent works in a throwaway workspace with Read/Write/Edit only (no Bash) and the Strands docs MCP server (`uvx strands-agents-mcp-server`).
+- **Contract source of truth**: `backend/codegen/guidance/contract_spec.md` — the generated-code contract (`async def main(user_input_arg=None, messages_arg=None)`, `--user-input`/`--messages` argparse, `callback_handler=None` on every Agent, `stream_async` string ⇔ streaming flows, side-effect-free import with `__main__` guard). AI-generated code must satisfy the same contract as template code, so local execution, chat, and AgentCore deployment work unchanged.
+- **Guidance assets**: `backend/codegen/guidance/` (CLAUDE.md, contract_spec.md, flow_semantics.md, VERSION) + golden examples in `guidance/examples/` (template-generator outputs for 6 representative flows; regenerate with `npx tsx scripts/generate-golden-examples.ts`). Bump `VERSION` when guidance changes — it is part of the cache key.
+- **Validation pipeline**: `codegen/validators.py` — AST contract checks → `ruff --select E9,F --ignore F401` → import smoke test in a credential-stripped subprocess (mirrors `agent_runtime_template.py` introspection). Failures feed a repair loop (same agent session, `CODEGEN_MAX_REPAIR_ROUNDS`, default 2); final failure falls back to the template code with `source: "fallback"`. Failed results are never cached.
+- **Cache**: `codegen/cache.py`, files under `backend/storage/codegen_cache/`. Key = sha256(canonical flow + guidance VERSION + backend + model); node layout fields (position/size/selection) are stripped, so moving nodes does not invalidate.
+- **Endpoints**: `POST /api/generate-code/stream` (SSE: progress / agent_activity / validation / done / error), `GET /api/generate-code/status` (drives the frontend button's disabled state), `DELETE /api/generate-code/cache`, `POST /api/fix-code/stream` (AI Fix, see below). Router: `backend/app/routers/codegen.py`.
+- **Env config** (all read in `backend/codegen/config.py`): `CODEGEN_BACKEND` (default `claude`), `CODEGEN_MODEL` (default `global.anthropic.claude-sonnet-4-6`), `CODEGEN_TIMEOUT_S` (default 180), `CODEGEN_MAX_REPAIR_ROUNDS` (default 2).
+- **AI Fix for failed executions**: when a local execution fails, the Execution Panel shows an "AI Fix" button (visible only when `GET /api/generate-code/status` reports available); failed chat turns get the same button in the Chat Modal (see "Conversation Management" — shared `use-ai-fix.ts` hook + `ai-fix-progress.tsx`, plus a session-code update so chat history survives the fix). `POST /api/fix-code/stream` (same SSE event vocabulary, same router) builds a fix workspace — the failing code as `generated_agent.py`, the error tail-truncated to 8KB as `error.txt`, `flow.json`, and `guidance/FIX_CLAUDE.md` (copied in as CLAUDE.md) — and asks the coding agent to diagnose and, when permitted, edit the code in place. The agent must write `diagnosis.json` with `category: code|config|environment`: `code` bugs are fixed directly; `config` fixes are temporary bypasses (canvas node properties are NOT written back — the diagnosis names the node/property to change); `environment` never changes code (any such edit is reverted). Changed code runs the same validation pipeline + repair loop; on exhaustion the original code is returned unchanged (`changed:false`, never ship broken code). No caching. `done` payload: `{code, changed, diagnosis, validation_report, duration_ms}`. Applying a fix sets CodeState `source:'ai'` and preserves `flowStale` (confirm prompt when overwriting manual edits); the user re-runs manually.
+- **Frontend CodeState**: single source of truth in `main-layout.tsx` — `{code, source: 'template'|'ai'|'manual', flowStale}`. `template`: canvas changes regenerate live (unchanged behavior). `ai`/`manual`: canvas changes only set `flowStale` (never overwrite); a banner offers "Regenerate (Template)" / "Regenerate with AI". Manual Monaco edits switch to `manual` (locked). Execution/chat/deploy all read `CodeState.code`; `{code, source}` persists with projects (legacy projects load as `template`).
+- **Execution hardening**: `/api/execute` and `/api/execute/stream` run generated code in a subprocess (`sys.executable`, process-group kill, temp workdir, per-request API-key env injection) with `EXECUTE_TIMEOUT_S` (default 300) — the old in-process `exec()` paths are gone.
+
+### Skills (Strands Agent Skills)
+
+Studio-managed skill library — skills are downloaded ONCE at import time into `backend/storage/skills/{name}/` and distributed from there; nothing is fetched at agent runtime.
+
+- **Import sources** (`POST /api/skills/import`, also `GET /api/skills` / `DELETE /api/skills/{name}`): `inline` (form → SKILL.md), `https` (raw SKILL.md URL), `git` (public GitHub via codeload zip, full directory incl. scripts/references/assets — no git binary needed), `s3` (`s3://bucket/prefix`, whole directory via backend credentials). Validation via strands' own `Skill.from_content`; name rule `^[a-z0-9][a-z0-9-]{0,63}$`; 50MB/skill cap; path-traversal and zip-slip guarded. Manage via the skill node's property panel ("Manage Skills" modal).
+- **Generated-code convention** (contract_spec §10, load-bearing): one top-level `_skills_dir = os.environ.get("STUDIO_SKILLS_DIR") or str(Path(__file__).parent / "skills")`; each skill-connected Agent gets `plugins=[AgentSkills(skills=[os.path.join(_skills_dir, "<name>")])]`. The exact `os.path.join(_skills_dir, "<name>")` form is required — AgentCore deployment extracts skill names from it by regex.
+- **Three consumption paths, zero runtime fetching**: local execution injects `STUDIO_SKILLS_DIR` into the subprocess env; chat subprocesses inherit it from the backend process env (set at startup); AgentCore deployment bundles used skill directories into the zip under `skills/` so the `__file__`-relative fallback resolves. AgentCore runtime role needs NO extra permissions.
+- **Connections**: skill → agent/orchestrator-agent (tools handle), fan-out to multiple agents allowed; never to a swarm node directly. Directory skills load lazily at agent init (strands `init_agent`), so module import stays side-effect free.
+- **Trust note**: skill instructions can direct an agent to run bundled scripts (if shell/file tools are attached) — only import skills from trusted sources.
+
 ### Deployment Features
-- **AWS Bedrock AgentCore Deployment**: Deploy agents to AWS Bedrock AgentCore for managed, serverless AI agent execution
-- **AWS Lambda Deployment**: Deploy agents to AWS Lambda with CloudFormation stack management
-- **AWS ECS Fargate Deployment**: Deploy agents to AWS ECS Fargate for containerized, scalable agent execution with CloudFormation-based infrastructure
-- **Deployment History**: Unified storage system for AgentCore, Lambda, and ECS deployments in backend (`/api/deployment-history`)
+- **AWS Bedrock AgentCore Deployment** (the only active deployment target): Direct code deploy via boto3 `bedrock-agentcore-control` — generated flow code is shipped VERBATIM as `generated_agent.py` next to a static `agent_runtime.py` entrypoint (from `agent_runtime_template.py`) that lazily imports it and calls `generated_agent.main(user_input_arg=..., messages_arg=...)`; sync responses come from main()'s return value (stdout capture as fallback), streaming responses are produced by redirecting main()'s printed chunks into an asyncio.Queue and yielding contentBlockDelta-shaped dicts. Dependencies are vendored for aarch64-manylinux2014/Python 3.13 with uv (cached by requirements hash), zipped, uploaded to S3 (`bedrock-agentcore-code-{account}-{region}`), and deployed with `create_agent_runtime`/`update_agent_runtime` (auto-update when the runtime name already exists). No Docker, CodeBuild, starter-toolkit CLI, or generated-code text surgery. Implementation: `backend/deployment/agentcore/` (`agentcore_deployment_service.py`, `package_builder.py`, `agent_runtime_template.py`; `code_adapter.py` is deprecated/unused)
+- **AWS Lambda / ECS Fargate Deployment (DISABLED)**: Hidden from the UI and gated off in the backend. Routes return HTTP 501 unless the `ENABLE_LEGACY_DEPLOY_TARGETS=true` env var is set. Code under `deployment/lambda/` and `deployment/ecs-fargate/` is retained but not on the active path
+- **Deployment History**: Unified storage system in backend (`/api/deployment-history`); legacy lambda/ecs records remain readable
 - **Cross-Browser Persistence**: All deployments stored in backend API, with localStorage as fallback
-- **Deployment Invoke Panel**: Unified interface in `invoke-panel.tsx` for invoking AgentCore, Lambda, and ECS agents
+- **Deployment Invoke Panel**: `invoke-panel.tsx` lists AgentCore deployments only (legacy lambda/ecs history records are filtered out of the invoke list)
 
 ### Critical Architecture Rules
 1. **MCP Connection Constraints**: Each MCP server node can only connect to one agent node. This prevents resource conflicts and ensures proper context management in generated code.
@@ -280,14 +311,22 @@ result = graph(user_input)  # Returns GraphResult with execution details
    - Conversation history uses schema: `[{"role":"user","content":[{"text": "..."}]}, {"role":"assistant","content":[{"text": "..."}]}]`
    - Backend conversation service constructs full message history and passes via `--messages` parameter
    - Chat modal provides interactive conversation interface with semi-transparent backdrop
+   - **Explicit error signaling**: execution failures are never disguised as agent replies. Non-streaming: `ChatResponse.success=false` + `error` (full stderr). Streaming: a single-line `[CHAT_ERROR:<json.dumps(text)>]` SSE sentinel before `[CHAT_COMPLETE:id]` (JSON-encoding keeps multiline tracebacks intact in one `data:` line)
+   - Failed turns are pair-marked `metadata={"error": true}` (user + agent message) and skipped by `_construct_messages_list`, so replayed `--messages` never contains error text and role alternation is preserved; the messages stay visible via the history APIs
+   - **Chat AI Fix**: failed chat turns render an error bubble with an "AI Fix" button (same availability gate and `POST /api/fix-code/stream` flow as the Execution Panel, shared via `use-ai-fix.ts` + `ai-fix-progress.tsx`). Applying a fix updates CodeState (`source:'ai'`) and then `PUT /api/conversations/{session_id}/code` rewrites the session's `agent.py` in place — the session and chat history are preserved, the user just re-sends the message
 
-5. **Deployment Storage Architecture**:
-   - AgentCore, Lambda, and ECS deployments are saved to backend via `/api/deployment-history`
-   - Frontend `invoke-panel.tsx` loads all deployments from backend API (not localStorage)
+5. **Swarm Constraints**:
+   - Tool/MCP nodes cannot connect to swarm nodes — tools attach to the individual agent nodes inside the swarm (enforced in `connection-validator.ts`)
+   - A swarm must have at least one connected agent; input/output nodes connect to the swarm node itself
+   - Swarm nodes participate in Graph Mode as graph nodes (swarm↔agent, swarm↔orchestrator, swarm↔swarm dependencies are valid)
+
+6. **Deployment Storage Architecture**:
+   - AgentCore deployments are saved to backend via `/api/deployment-history` (legacy lambda/ecs records remain readable there)
+   - Frontend `invoke-panel.tsx` loads deployments from backend API (not localStorage) and shows agentcore entries only
    - localStorage is used only as fallback if backend API fails or returns no data
    - Deployment history save operations are non-blocking and use `Promise.resolve().then()` to prevent save failures from affecting deployment success
-   - AgentCore deployment outputs are extracted from `deployment_result.status.deployment_outputs`
-   - ECS deployments use CloudFormation for infrastructure provisioning (VPC, ALB, ECS cluster, Fargate service)
+   - AgentCore deployment outputs are extracted from `deployment_result.status.deployment_outputs` (keys: `agent_runtime_arn`, `agent_runtime_id`, `agent_runtime_name`, `invoke_endpoint`, `region`, `s3_bucket`, `s3_key`, `streaming_capable`)
+   - AgentCore direct-code runtime limits: 250 MB zipped / 750 MB unzipped package; ARM64 wheels only (`--only-binary=:all:`); stdio MCP servers inside a deployed runtime are unsupported/at-risk (a warning is logged at deploy time — use HTTP/SSE MCP for deployed agents)
 
 ### Development Rules
 1. Always use context7 when I need code generation, setup or configuration steps, or library/API documentation. This means you should automatically use the Context7 MCP tools to resolve library id and get library docs without me having to explicitly ask.

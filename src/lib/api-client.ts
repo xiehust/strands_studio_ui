@@ -37,6 +37,7 @@ export interface ExecutionRequest {
   flow_data?: { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[] };
   // API Keys for secure environment variable handling
   openai_api_key?: string;
+  bedrock_api_key?: string;
 }
 
 export interface ExecutionResult {
@@ -45,6 +46,82 @@ export interface ExecutionResult {
   error?: string;
   execution_time: number;
   timestamp: string;
+}
+
+// AI code generation (backend coding agent)
+export interface CodegenStatus {
+  backend: string;
+  available: boolean;
+  reason?: string | null;
+}
+
+export interface CodegenValidationError {
+  stage: string;
+  message: string;
+}
+
+export interface CodegenValidationReport {
+  passed: boolean;
+  errors: CodegenValidationError[];
+}
+
+export interface GenerateCodeRequest {
+  flow_data: { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[] };
+  graph_mode: boolean;
+  template_code?: string;
+}
+
+export interface GenerateCodeResult {
+  code: string;
+  source: 'agent' | 'cache' | 'fallback';
+  validation_report?: CodegenValidationReport;
+  duration_ms?: number;
+  fallback_reason?: string;
+}
+
+export interface GenerateCodeStreamCallbacks {
+  onProgress?: (message: string) => void;
+  onAgentActivity?: (summary: string) => void;
+  onValidation?: (round: number, errors: CodegenValidationError[]) => void;
+  onDone: (result: GenerateCodeResult) => void;
+  onError: (message: string) => void;
+}
+
+// AI fix for failed executions (backend coding agent)
+export interface FixCodeRequest {
+  code: string;
+  error: string;
+  flow_data: { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[] };
+  graph_mode: boolean;
+  input_data?: string;
+}
+
+export interface FixSuggestion {
+  node_label?: string;
+  property?: string;
+  action: string;
+}
+
+export interface FixDiagnosis {
+  category: 'code' | 'config' | 'environment';
+  summary: string;
+  suggestions: FixSuggestion[];
+}
+
+export interface FixResult {
+  code: string;
+  changed: boolean;
+  diagnosis: FixDiagnosis;
+  validation_report?: CodegenValidationReport;
+  duration_ms?: number;
+}
+
+export interface FixCodeStreamCallbacks {
+  onProgress?: (message: string) => void;
+  onAgentActivity?: (summary: string) => void;
+  onValidation?: (round: number, errors: CodegenValidationError[]) => void;
+  onDone: (result: FixResult) => void;
+  onError: (message: string) => void;
 }
 
 export interface ExecutionResponse {
@@ -189,6 +266,30 @@ export interface StorageStats {
   newest_artifact?: string;
 }
 
+// Skill Library
+export interface SkillInfo {
+  name: string;
+  description: string;
+  source_type?: string;
+  imported_at?: string;
+}
+
+export interface SkillImportRequest {
+  source_type: 'inline' | 'git' | 'https' | 's3';
+  // inline
+  name?: string;
+  description?: string;
+  instructions?: string;
+  // https
+  url?: string;
+  // git (public GitHub repos)
+  repo?: string;
+  ref?: string;
+  path?: string;
+  // s3
+  s3_uri?: string;
+}
+
 class ApiClient {
   private baseUrl: string;
   private wsConnection: WebSocket | null = null;
@@ -245,6 +346,46 @@ class ApiClient {
 
   async deleteProject(projectId: string): Promise<{ message: string }> {
     return this.request(`/api/projects/${projectId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // Skill Library
+  async listSkills(): Promise<SkillInfo[]> {
+    const result = await this.request<{ skills?: SkillInfo[] } | SkillInfo[]>('/api/skills');
+    if (Array.isArray(result)) {
+      return result;
+    }
+    return result.skills ?? [];
+  }
+
+  async importSkill(request: SkillImportRequest): Promise<SkillInfo> {
+    const response = await fetch(`${this.baseUrl}/api/skills/import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      let detail = `Import failed: ${response.status} ${response.statusText}`;
+      try {
+        const body = await response.json();
+        if (body?.detail) {
+          detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail);
+        }
+      } catch {
+        // keep generic message
+      }
+      throw new Error(detail);
+    }
+
+    // Backend wraps the payload: { "skill": {...} }
+    const body: { skill?: SkillInfo } | SkillInfo = await response.json();
+    return (body as { skill?: SkillInfo }).skill ?? (body as SkillInfo);
+  }
+
+  async deleteSkill(name: string): Promise<{ deleted?: string }> {
+    return this.request(`/api/skills/${encodeURIComponent(name)}`, {
       method: 'DELETE',
     });
   }
@@ -358,6 +499,164 @@ class ApiClient {
     } catch (error) {
       onError(error instanceof Error ? error.message : 'Unknown streaming error', '');
     }
+  }
+
+  // AI Code Generation status (drives AI Generate button enable/disable)
+  async getCodegenStatus(): Promise<CodegenStatus> {
+    return this.request('/api/generate-code/status');
+  }
+
+  // Shared SSE POST parser: handles fetch, `event:`/`data:` framing, and decoding.
+  // Calls onEvent(eventType, dataText) for every complete event in the stream.
+  private async postSseStream(
+    path: string,
+    body: unknown,
+    onEvent: (eventType: string, dataText: string) => void,
+    requestLabel: string = 'SSE'
+  ): Promise<void> {
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      throw new Error(`${requestLabel} request failed: ${response.status} ${response.statusText}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error('Response body is not readable');
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      // Process complete SSE events (separated by \n\n)
+      const events = buffer.split('\n\n');
+      buffer = events.pop() || '';
+
+      for (const rawEvent of events) {
+        if (!rawEvent.trim()) continue;
+
+        let eventType = 'message';
+        const dataLines: string[] = [];
+        for (const line of rawEvent.split('\n')) {
+          if (line.startsWith('event: ')) {
+            eventType = line.substring(7).trim();
+          } else if (line.startsWith('data: ')) {
+            dataLines.push(line.substring(6));
+          } else if (line === 'data:') {
+            dataLines.push('');
+          }
+        }
+
+        onEvent(eventType, dataLines.join('\n'));
+      }
+    }
+  }
+
+  // Shared dispatcher for the codegen SSE event vocabulary
+  // (progress / agent_activity / validation / done / error / end).
+  private async runCodegenSseStream<TDone>(
+    path: string,
+    body: unknown,
+    callbacks: {
+      onProgress?: (message: string) => void;
+      onAgentActivity?: (summary: string) => void;
+      onValidation?: (round: number, errors: CodegenValidationError[]) => void;
+      onDone: (result: TDone) => void;
+      onError: (message: string) => void;
+    },
+    context: string
+  ): Promise<void> {
+    const { onProgress, onAgentActivity, onValidation, onDone, onError } = callbacks;
+    const unknownError = `Unknown ${context.toLowerCase()} error`;
+    let doneReceived = false;
+    let errorReceived = false;
+
+    const handleEvent = (eventType: string, dataText: string) => {
+      if (eventType === 'end') return;
+
+      let data: Record<string, unknown> = {};
+      if (dataText) {
+        try {
+          data = JSON.parse(dataText);
+        } catch {
+          // Non-JSON payload (e.g. empty end-event data) - ignore
+          return;
+        }
+      }
+
+      switch (eventType) {
+        case 'progress':
+          onProgress?.(String(data.message ?? ''));
+          break;
+        case 'agent_activity':
+          onAgentActivity?.(String(data.summary ?? ''));
+          break;
+        case 'validation':
+          onValidation?.(
+            Number(data.round ?? 0),
+            (data.errors as CodegenValidationError[]) || []
+          );
+          break;
+        case 'done':
+          doneReceived = true;
+          onDone(data as unknown as TDone);
+          break;
+        case 'error':
+          errorReceived = true;
+          onError(String(data.message ?? unknownError));
+          break;
+      }
+    };
+
+    try {
+      await this.postSseStream(path, body, handleEvent, context);
+
+      if (!doneReceived && !errorReceived) {
+        onError(`${context} stream ended unexpectedly`);
+      }
+    } catch (error) {
+      if (!doneReceived && !errorReceived) {
+        onError(error instanceof Error ? error.message : unknownError);
+      }
+    }
+  }
+
+  // AI Code Generation via backend coding agent (SSE stream)
+  async generateCodeStream(
+    request: GenerateCodeRequest,
+    callbacks: GenerateCodeStreamCallbacks
+  ): Promise<void> {
+    return this.runCodegenSseStream<GenerateCodeResult>(
+      '/api/generate-code/stream',
+      request,
+      callbacks,
+      'Code generation'
+    );
+  }
+
+  // AI Fix for failed executions via backend coding agent (SSE stream)
+  async fixCodeStream(
+    request: FixCodeRequest,
+    callbacks: FixCodeStreamCallbacks
+  ): Promise<void> {
+    return this.runCodegenSseStream<FixResult>(
+      '/api/fix-code/stream',
+      request,
+      callbacks,
+      'Code fix'
+    );
   }
 
   // WebSocket connection for real-time updates
@@ -698,7 +997,20 @@ class ApiClient {
           }
 
           if (eventData !== '' || lines.some(line => line === 'data:' || line.startsWith('data: '))) {
-            if (eventData.startsWith('[CHAT_COMPLETE:')) {
+            if (eventData.startsWith('[CHAT_ERROR:')) {
+              // Structured error sentinel: [CHAT_ERROR:<json-encoded error text>]
+              // (JSON encoding keeps multiline tracebacks on a single SSE data line)
+              const match = eventData.match(/^\[CHAT_ERROR:([\s\S]+)\]$/);
+              if (match) {
+                try {
+                  errorMessage = JSON.parse(match[1]);
+                } catch {
+                  errorMessage = match[1];
+                }
+              } else {
+                errorMessage = eventData;
+              }
+            } else if (eventData.startsWith('[CHAT_COMPLETE:')) {
               // Parse message ID from format: [CHAT_COMPLETE:message_id_here]
               const match = eventData.match(/^\[CHAT_COMPLETE:([^\]]+)\]$/);
               messageId = match ? match[1] : '';
@@ -718,10 +1030,23 @@ class ApiClient {
         }
       }
 
-      onComplete(accumulatedOutput, messageId);
+      // Stream ended without a [CHAT_COMPLETE:] marker (e.g. the backend endpoint's
+      // fallback path yields only [CHAT_ERROR:...] before closing the stream).
+      if (errorMessage) {
+        onError(errorMessage, accumulatedOutput);
+      } else {
+        onComplete(accumulatedOutput, messageId);
+      }
     } catch (error) {
       onError(error instanceof Error ? error.message : 'Unknown streaming error', '');
     }
+  }
+
+  async updateConversationCode(sessionId: string, generatedCode: string): Promise<ConversationSession> {
+    return this.request(`/api/conversations/${sessionId}/code`, {
+      method: 'PUT',
+      body: JSON.stringify({ generated_code: generatedCode }),
+    });
   }
 
   async getConversationMessages(sessionId: string): Promise<ChatMessage[]> {

@@ -1,5 +1,6 @@
 import { type Node, type Edge } from '@xyflow/react';
 import { generateGraphCode } from './graph-code-generator';
+import { DEFAULT_MODEL_ID, MANTLE_PROVIDER } from './models';
 
 interface CodeGenerationResult {
   code: string;
@@ -29,8 +30,8 @@ export function generateStrandsAgentCode(
   // Regular (non-graph) code generation
   const imports = new Set<string>([
     'from strands import Agent, tool',
-    'from strands.models import BedrockModel',
-    'from strands_tools import calculator, file_read, shell, current_time, http_request, editor, retrieve, mem0_memory',
+    'from strands.models import BedrockModel, CacheConfig',
+    'from strands_tools import calculator, file_read, shell, current_time, http_request, editor, retrieve',
     'import json',
     'import os',
     'import asyncio',
@@ -69,7 +70,12 @@ export function generateStrandsAgentCode(
     if (hasOpenAIProvider) {
       imports.add('from strands.models.openai import OpenAIModel');
     }
-    
+    // Amazon Bedrock (Mantle) uses the OpenAI Responses API
+    const hasMantleProvider = allAgentNodes.some(node => node.data?.modelProvider === MANTLE_PROVIDER);
+    if (hasMantleProvider) {
+      imports.add('from strands.models.openai_responses import OpenAIResponsesModel');
+    }
+
     // Validate mandatory nodes
     if (agentNodes.length === 0 && orchestratorNodes.length === 0 && swarmNodes.length === 0) {
       errors.push('No agent nodes found. At least one agent, orchestrator agent, or swarm is required.');
@@ -115,6 +121,17 @@ export function generateStrandsAgentCode(
     // Return early if mandatory nodes are missing or not connected
     if (errors.length > 0) {
       return { code: '', imports: Array.from(imports), errors };
+    }
+
+    // Skills: emit the shared skills directory convention when any agent uses a skill
+    const hasConnectedSkills = allAgentNodes.some(
+      node => findConnectedSkills(node, nodes, edges).length > 0
+    );
+    if (hasConnectedSkills) {
+      imports.add('from pathlib import Path');
+      imports.add('from strands import AgentSkills');
+      code += '# Studio-managed skills directory (env override locally; packaged skills/ next to this file when deployed)\n';
+      code += '_skills_dir = os.environ.get("STUDIO_SKILLS_DIR") or str(Path(__file__).parent / "skills")\n\n';
     }
 
     // Generate custom tool code first (needs to be before agents that use them)
@@ -183,8 +200,15 @@ export function generateStrandsAgentCode(
       // Check if this orchestrator is the execution agent
       const isExecutionOrchestrator = executionAgent?.id === orchestratorNode.id;
 
-      if (isExecutionOrchestrator) {
-        // For execution orchestrators, only generate model configuration
+      // main() only constructs the coordinator inside an MCP context manager
+      // when the orchestrator itself has MCP tools; in every other case the
+      // instance must be constructed here at module level, or main() hits a
+      // NameError on the never-defined coordinator variable.
+      const orchestratorHasMCP = findConnectedMCPTools(orchestratorNode, nodes, edges).length > 0;
+
+      if (isExecutionOrchestrator && orchestratorHasMCP) {
+        // For execution orchestrators with MCP tools, only generate model
+        // configuration — the Agent is constructed inside main()'s MCP context
         const orchestratorModelCode = generateOrchestratorModelOnly(orchestratorNode, nodes, edges, index);
         code += orchestratorModelCode + '\n\n';
       } else {
@@ -243,14 +267,15 @@ function generateAgentModelOnly(
   const {
     label = `Agent${index + 1}`,
     modelProvider = 'AWS Bedrock',
-    modelId = 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+    modelId = DEFAULT_MODEL_ID,
     modelName = 'Claude 3.7 Sonnet',
     temperature = 0.7,
     maxTokens = 4000,
     baseUrl = '',
     thinkingEnabled = false,
-    thinkingBudgetTokens = 2048,
     reasoningEffort = 'medium',
+    cacheMessages = false,
+    cacheTools = false,
   } = data;
 
   // Use modelId for Bedrock, modelName for others
@@ -260,7 +285,7 @@ function generateAgentModelOnly(
   const agentVarName = sanitizePythonVariableName(label as string);
 
   // Generate model configuration based on provider
-  const modelConfig = generateModelConfigForCode(agentVarName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, thinkingBudgetTokens as number, reasoningEffort as string);
+  const modelConfig = generateModelConfigForCode(agentVarName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, reasoningEffort as string, cacheMessages as boolean, cacheTools as boolean);
 
   return `# ${label} Configuration
 ${modelConfig}`;
@@ -276,15 +301,16 @@ function generateAgentCode(
   const {
     label = `Agent${index + 1}`,
     modelProvider = 'AWS Bedrock',
-    modelId = 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+    modelId = DEFAULT_MODEL_ID,
     modelName = 'Claude 3.7 Sonnet',
     systemPrompt = 'You are a helpful AI assistant.',
     temperature = 0.7,
     maxTokens = 4000,
     baseUrl = '',
     thinkingEnabled = false,
-    thinkingBudgetTokens = 2048,
     reasoningEffort = 'medium',
+    cacheMessages = false,
+    cacheTools = false,
   } = data;
 
   // Use modelId for Bedrock, modelName for others
@@ -299,11 +325,14 @@ function generateAgentCode(
     ? `,\n    tools=[${connectedTools.map(tool => tool.code).join(', ')}]`
     : '';
 
+  // Find connected skills
+  const skillsCode = buildSkillsPluginArg(findConnectedSkills(agentNode, allNodes, edges), '    ');
+
   // System prompt comes from agent property panel only (no input connections)
   const systemPromptValue = String(systemPrompt || 'You are a helpful AI assistant.');
 
   // Generate model configuration based on provider
-  const modelConfig = generateModelConfigForCode(agentVarName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, thinkingBudgetTokens as number, reasoningEffort as string);
+  const modelConfig = generateModelConfigForCode(agentVarName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, reasoningEffort as string, cacheMessages as boolean, cacheTools as boolean);
 
   return `# ${label} Configuration
 ${modelConfig}
@@ -311,7 +340,7 @@ ${modelConfig}
 ${agentVarName} = Agent(
     model=${agentVarName}_model,
     system_prompt="""${escapePythonTripleQuotedString(systemPromptValue)}"""${toolsCode},
-    callback_handler=None
+    callback_handler=None${skillsCode}
 )`;
 }
 
@@ -325,15 +354,16 @@ function generateSwarmAgentCode(
   const {
     label = `Agent${index + 1}`,
     modelProvider = 'AWS Bedrock',
-    modelId = 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+    modelId = DEFAULT_MODEL_ID,
     modelName = 'Claude 3.7 Sonnet',
     systemPrompt = 'You are a helpful AI assistant.',
     temperature = 0.7,
     maxTokens = 4000,
     baseUrl = '',
     thinkingEnabled = false,
-    thinkingBudgetTokens = 2048,
     reasoningEffort = 'medium',
+    cacheMessages = false,
+    cacheTools = false,
   } = data;
 
   // Use modelId for Bedrock, modelName for others
@@ -348,11 +378,14 @@ function generateSwarmAgentCode(
     ? `,\n    tools=[${connectedTools.map(tool => tool.code).join(', ')}]`
     : '';
 
+  // Find connected skills
+  const skillsCode = buildSkillsPluginArg(findConnectedSkills(agentNode, allNodes, edges), '    ');
+
   // System prompt comes from agent property panel only (no input connections)
   const systemPromptValue = String(systemPrompt || 'You are a helpful AI assistant.');
 
   // Generate model configuration based on provider
-  const modelConfig = generateModelConfigForCode(agentVarName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, thinkingBudgetTokens as number, reasoningEffort as string);
+  const modelConfig = generateModelConfigForCode(agentVarName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, reasoningEffort as string, cacheMessages as boolean, cacheTools as boolean);
 
   return `# ${label} Configuration
 ${modelConfig}
@@ -361,7 +394,7 @@ ${agentVarName} = Agent(
     name="${label}",
     model=${agentVarName}_model,
     system_prompt="""${escapePythonTripleQuotedString(systemPromptValue)}"""${toolsCode},
-    callback_handler=None
+    callback_handler=None${skillsCode}
 )`;
 }
 
@@ -447,9 +480,8 @@ function findConnectedTools(
         'shell': 'shell',
         'current_time': 'current_time',
         'http_request': 'http_request',
-        'editor': 'editor', 
-        'retrieve': 'retrieve', 
-        'mem0_memory': 'mem0_memory', 
+        'editor': 'editor',
+        'retrieve': 'retrieve',
       };
       const mappedTool = toolMapping[toolName] || 'calculator';
       return {
@@ -484,10 +516,48 @@ function findConnectedMCPTools(
   const connectedToolEdges = edges.filter(
     edge => edge.target === agentNode.id && (edge.targetHandle === 'tools' || edge.targetHandle === 'mcp-tools')
   );
-  
+
   return connectedToolEdges
     .map(edge => allNodes.find(node => node.id === edge.source))
     .filter((node): node is Node => node?.type === 'mcp-tool');
+}
+
+/**
+ * Finds the names of all skills (skill nodes) connected to an agent node
+ */
+function findConnectedSkills(
+  agentNode: Node,
+  allNodes: Node[],
+  edges: Edge[]
+): string[] {
+  const connectedSkillEdges = edges.filter(
+    edge => edge.target === agentNode.id && edge.targetHandle === 'tools'
+  );
+
+  const skillNames: string[] = [];
+  connectedSkillEdges.forEach(edge => {
+    const skillNode = allNodes.find(node => node.id === edge.source);
+    if (skillNode?.type === 'skill') {
+      const name = (skillNode.data?.skillName as string) || '';
+      if (name && !skillNames.includes(name)) {
+        skillNames.push(name);
+      }
+    }
+  });
+
+  return skillNames;
+}
+
+/**
+ * Builds the plugins=[AgentSkills(...)] constructor argument for connected skills.
+ * Paths resolve against the module-level _skills_dir convention.
+ */
+function buildSkillsPluginArg(skillNames: string[], indent: string): string {
+  if (skillNames.length === 0) return '';
+  const skillPaths = skillNames
+    .map(name => `os.path.join(_skills_dir, "${name}")`)
+    .join(', ');
+  return `,\n${indent}plugins=[AgentSkills(skills=[${skillPaths}])]`;
 }
 
 
@@ -670,6 +740,7 @@ ${indentation}# Swarm ${agentName} is already configured with its agents`;
         : String(systemPrompt);
       
       const indentation = executionAgentMcpClientVars.length > 0 ? '        ' : '    ';
+      const skillsCode = buildSkillsPluginArg(findConnectedSkills(executionAgent, allNodes, edges), `${indentation}    `);
       mainCode += `
 ${indentation}
 ${indentation}# Create orchestrator agent ${executionAgentMcpClientVars.length > 0 ? 'with MCP tools' : ''}
@@ -677,7 +748,7 @@ ${indentation}${agentName} = Agent(
 ${indentation}    model=${agentName}_model,
 ${indentation}    system_prompt="""${escapePythonTripleQuotedString(fullSystemPrompt)}""",
 ${indentation}    tools=${toolsArrayCode},
-${indentation}    callback_handler=None
+${indentation}    callback_handler=None${skillsCode}
 ${indentation})`;
     } else {
       // Regular agent
@@ -689,6 +760,7 @@ ${indentation})`;
         : 'mcp_tools';
 
       const indentation = executionAgentMcpClientVars.length > 0 ? '        ' : '    ';
+      const skillsCode = buildSkillsPluginArg(findConnectedSkills(executionAgent, allNodes, edges), `${indentation}    `);
       mainCode += `
 ${indentation}
 ${indentation}# Create agent ${executionAgentMcpClientVars.length > 0 ? 'with MCP tools' : ''}
@@ -696,7 +768,7 @@ ${indentation}${agentName} = Agent(
 ${indentation}    model=${agentName}_model,
 ${indentation}    system_prompt="""${escapePythonTripleQuotedString(String(systemPrompt || 'You are a helpful AI agent.'))}""",
 ${indentation}    tools=${toolsArrayCode},
-${indentation}    callback_handler=None
+${indentation}    callback_handler=None${skillsCode}
 ${indentation})`;
     }
   } else {
@@ -1002,15 +1074,16 @@ function generateAgentAsToolCode(
   const {
     label = `Agent${index + 1}`,
     modelProvider = 'AWS Bedrock',
-    modelId = 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+    modelId = DEFAULT_MODEL_ID,
     modelName = 'Claude 3.7 Sonnet',
     systemPrompt = 'You are a helpful AI assistant.',
     temperature = 0.7,
     maxTokens = 4000,
     baseUrl = '',
     thinkingEnabled = false,
-    thinkingBudgetTokens = 2048,
     reasoningEffort = 'medium',
+    cacheMessages = false,
+    cacheTools = false,
   } = data;
 
   const modelIdentifier = modelProvider === 'AWS Bedrock' ? modelId : modelName;
@@ -1021,7 +1094,8 @@ function generateAgentAsToolCode(
   // Find connected tools (but not orchestrator connections)
   const connectedTools = findConnectedTools(agentNode, allNodes, edges);
   const connectedMCPTools = findConnectedMCPTools(agentNode, allNodes, edges);
-  
+  const connectedSkills = findConnectedSkills(agentNode, allNodes, edges);
+
   // Check if this agent has MCP tools - if so, it needs special handling
   const hasMCPTools = connectedMCPTools.length > 0;
   
@@ -1048,37 +1122,37 @@ def ${functionName}(user_input: str) -> str:
         ${mcpClientVars.map(clientVar => `mcp_tools.extend(${clientVar}.list_tools_sync())`).join('\n        ')}
         
         # Create model for ${label}
-        ${generateModelConfigForTool(functionName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, thinkingBudgetTokens as number, reasoningEffort as string)}
+        ${generateModelConfigForTool(functionName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, reasoningEffort as string, cacheMessages as boolean, cacheTools as boolean)}
 
         # Create agent with MCP tools
         agent = Agent(
             model=${functionName}_model,
             system_prompt="""${escapePythonTripleQuotedString(String(systemPrompt || 'You are a helpful AI agent.'))}""",
             tools=${toolsArrayCode},
-            callback_handler=None
+            callback_handler=None${buildSkillsPluginArg(connectedSkills, '            ')}
         )
-        
+
         # Execute and return result
         response = agent(user_input)
     return str(response)`;
   } else {
     // Regular agent-as-tool function without MCP tools
-    const toolsCode = connectedTools.length > 0 
+    const toolsCode = connectedTools.length > 0
       ? `,\n        tools=[${connectedTools.map(tool => tool.code).join(', ')}]`
       : '';
 
     return `@tool
 def ${functionName}(user_input: str) -> str:
     """${label} - ${(systemPrompt as string).substring(0, 100)}${(systemPrompt as string).length > 100 ? '...' : ''}"""
-    
+
     # Create model for ${label}
-    ${generateModelConfigForTool(functionName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, thinkingBudgetTokens as number, reasoningEffort as string)}
+    ${generateModelConfigForTool(functionName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, reasoningEffort as string, cacheMessages as boolean, cacheTools as boolean)}
 
     # Create agent
     agent = Agent(
         model=${functionName}_model,
         system_prompt="""${escapePythonTripleQuotedString(String(systemPrompt || 'You are a helpful AI agent.'))}"""${toolsCode},
-        callback_handler=None
+        callback_handler=None${buildSkillsPluginArg(connectedSkills, '        ')}
     )
 
     # Execute and return result
@@ -1100,7 +1174,7 @@ function generateOrchestratorAsToolCode(
   const {
     label = `OrchestratorAgent${index + 1}`,
     modelProvider = 'AWS Bedrock',
-    modelId = 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+    modelId = DEFAULT_MODEL_ID,
     modelName = 'Claude 3.7 Sonnet',
     systemPrompt = 'You are an orchestrator agent that coordinates multiple specialized agents.',
     temperature = 0.7,
@@ -1108,8 +1182,9 @@ function generateOrchestratorAsToolCode(
     coordinationPrompt = '',
     baseUrl = '',
     thinkingEnabled = false,
-    thinkingBudgetTokens = 2048,
     reasoningEffort = 'medium',
+    cacheMessages = false,
+    cacheTools = false,
   } = data;
 
   const modelIdentifier = modelProvider === 'AWS Bedrock' ? modelId : modelName;
@@ -1131,14 +1206,15 @@ function generateOrchestratorAsToolCode(
     return `${baseName}_${subNode!.id.slice(-4)}`;
   });
   
-  // Find regular tools and MCP tools connected to orchestrator
+  // Find regular tools, MCP tools and skills connected to orchestrator
   const connectedTools = findConnectedTools(orchestratorNode, allNodes, edges);
   const connectedMCPTools = findConnectedMCPTools(orchestratorNode, allNodes, edges);
-  
+  const connectedSkills = findConnectedSkills(orchestratorNode, allNodes, edges);
+
   // Combine regular tools and sub-node functions
   const regularToolsList = connectedTools.map(tool => tool.code);
   const allRegularTools = [...regularToolsList, ...subFunctions];
-  
+
   const hasMCPTools = connectedMCPTools.length > 0;
   const fullSystemPrompt = coordinationPrompt
     ? `${String(systemPrompt)}\\n\\nCoordination Instructions: ${String(coordinationPrompt)}`
@@ -1166,37 +1242,37 @@ def ${functionName}(user_input: str) -> str:
         ${mcpClientVars.map(clientVar => `mcp_tools.extend(${clientVar}.list_tools_sync())`).join('\n        ')}
         
         # Create model for ${label}
-        ${generateModelConfigForTool(functionName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, thinkingBudgetTokens as number, reasoningEffort as string)}
+        ${generateModelConfigForTool(functionName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, reasoningEffort as string, cacheMessages as boolean, cacheTools as boolean)}
 
         # Create orchestrator agent with MCP tools
         agent = Agent(
             model=${functionName}_model,
             system_prompt="""${escapePythonTripleQuotedString(fullSystemPrompt)}""",
             tools=${toolsArrayCode},
-            callback_handler=None
+            callback_handler=None${buildSkillsPluginArg(connectedSkills, '            ')}
         )
-        
+
         # Execute and return result
         response = agent(user_input)
     return str(response)`;
   } else {
     // Regular orchestrator-as-tool function without MCP tools
-    const toolsCode = allRegularTools.length > 0 
+    const toolsCode = allRegularTools.length > 0
       ? `,\n        tools=[${allRegularTools.join(', ')}]`
       : '';
 
     return `@tool
 def ${functionName}(user_input: str) -> str:
     """${label} - ${(systemPrompt as string).substring(0, 100)}${(systemPrompt as string).length > 100 ? '...' : ''}"""
-    
+
     # Create model for ${label}
-    ${generateModelConfigForTool(functionName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, thinkingBudgetTokens as number, reasoningEffort as string)}
+    ${generateModelConfigForTool(functionName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, reasoningEffort as string, cacheMessages as boolean, cacheTools as boolean)}
 
     # Create orchestrator agent
     agent = Agent(
         model=${functionName}_model,
         system_prompt="""${escapePythonTripleQuotedString(fullSystemPrompt)}"""${toolsCode},
-        callback_handler=None
+        callback_handler=None${buildSkillsPluginArg(connectedSkills, '        ')}
     )
 
     # Execute and return result
@@ -1215,14 +1291,15 @@ function generateOrchestratorModelOnly(
   const {
     label = `OrchestratorAgent${index + 1}`,
     modelProvider = 'AWS Bedrock',
-    modelId = 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+    modelId = DEFAULT_MODEL_ID,
     modelName = 'Claude 3.7 Sonnet',
     temperature = 0.7,
     maxTokens = 4000,
     baseUrl = '',
     thinkingEnabled = false,
-    thinkingBudgetTokens = 2048,
     reasoningEffort = 'medium',
+    cacheMessages = false,
+    cacheTools = false,
   } = data;
 
   const modelIdentifier = modelProvider === 'AWS Bedrock' ? modelId : modelName;
@@ -1230,7 +1307,7 @@ function generateOrchestratorModelOnly(
   const orchestratorName = sanitizePythonVariableName(label as string);
 
   // Generate model configuration based on provider
-  const modelConfig = generateModelConfigForCode(orchestratorName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, thinkingBudgetTokens as number, reasoningEffort as string);
+  const modelConfig = generateModelConfigForCode(orchestratorName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, reasoningEffort as string, cacheMessages as boolean, cacheTools as boolean);
 
   return `# ${label} Configuration
 ${modelConfig}`;
@@ -1246,7 +1323,7 @@ function generateOrchestratorCode(
   const {
     label = `OrchestratorAgent${index + 1}`,
     modelProvider = 'AWS Bedrock',
-    modelId = 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+    modelId = DEFAULT_MODEL_ID,
     modelName = 'Claude 3.7 Sonnet',
     systemPrompt = 'You are an orchestrator agent that coordinates multiple specialized agents.',
     temperature = 0.7,
@@ -1254,8 +1331,9 @@ function generateOrchestratorCode(
     coordinationPrompt = '',
     baseUrl = '',
     thinkingEnabled = false,
-    thinkingBudgetTokens = 2048,
     reasoningEffort = 'medium',
+    cacheMessages = false,
+    cacheTools = false,
   } = data;
 
   const modelIdentifier = modelProvider === 'AWS Bedrock' ? modelId : modelName;
@@ -1311,21 +1389,22 @@ function generateOrchestratorCode(
 
   if (hasMCPTools) {
     // When MCP tools are present, only define the model - agent creation happens in main()
-    const modelConfig = generateModelConfigForCode(orchestratorName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, thinkingBudgetTokens as number, reasoningEffort as string);
+    const modelConfig = generateModelConfigForCode(orchestratorName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, reasoningEffort as string, cacheMessages as boolean, cacheTools as boolean);
     return `# ${label} Configuration
 ${modelConfig}
 
 # ${orchestratorName} will be created in main() with MCP tools`;
   } else {
     // Regular orchestrator without MCP tools
-    const modelConfig = generateModelConfigForCode(orchestratorName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, thinkingBudgetTokens as number, reasoningEffort as string);
+    const skillsCode = buildSkillsPluginArg(findConnectedSkills(orchestratorNode, allNodes, edges), '    ');
+    const modelConfig = generateModelConfigForCode(orchestratorName, modelProvider as string, modelIdentifier as string, temperature as number, maxTokens as number, baseUrl as string, thinkingEnabled as boolean, reasoningEffort as string, cacheMessages as boolean, cacheTools as boolean);
     return `# ${label} Configuration
 ${modelConfig}
 
 ${orchestratorName} = Agent(
     model=${orchestratorName}_model,
     system_prompt="""${escapePythonTripleQuotedString(fullSystemPrompt)}"""${toolsCode},
-    callback_handler=None
+    callback_handler=None${skillsCode}
 )`;
   }
 }
@@ -1338,14 +1417,38 @@ function generateModelConfigForCode(
   maxTokens: number,
   baseUrl: string,
   thinkingEnabled?: boolean,
-  thinkingBudgetTokens?: number,
-  reasoningEffort?: string
+  reasoningEffort?: string,
+  cacheMessages?: boolean,
+  cacheTools?: boolean
 ): string {
+  // Legacy projects may still carry 'minimal' (removed from the effort scale)
+  if (reasoningEffort === 'minimal') reasoningEffort = 'low';
   // When thinking is enabled for Bedrock, temperature must be 1
   const isBedrock = modelProvider === 'AWS Bedrock' || modelProvider === undefined;
   const finalTemperature = thinkingEnabled && isBedrock ? 1 : temperature;
 
-  if (modelProvider === 'OpenAI') {
+  if (modelProvider === MANTLE_PROVIDER) {
+    // Amazon Bedrock (Mantle): OpenAI-compatible endpoint via the Responses API.
+    // gpt/grok reasoning models take reasoning={"effort": ...}; when reasoning
+    // is on, temperature is omitted (reasoning models reject non-default temp).
+    const clientArgs = [
+      `"api_key": os.environ.get("BEDROCK_API_KEY")`,
+      `"base_url": "${baseUrl}"`,
+    ];
+    const clientArgsStr = `\n    client_args={\n        ${clientArgs.join(',\n        ')}\n    },`;
+    const params = [`"max_output_tokens": ${maxTokens}`];
+    if (thinkingEnabled && reasoningEffort) {
+      params.push(`"reasoning": {"effort": "${reasoningEffort}"}`);
+    } else {
+      params.push(`"temperature": ${temperature}`);
+    }
+    return `${varName}_model = OpenAIResponsesModel(${clientArgsStr}
+    model_id="${modelIdentifier}",
+    params={
+        ${params.join(',\n        ')},
+    }
+)`;
+  } else if (modelProvider === 'OpenAI') {
     const clientArgs = [];
     // Always use environment variable for API key for security - never hardcode
     clientArgs.push(`"api_key": os.environ.get("OPENAI_API_KEY")`);
@@ -1367,20 +1470,30 @@ function generateModelConfigForCode(
     }
 )`;
   } else {
-    // Default to Bedrock
+    // Default to Bedrock. Claude 4.6+ uses adaptive thinking (budget_tokens is
+    // rejected on Sonnet 5 / Opus 4.8); Bedrock requires temperature=1 with it.
     let bedrockCode = `${varName}_model = BedrockModel(
     model_id="${modelIdentifier}",
     temperature=${finalTemperature},
     max_tokens=${maxTokens}`;
 
-    if (thinkingEnabled && thinkingBudgetTokens) {
+    if (thinkingEnabled) {
       bedrockCode += `,
     additional_request_fields={
         "thinking": {
-            "type": "enabled",
-            "budget_tokens": ${thinkingBudgetTokens}
+            "type": "adaptive"
         }
     }`;
+    }
+
+    // Bedrock prompt caching (Claude): auto message caching / tool caching
+    if (cacheMessages) {
+      bedrockCode += `,
+    cache_config=CacheConfig(strategy="auto")`;
+    }
+    if (cacheTools) {
+      bedrockCode += `,
+    cache_tools="default"`;
     }
 
     bedrockCode += '\n)';
@@ -1396,14 +1509,36 @@ function generateModelConfigForTool(
   maxTokens: number,
   baseUrl: string,
   thinkingEnabled?: boolean,
-  thinkingBudgetTokens?: number,
-  reasoningEffort?: string
+  reasoningEffort?: string,
+  cacheMessages?: boolean,
+  cacheTools?: boolean
 ): string {
+  // Legacy projects may still carry 'minimal' (removed from the effort scale)
+  if (reasoningEffort === 'minimal') reasoningEffort = 'low';
   // When thinking is enabled for Bedrock, temperature must be 1
   const isBedrock = modelProvider === 'AWS Bedrock' || modelProvider === undefined;
   const finalTemperature = thinkingEnabled && isBedrock ? 1 : temperature;
 
-  if (modelProvider === 'OpenAI') {
+  if (modelProvider === MANTLE_PROVIDER) {
+    // Amazon Bedrock (Mantle): OpenAI-compatible endpoint via the Responses API
+    const clientArgs = [
+      `"api_key": os.environ.get("BEDROCK_API_KEY")`,
+      `"base_url": "${baseUrl}"`,
+    ];
+    const clientArgsStr = `\n            client_args={\n                ${clientArgs.join(',\n                ')}\n            },`;
+    const params = [`"max_output_tokens": ${maxTokens}`];
+    if (thinkingEnabled && reasoningEffort) {
+      params.push(`"reasoning": {"effort": "${reasoningEffort}"}`);
+    } else {
+      params.push(`"temperature": ${temperature}`);
+    }
+    return `${varName}_model = OpenAIResponsesModel(${clientArgsStr}
+            model_id="${modelIdentifier}",
+            params={
+                ${params.join(',\n                ')},
+            }
+        )`;
+  } else if (modelProvider === 'OpenAI') {
     const clientArgs = [];
     // Always use environment variable for API key for security - never hardcode
     clientArgs.push(`\"api_key\": os.environ.get(\"OPENAI_API_KEY\")`);
@@ -1425,20 +1560,29 @@ function generateModelConfigForTool(
             }
         )`;
   } else {
-    // Default to Bedrock
+    // Default to Bedrock — adaptive thinking (see generateModelConfigForCode)
     let bedrockCode = `${varName}_model = BedrockModel(
             model_id="${modelIdentifier}",
             temperature=${finalTemperature},
             max_tokens=${maxTokens}`;
 
-    if (thinkingEnabled && thinkingBudgetTokens) {
+    if (thinkingEnabled) {
       bedrockCode += `,
             additional_request_fields={
                 "thinking": {
-                    "type": "enabled",
-                    "budget_tokens": ${thinkingBudgetTokens}
+                    "type": "adaptive"
                 }
             }`;
+    }
+
+    // Bedrock prompt caching (Claude): auto message caching / tool caching
+    if (cacheMessages) {
+      bedrockCode += `,
+            cache_config=CacheConfig(strategy="auto")`;
+    }
+    if (cacheTools) {
+      bedrockCode += `,
+            cache_tools="default"`;
     }
 
     bedrockCode += '\n        )';

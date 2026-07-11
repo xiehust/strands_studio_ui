@@ -249,13 +249,16 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
     try {
       const allDeployments: DeploymentHistory[] = [];
 
-      // Load all deployments (both AgentCore and Lambda) from backend API
+      // Load deployments from backend API.
+      // NOTE: Lambda/ECS deployment targets are disabled - only AgentCore deployments
+      // are shown. Legacy lambda/ecs history records are filtered out here (they remain
+      // readable in the deployment history view).
       try {
         const response = await fetch('/api/deployment-history?limit=50');
         if (response.ok) {
           const historyData = await response.json();
           const successfulDeployments = historyData.deployments?.filter(
-            (dep: any) => dep.success
+            (dep: any) => dep.success && dep.deployment_target === 'agentcore'
           ) || [];
 
           // Process each deployment by type
@@ -1074,17 +1077,16 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
   }, []);
 
   return (
-    <div className={`flex flex-col h-full bg-white border border-gray-200 rounded-lg ${className}`}>
+    <div className={`flex flex-col h-full bg-panel border-l border-line ${className}`}>
       {/* Header */}
-      <div className="flex items-center justify-between p-3 border-b border-gray-200">
-        <div className="flex items-center gap-2">
-          <Play className="h-4 w-4 text-blue-600" />
-          <span className="font-medium text-gray-900">Invoke Agent</span>
-        </div>
-        <div className="flex gap-2">
+      <div className="lp-phead">
+        <Play className="h-4 w-4 text-amber" />
+        <span className="lp-ptitle">Invoke Agent</span>
+        <span className="lp-sub">cloud runtime</span>
+        <div className="ml-auto flex gap-2">
           <button
             onClick={loadDeploymentHistory}
-            className="p-1 text-gray-400 hover:text-gray-600"
+            className="p-1 text-ink-3 hover:text-ink transition-colors"
             title="Refresh deployment history"
           >
             <RefreshCw className="h-4 w-4" />
@@ -1095,7 +1097,7 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
       <div className="flex-1 p-4 space-y-4 overflow-y-auto">
         {/* Agent Selection */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">Select Agent</label>
+          <label className="lp-label">Select Agent</label>
           {deploymentHistory.length === 0 ? (
             <div className="p-4 bg-gray-50 border border-gray-200 rounded-md text-center">
               <p className="text-sm text-gray-500">No deployed agents found</p>
@@ -1131,10 +1133,10 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
                 return (
                   <div
                     key={uniqueKey}
-                    className={`p-3 border rounded-md cursor-pointer transition-colors ${
+                    className={`p-3 border cursor-pointer transition-colors ${
                       isSelected
-                        ? 'border-blue-500 bg-blue-50'
-                        : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                        ? 'border-amber bg-amber-soft shadow-[0_0_0_1px_var(--amber)]'
+                        : 'border-line hover:border-line2 hover:bg-white/[0.02]'
                     }`}
                     onClick={() => setSelectedAgent(deployment)}
                   >
@@ -1334,12 +1336,12 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
 
         {/* Payload Input */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">Payload (JSON)</label>
+          <label className="lp-label">Payload (JSON)</label>
           <textarea
             value={payload}
             onChange={(e) => setPayload(e.target.value)}
             rows={6}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm font-mono"
+            className="lp-input mono"
             placeholder='{"user_input": "Hello, Agent!"}'
           />
         </div>
@@ -1348,18 +1350,18 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
         {/* Session ID - Only for AgentCore */}
         {selectedAgent && selectedAgent.deployment_type === 'agentcore' && (
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Session ID (Required for AgentCore)</label>
+            <label className="lp-label">Session ID (Required for AgentCore)</label>
             <div className="flex gap-2">
               <input
                 type="text"
                 value={sessionId}
                 onChange={(e) => setSessionId(e.target.value)}
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm font-mono"
+                className="lp-input mono flex-1"
                 placeholder="33+ character session ID"
               />
               <button
                 onClick={() => setSessionId(generateSessionId())}
-                className="px-3 py-2 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded-md text-sm"
+                className="lp-btn"
               >
                 Generate
               </button>
@@ -1378,7 +1380,7 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
               (selectedAgent?.deployment_type === 'agentcore' && !sessionId) ||
               isInvoking
             }
-            className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="lp-btn primary w-full justify-center"
           >
             {isInvoking
               ? selectedAgent?.deployment_type === 'ecs-fargate'
@@ -1668,7 +1670,7 @@ export function InvokePanel({ className = '' }: InvokePanelProps) {
       )}
 
       {/* Footer Info */}
-      <div className="p-3 bg-gray-50 border-t border-gray-200 text-xs text-gray-600">
+      <div className="px-3 py-2 border-t border-line font-mono text-[9.5px] text-ink-3 tracking-wider uppercase">
         <div className="flex justify-between">
           <span>Invoke Agent Runtime</span>
           <span>{deploymentHistory.length} agent(s) available</span>

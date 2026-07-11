@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Play, Square, Loader, CheckCircle, XCircle, Clock, Terminal, Zap, FolderOpen, FileText, AlertTriangle, RefreshCw, MessageSquare } from 'lucide-react';
+import { Play, Square, Loader, CheckCircle, XCircle, Clock, Terminal, Zap, FolderOpen, FileText, AlertTriangle, RefreshCw, MessageSquare, Wrench } from 'lucide-react';
 import { ChatModal } from './chat-modal';
+import { AiFixProgress } from './ai-fix-progress';
+import { useAiFix } from '../hooks/use-ai-fix';
 import { apiClient, type ExecutionRequest, type ExecutionResult, type ExecutionHistoryItem } from '../lib/api-client';
 import { ValidationError, isExecutionResult } from '../lib/validation';
 
@@ -11,8 +13,11 @@ interface ExecutionPanelProps {
   projectName?: string;
   projectVersion?: string;
   flowData?: { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[] };
+  graphMode?: boolean;
+  // Returns true when the fixed code was applied to the app code state
+  // (false when the user declined to overwrite manual edits).
+  onApplyFixedCode?: (code: string) => boolean;
 }
-
 
 // Utility functions for localStorage
 const getStoredInputData = (): string => {
@@ -32,12 +37,14 @@ const setStoredInputData = (data: string): void => {
   }
 };
 
-export function ExecutionPanel({ 
-  code, 
-  className = '', 
+export function ExecutionPanel({
+  code,
+  className = '',
   projectName = 'Untitled Project',
   projectVersion = '1.0.0',
-  flowData
+  flowData,
+  graphMode = false,
+  onApplyFixedCode
 }: ExecutionPanelProps) {
   const [isExecuting, setIsExecuting] = useState(false);
   const [currentExecution, setCurrentExecution] = useState<ExecutionResult | null>(null);
@@ -52,6 +59,21 @@ export function ExecutionPanel({
   const [error, setError] = useState<string | null>(null);
   const [storageError, setStorageError] = useState<string | null>(null);
   const [showChatModal, setShowChatModal] = useState(false);
+
+  // AI Fix state (backend coding agent, POST /api/fix-code/stream)
+  const [codegenAvailable, setCodegenAvailable] = useState(false);
+  const {
+    isFixing,
+    fixEvents,
+    fixError,
+    fixDiagnosis,
+    fixApplied,
+    startFix,
+    resetFixState,
+    dismissDiagnosis,
+  } = useAiFix({
+    onApplied: (fixedCode) => (onApplyFixedCode ? onApplyFixedCode(fixedCode) : false),
+  });
 
   // Extract OpenAI API key from agent nodes
   const getOpenAIApiKey = (): string | undefined => {
@@ -74,6 +96,42 @@ export function ExecutionPanel({
   useEffect(() => {
     checkBackendHealth();
   }, []);
+
+  // Check codegen backend availability on mount (drives AI Fix button visibility)
+  useEffect(() => {
+    let cancelled = false;
+    apiClient
+      .getCodegenStatus()
+      .then((status) => {
+        if (!cancelled) setCodegenAvailable(status.available);
+      })
+      .catch(() => {
+        if (!cancelled) setCodegenAvailable(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Full error text for the fix request (backend truncates to the traceback tail)
+  const buildFixErrorText = (result: ExecutionResult): string => {
+    const parts: string[] = [];
+    if (result.output?.trim()) parts.push(result.output);
+    if (result.error?.trim()) parts.push(result.error);
+    return parts.join('\n\n');
+  };
+
+  const handleAiFix = () => {
+    if (isFixing || !currentExecution || currentExecution.success !== false) return;
+
+    startFix({
+      code,
+      error: buildFixErrorText(currentExecution),
+      flow_data: flowData || { nodes: [], edges: [] },
+      graph_mode: graphMode,
+      input_data: inputData.trim() || undefined,
+    });
+  };
 
   // Load stored executions when backend becomes available
   useEffect(() => {
@@ -193,6 +251,7 @@ export function ExecutionPanel({
       setCurrentExecution(execution.result);
       setSelectedStoredExecution(execution);
       setError(null); // Clear any previous errors
+      resetFixState(); // Diagnosis from a previous fix no longer applies
 
       // Set input data from the execution history item
       if (execution.input_data !== undefined && execution.input_data !== null) {
@@ -292,7 +351,8 @@ export function ExecutionPanel({
 
     setIsExecuting(true);
     setCurrentExecution(null);
-    
+    resetFixState();
+
     // Extract API keys from agent nodes for secure backend handling
     const extractApiKeys = () => {
       const allNodes = flowData?.nodes || [];
@@ -300,14 +360,18 @@ export function ExecutionPanel({
         node.type === 'agent' || node.type === 'orchestrator-agent'
       );
       
-      // Find first OpenAI API key from any agent node
+      // Find first provider API key from any agent node
+      const keys: Record<string, string> = {};
       for (const node of agentNodes) {
         const nodeData = node.data as any;
-        if (nodeData?.modelProvider === 'OpenAI' && nodeData?.apiKey) {
-          return { openai_api_key: nodeData.apiKey };
+        if (nodeData?.modelProvider === 'OpenAI' && nodeData?.apiKey && !keys.openai_api_key) {
+          keys.openai_api_key = nodeData.apiKey;
+        }
+        if (nodeData?.modelProvider === 'Amazon Bedrock (Mantle)' && nodeData?.apiKey && !keys.bedrock_api_key) {
+          keys.bedrock_api_key = nodeData.apiKey;
         }
       }
-      return {};
+      return keys;
     };
     
     const apiKeys = extractApiKeys();
@@ -474,50 +538,46 @@ export function ExecutionPanel({
     return `${seconds.toFixed(2)}s`;
   };
 
-  const getStatusIcon = (result: ExecutionResult | null) => {
-    if (!result) return <Clock className="w-4 h-4 text-gray-400" />;
-    if (result.success) return <CheckCircle className="w-4 h-4 text-green-500" />;
-    return <XCircle className="w-4 h-4 text-red-500" />;
+  const getStatusChip = (result: ExecutionResult | null) => {
+    if (isExecuting) return <span className="lp-chip warn"><i>◐</i>{isStreaming ? 'STREAMING' : 'RUNNING'}</span>;
+    if (!result) return <span className="lp-chip muted"><Clock className="w-3 h-3" />READY</span>;
+    if (result.success) return <span className="lp-chip good"><CheckCircle className="w-3 h-3" />COMPLETE</span>;
+    return <span className="lp-chip crit"><XCircle className="w-3 h-3" />FAILED</span>;
   };
 
   return (
-    <div className={`bg-white border-l border-gray-200 flex flex-col h-full ${className}`}>
+    <div className={`bg-panel border-l border-line flex flex-col h-full ${className}`}>
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-gray-200">
-        <div className="flex items-center">
-          <Terminal className="w-4 h-4 text-gray-600 mr-2" />
-          <h3 className="text-lg font-semibold text-gray-900">Agent Execution</h3>
-        </div>
-        <div className="flex items-center space-x-2">
+      <div className="lp-phead">
+        <Terminal className="w-4 h-4 text-ink-3" />
+        <h3 className="lp-ptitle">Agent Execution</h3>
+        <span className="lp-sub">local invoke</span>
+        <div className="ml-auto flex items-center gap-2">
           {!backendAvailable && (
-            <span className="text-xs text-red-500 mr-2">Backend Connecting</span>
+            <span className="lp-chip crit"><i>✕</i>BACKEND</span>
           )}
           <button
             onClick={() => setShowChatModal(true)}
             disabled={!backendAvailable || !hasValidAgent()}
-            className="flex items-center px-3 py-1 text-sm rounded bg-blue-500 text-white hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed"
+            className="lp-btn sm"
             title={!hasValidAgent() ? 'Create a valid agent flow with input/output nodes first' : 'Start a conversation with your agent'}
           >
-            <MessageSquare className="w-3 h-3 mr-1" />
-            Chat with Agent
+            <MessageSquare className="w-3 h-3" />
+            Chat
           </button>
           <button
             onClick={isExecuting ? handleStop : handleExecute}
             disabled={!backendAvailable}
-            className={`flex items-center px-3 py-1 text-sm rounded ${
-              isExecuting
-                ? 'bg-red-500 text-white hover:bg-red-600'
-                : 'bg-green-500 text-white hover:bg-green-600 disabled:bg-gray-300 disabled:cursor-not-allowed'
-            }`}
+            className={`lp-btn sm ${isExecuting ? 'danger' : 'primary'}`}
           >
             {isExecuting ? (
               <>
-                <Square className="w-3 h-3 mr-1" />
+                <Square className="w-3 h-3" />
                 Stop
               </>
             ) : (
               <>
-                <Play className="w-3 h-3 mr-1" />
+                <Play className="w-3 h-3" />
                 Execute
               </>
             )}
@@ -527,15 +587,15 @@ export function ExecutionPanel({
 
       {/* Error Display */}
       {error && (
-        <div className="p-4 border-b border-gray-200">
-          <div className="bg-red-50 border border-red-200 rounded-md p-3">
+        <div className="p-4 border-b border-line">
+          <div className="bg-crit/10 border border-crit/40 p-3">
             <div className="flex items-center">
-              <AlertTriangle className="w-4 h-4 text-red-500 mr-2" />
+              <AlertTriangle className="w-4 h-4 text-crit mr-2 flex-shrink-0" />
               <div className="flex-1">
                 <p className="text-sm text-red-700">{error}</p>
                 <button
                   onClick={() => setError(null)}
-                  className="text-xs text-red-500 hover:text-red-700 mt-1"
+                  className="font-mono text-[10px] uppercase tracking-wider text-crit hover:text-red-700 mt-1"
                 >
                   Dismiss
                 </button>
@@ -547,16 +607,16 @@ export function ExecutionPanel({
 
       {/* Storage Error Display */}
       {storageError && (
-        <div className="p-4 border-b border-gray-200">
-          <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3">
+        <div className="p-4 border-b border-line">
+          <div className="bg-warn/10 border border-warn/40 p-3">
             <div className="flex items-center">
-              <AlertTriangle className="w-4 h-4 text-yellow-500 mr-2" />
+              <AlertTriangle className="w-4 h-4 text-warn mr-2 flex-shrink-0" />
               <div className="flex-1">
                 <p className="text-sm text-yellow-700">{storageError}</p>
                 <div className="flex items-center space-x-2 mt-2">
                   <button
                     onClick={() => setStorageError(null)}
-                    className="text-xs text-yellow-600 hover:text-yellow-800"
+                    className="font-mono text-[10px] uppercase tracking-wider text-warn hover:text-yellow-700"
                   >
                     Dismiss
                   </button>
@@ -565,7 +625,7 @@ export function ExecutionPanel({
                       setStorageError(null);
                       loadStoredExecutions();
                     }}
-                    className="text-xs text-yellow-600 hover:text-yellow-800 flex items-center"
+                    className="font-mono text-[10px] uppercase tracking-wider text-warn hover:text-yellow-700 flex items-center"
                   >
                     <RefreshCw className="w-3 h-3 mr-1" />
                     Retry
@@ -578,8 +638,8 @@ export function ExecutionPanel({
       )}
 
       {/* Input Data Section */}
-      <div className="p-4 border-b border-gray-200 bg-gray-50">
-        <label className="block text-sm font-medium text-gray-700 mb-2">
+      <div className="p-4 border-b border-line">
+        <label className="lp-label">
           User Input
         </label>
         <textarea
@@ -589,47 +649,38 @@ export function ExecutionPanel({
             setInputData(newValue);
             setStoredInputData(newValue); // Save to localStorage
           }}
-          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 text-sm"
+          className="lp-input text-sm"
           placeholder="Enter input data for your agent..."
           rows={2}
         />
       </div>
 
       {/* Current Execution Status */}
-      <div className="p-4 border-b border-gray-200">
+      <div className="px-4 py-3 border-b border-line">
         <div className="flex items-center justify-between mb-2">
-          <span className="text-sm font-medium text-gray-700">Current Execution</span>
+          <span className="lp-label !mb-0">Current Execution</span>
           <div className="flex items-center space-x-2">
             {hasStreamingEnabled() && (
-              <div className="flex items-center space-x-1 text-xs text-blue-600">
-                <Zap className="w-3 h-3" />
-                <span>Streaming</span>
-              </div>
+              <span className="lp-chip blue"><Zap className="w-3 h-3" />STREAMING</span>
             )}
-            {isExecuting && <Loader className="w-4 h-4 text-blue-500 animate-spin" />}
+            {isExecuting && <Loader className="w-4 h-4 text-amber animate-spin" />}
           </div>
         </div>
-        
-        <div className="flex items-center space-x-2 text-sm">
-          {getStatusIcon(currentExecution)}
-          <span className={`${
-            currentExecution?.success 
-              ? 'text-green-700' 
-              : currentExecution?.success === false 
-                ? 'text-red-700' 
-                : 'text-gray-500'
-          }`}>
-            {isExecuting 
-              ? (isStreaming ? 'Streaming response...' : 'Executing...') 
-              : currentExecution?.success 
-                ? 'Completed successfully' 
-                : currentExecution?.success === false 
-                  ? 'Failed' 
-                  : 'Ready to execute'
+
+        <div className="flex items-center gap-2 text-sm">
+          {getStatusChip(currentExecution)}
+          <span className="font-mono text-[10.5px] text-ink-2">
+            {isExecuting
+              ? (isStreaming ? 'streaming response…' : 'executing…')
+              : currentExecution?.success
+                ? 'completed successfully'
+                : currentExecution?.success === false
+                  ? 'failed'
+                  : 'ready to execute'
             }
           </span>
           {currentExecution && (
-            <span className="text-gray-500">
+            <span className="font-mono text-[10.5px] text-ink-3">
               ({formatExecutionTime(currentExecution.execution_time)})
             </span>
           )}
@@ -641,55 +692,81 @@ export function ExecutionPanel({
         {/* Show streaming output in real-time */}
         {isStreaming && (
           <div className="flex-1 overflow-auto">
-            <div className="p-4 border-b border-gray-200">
-              <div className="flex items-center space-x-2 mb-2">
-                <h4 className="text-sm font-medium text-gray-700">Live Output</h4>
-                <div className="flex items-center space-x-1 text-xs text-blue-600">
-                  <Zap className="w-3 h-3" />
-                  <span>Streaming</span>
-                </div>
+            <div className="p-4 border-b border-line">
+              <div className="flex items-center gap-2 mb-2">
+                <h4 className="lp-label !mb-0">Live Output</h4>
+                <span className="lp-chip blue"><Zap className="w-3 h-3" />STREAMING</span>
               </div>
-              <pre className="bg-gray-900 text-green-400 p-3 rounded text-xs font-mono whitespace-pre-wrap break-words overflow-y-auto">
+              <pre className="lp-code whitespace-pre-wrap break-words overflow-y-auto">
                 {streamingOutput || '...'}
-                <span className="animate-pulse">█</span>
+                <span className="lp-caret" />
               </pre>
             </div>
           </div>
         )}
-        
+
         {/* Show completed execution results */}
         {currentExecution && !isStreaming && (
           <div className="flex-1 overflow-auto">
             {/* Output */}
             {currentExecution.output && (
-              <div className="p-4 border-b border-gray-200">
-                <h4 className="text-sm font-medium text-gray-700 mb-2">Output</h4>
-                <pre className="bg-gray-900 text-green-400 p-3 rounded text-xs font-mono whitespace-pre-wrap break-words overflow-y-auto">
+              <div className="p-4 border-b border-line">
+                <h4 className="lp-label">Output</h4>
+                <pre className="lp-code whitespace-pre-wrap break-words overflow-y-auto">
                   {currentExecution.output}
                 </pre>
               </div>
             )}
 
             {/* Error */}
-            {currentExecution.error && (
-              <div className="p-4 border-b border-gray-200">
-                <h4 className="text-sm font-medium text-red-700 mb-2">Error</h4>
-                <pre className="bg-red-50 text-red-800 p-3 rounded text-xs font-mono border border-red-200 whitespace-pre-wrap break-words overflow-y-auto">
-                  {currentExecution.error}
-                </pre>
+            {(currentExecution.error || currentExecution.success === false) && (
+              <div className="p-4 border-b border-line">
+                <div className="flex items-center justify-between mb-1">
+                  <h4 className="lp-label !text-crit !mb-0">Error</h4>
+                  {codegenAvailable && currentExecution.success === false && (
+                    <button
+                      onClick={handleAiFix}
+                      disabled={isFixing}
+                      className="lp-btn sm"
+                      title="Diagnose and fix this failure with the backend coding agent"
+                    >
+                      {isFixing ? (
+                        <Loader className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <Wrench className="w-3 h-3" />
+                      )}
+                      AI Fix
+                    </button>
+                  )}
+                </div>
+                {currentExecution.error && (
+                  <pre className="lp-code !text-red-700 !border-crit/40 whitespace-pre-wrap break-words overflow-y-auto">
+                    {currentExecution.error}
+                  </pre>
+                )}
+
+                <AiFixProgress
+                  isFixing={isFixing}
+                  fixEvents={fixEvents}
+                  fixError={fixError}
+                  fixDiagnosis={fixDiagnosis}
+                  fixApplied={fixApplied}
+                  onDismissError={resetFixState}
+                  onDismissDiagnosis={dismissDiagnosis}
+                />
               </div>
             )}
           </div>
         )}
-        
+
         {/* Show placeholder when no execution */}
         {!currentExecution && !isStreaming && (
-          <div className="flex-1 flex items-center justify-center text-gray-500">
+          <div className="flex-1 flex items-center justify-center text-ink-3">
             <div className="text-center">
               <Terminal className="w-8 h-8 mx-auto mb-2 opacity-50" />
               <p className="text-sm">Execute your agent to see results</p>
               {hasStreamingEnabled() && (
-                <p className="text-xs mt-1 text-blue-600">Streaming mode enabled</p>
+                <p className="font-mono text-[10px] uppercase tracking-wider mt-1 text-s1">Streaming mode enabled</p>
               )}
             </div>
           </div>
@@ -697,55 +774,57 @@ export function ExecutionPanel({
 
         {/* Stored Executions */}
         {(storedExecutions.length > 0 || loadingStoredExecutions) && (
-          <div className="border-t border-gray-200">
-            <div className="p-3 bg-gray-50 flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <FolderOpen className="w-4 h-4 text-gray-600" />
-                <h4 className="text-sm font-medium text-gray-700">Stored Executions</h4>
-                <span className="text-xs text-gray-500">({projectName})</span>
+          <div className="border-t border-line">
+            <div className="px-4 py-2.5 bg-panel2 flex items-center justify-between border-b border-line">
+              <div className="flex items-center gap-2">
+                <FolderOpen className="w-3.5 h-3.5 text-ink-3" />
+                <h4 className="lp-label !mb-0">Stored Executions</h4>
+                <span className="font-mono text-[9.5px] text-ink-3">({projectName})</span>
               </div>
               <button
                 onClick={loadStoredExecutions}
                 disabled={loadingStoredExecutions}
-                className="text-xs text-blue-600 hover:text-blue-800 disabled:opacity-50"
+                className="font-mono text-[10px] uppercase tracking-wider text-amber hover:text-orange-400 disabled:opacity-50"
               >
-                {loadingStoredExecutions ? 'Loading...' : 'Refresh'}
+                {loadingStoredExecutions ? 'Loading…' : 'Refresh'}
               </button>
             </div>
             <div className="max-h-40 overflow-auto">
               {loadingStoredExecutions ? (
                 <div className="p-4 text-center">
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mx-auto mb-2"></div>
-                  <p className="text-xs text-gray-600">Loading stored executions...</p>
+                  <Loader className="w-4 h-4 animate-spin text-amber mx-auto mb-2" />
+                  <p className="font-mono text-[10px] text-ink-3">Loading stored executions…</p>
                 </div>
               ) : storedExecutions.length === 0 ? (
-                <div className="p-4 text-center text-xs text-gray-500">
+                <div className="p-4 text-center font-mono text-[10px] text-ink-3">
                   No stored executions available
                 </div>
               ) : (
                 storedExecutions.slice(0, 10).map((execution) => (
-                  <div key={execution.execution_id} 
-                    className={`p-3 border-b border-gray-100 hover:bg-gray-50 cursor-pointer ${
-                      selectedStoredExecution?.execution_id === execution.execution_id ? 'bg-blue-50' : ''
+                  <div key={execution.execution_id}
+                    className={`px-4 py-2.5 border-b border-grid hover:bg-white/[0.02] cursor-pointer ${
+                      selectedStoredExecution?.execution_id === execution.execution_id ? 'bg-amber-soft' : ''
                     }`}
                     onClick={() => loadStoredExecutionResult(execution)}
                     title={`Execution ID: ${execution.execution_id}`}>
                     <div className="flex items-center justify-between text-xs">
-                      <div className="flex items-center space-x-2">
-                        <FileText className="w-3 h-3 text-gray-500" />
-                        <span className="text-gray-700">
-                          {execution.execution_id.substring(0, 8)}...
+                      <div className="flex items-center gap-2">
+                        <FileText className="w-3 h-3 text-ink-3" />
+                        <span className="font-mono text-[11px] text-ink-2">
+                          {execution.execution_id.substring(0, 8)}…
                         </span>
-                        <span className="text-gray-500 text-xs bg-gray-100 px-1 rounded">
-                          {execution.result.success ? '✓' : '✗'}
-                        </span>
+                        {execution.result.success ? (
+                          <span className="lp-chip good"><i>●</i>OK</span>
+                        ) : (
+                          <span className="lp-chip crit"><i>✕</i>ERR</span>
+                        )}
                       </div>
-                      <div className="text-gray-500">
+                      <div className="font-mono text-[10px] text-ink-3">
                         {new Date(execution.created_at).toLocaleTimeString()}
                       </div>
                     </div>
-                    <div className="mt-1 text-xs text-gray-600">
-                      Version: {execution.version} • Time: {execution.result.execution_time.toFixed(2)}s
+                    <div className="mt-1 font-mono text-[9.5px] text-ink-3">
+                      v{execution.version} · {execution.result.execution_time.toFixed(2)}s
                     </div>
                   </div>
                 ))
@@ -757,20 +836,19 @@ export function ExecutionPanel({
       </div>
 
       {/* Backend Status Footer */}
-      <div className="p-3 bg-gray-50 border-t border-gray-200 text-xs text-gray-600">
-        <div className="flex justify-between">
-          <span>Backend Status: 
-            <span className={backendAvailable ? 'text-green-600' : 'text-red-600'}>
-              {backendAvailable ? ' Connected' : ' Disconnected'}
-            </span>
+      <div className="px-3 py-2 border-t border-line font-mono text-[9.5px] text-ink-3 tracking-wider uppercase">
+        <div className="flex justify-between items-center">
+          <span className="flex items-center gap-1.5">
+            <span className={`lp-led ${backendAvailable ? '' : 'crit'}`} />
+            Backend {backendAvailable ? 'Connected' : 'Disconnected'}
           </span>
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center gap-2">
             {selectedStoredExecution && (
-              <span className="text-blue-600">
-                Loaded: {selectedStoredExecution.execution_id.substring(0, 8)}...
+              <span className="text-amber">
+                Loaded {selectedStoredExecution.execution_id.substring(0, 8)}…
               </span>
             )}
-            <span>Port: 8000</span>
+            <span>Port 8000</span>
           </div>
         </div>
       </div>
@@ -784,6 +862,9 @@ export function ExecutionPanel({
         projectId={projectName}
         projectVersion={projectVersion}
         openaiApiKey={getOpenAIApiKey()}
+        codegenAvailable={codegenAvailable}
+        graphMode={graphMode}
+        onApplyFixedCode={onApplyFixedCode}
       />
     </div>
   );

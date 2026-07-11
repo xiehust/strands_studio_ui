@@ -46,7 +46,16 @@ const connectionRules: ConnectionRule[] = [
     targetHandle: 'tools',
     description: 'MCP server tools can be attached to agents',
   },
-  
+
+  // Skills can connect to agents (a skill node may connect to multiple agents)
+  {
+    sourceType: 'skill',
+    sourceHandle: 'skill-output',
+    targetType: 'agent',
+    targetHandle: 'tools',
+    description: 'Skills can be attached to agents',
+  },
+
   // Agents can connect to outputs
   {
     sourceType: 'agent',
@@ -93,7 +102,16 @@ const connectionRules: ConnectionRule[] = [
     targetHandle: 'tools',
     description: 'MCP server tools can be attached to orchestrator agents',
   },
-  
+
+  // Skills can connect to orchestrator agents
+  {
+    sourceType: 'skill',
+    sourceHandle: 'skill-output',
+    targetType: 'orchestrator-agent',
+    targetHandle: 'tools',
+    description: 'Skills can be attached to orchestrator agents',
+  },
+
   // Orchestrator agents can connect to regular agents (key feature)
   {
     sourceType: 'orchestrator-agent',
@@ -395,13 +413,13 @@ export function isValidConnection(
     return { valid: false, message: 'Nodes cannot connect to themselves' };
   }
 
-  // Explicit validation: Tools and MCP tools cannot connect to swarm nodes
+  // Explicit validation: Tools, MCP tools and skills cannot connect to swarm nodes
   // This enforces the architectural principle that swarms coordinate agents but don't have tools themselves
   if (targetNode.type === 'swarm' &&
-      (sourceNode.type === 'tool' || sourceNode.type === 'custom-tool' || sourceNode.type === 'mcp-tool')) {
+      (sourceNode.type === 'tool' || sourceNode.type === 'custom-tool' || sourceNode.type === 'mcp-tool' || sourceNode.type === 'skill')) {
     return {
       valid: false,
-      message: 'Tools cannot connect to swarm nodes. Connect tools to individual agent nodes within the swarm instead.'
+      message: 'Tools and skills cannot connect to swarm nodes. Connect them to individual agent nodes within the swarm instead.'
     };
   }
   

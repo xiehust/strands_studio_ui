@@ -18,7 +18,9 @@ interface OrchestratorAgentNodeData {
   // Thinking settings
   thinkingEnabled?: boolean;
   thinkingBudgetTokens?: number;
-  reasoningEffort?: 'low' | 'medium' | 'high';
+  reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  cacheMessages?: boolean;
+  cacheTools?: boolean;
 }
 
 export function OrchestratorAgentNode({ data, selected, id }: NodeProps) {
@@ -38,20 +40,18 @@ export function OrchestratorAgentNode({ data, selected, id }: NodeProps) {
 
 
   return (
-    <div className={`
-      bg-white rounded-lg border-2 shadow-sm min-w-[220px]
-      ${selected ? 'border-purple-500 shadow-lg' : 'border-gray-200 hover:border-purple-300'}
-    `}>
+    <div className={`lp-node min-w-[220px] ${selected ? 'sel' : ''}`}>
       {/* Node Header */}
-      <div className="bg-gradient-to-r from-purple-50 to-indigo-50 px-4 py-2 border-b border-purple-200 rounded-t-lg flex items-center">
-        <Crown className="w-4 h-4 text-purple-600 mr-2" />
-        <span className="text-sm font-semibold text-purple-800">{label}</span>
-        <div className="ml-auto flex items-center space-x-1">
-          <Settings className="w-3 h-3 text-gray-400" />
+      <div className="lp-node-head" style={{ boxShadow: 'inset 2px 0 0 var(--s5)' }}>
+        <Crown className="w-4 h-4 text-s5 flex-shrink-0" />
+        <span className="text-[13px] font-semibold text-ink flex-1 truncate">{label}</span>
+        <span className="lp-node-type text-s5">ORCH</span>
+        <div className="flex items-center gap-1">
+          <Settings className="w-3 h-3 text-ink-3" />
           {selected && (
             <button
               onClick={handleDelete}
-              className="w-4 h-4 flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+              className="w-4 h-4 flex items-center justify-center text-ink-3 hover:text-crit transition-colors"
               title="Delete node"
             >
               <X className="w-3 h-3" />
@@ -61,38 +61,30 @@ export function OrchestratorAgentNode({ data, selected, id }: NodeProps) {
       </div>
 
       {/* Node Content */}
-      <div className="p-4">
-        <div className="space-y-2 text-xs text-gray-600">
-          <div>
-            <span className="font-medium">Provider:</span> {modelProvider}
-          </div>
-          <div>
-            <span className="font-medium">Model:</span> {modelName}
-          </div>
-          <div>
-            <span className="font-medium">Temperature:</span> {temperature}
-          </div>
-        </div>
+      <div className="px-3 py-2.5">
+        <div className="lp-node-kv"><span className="k">PROVIDER</span><span className="v">{modelProvider}</span></div>
+        <div className="lp-node-kv"><span className="k">MODEL</span><span className="v">{modelName}</span></div>
+        <div className="lp-node-kv"><span className="k">TEMP</span><span className="v">{temperature}</span></div>
       </div>
 
       {/* Input Handle with Label */}
       <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-full flex flex-col items-center">
-        <span className="text-[10px] font-medium text-green-600 bg-white px-1 rounded mb-0.5">In</span>
+        <span className="lp-handle-tag text-s2 mb-0.5">In</span>
         <Handle
           type="target"
           position={Position.Top}
           id="user-input"
-          className="!bg-green-500 !w-3 !h-3 !relative !transform-none"
+          className="!bg-s2 !w-3 !h-3 !relative !transform-none"
           style={{ position: 'relative', top: 0, left: 0 }}
         />
       </div>
       <div className="absolute left-0 top-[25%] -translate-x-full -translate-y-1/2 flex items-center">
-        <span className="text-[10px] font-medium text-orange-600 bg-white px-1 rounded mr-0.5">Tool</span>
+        <span className="lp-handle-tag text-s3 mr-0.5">Tool</span>
         <Handle
           type="target"
           position={Position.Left}
           id="tools"
-          className="!bg-orange-500 !w-3 !h-3 !relative !transform-none"
+          className="!bg-s3 !w-3 !h-3 !relative !transform-none"
           style={{ position: 'relative', left: 0, top: 0 }}
         />
       </div>
@@ -100,7 +92,7 @@ export function OrchestratorAgentNode({ data, selected, id }: NodeProps) {
         type="target"
         position={Position.Left}
         id="orchestrator-input"
-        className="!bg-purple-400 !w-3 !h-3 !absolute"
+        className="!bg-s5 !w-3 !h-3 !absolute"
         style={{ left: -6, top: '55%' }}
       />
 
@@ -109,7 +101,7 @@ export function OrchestratorAgentNode({ data, selected, id }: NodeProps) {
         type="source"
         position={Position.Right}
         id="sub-agents"
-        className="!bg-purple-400  !w-3 !h-3 !absolute"
+        className="!bg-s5 !w-3 !h-3 !absolute"
         style={{ right: -6, top: '50%' }}
       />
 
@@ -119,10 +111,10 @@ export function OrchestratorAgentNode({ data, selected, id }: NodeProps) {
           type="source"
           position={Position.Bottom}
           id="output"
-          className="!bg-indigo-500 !w-3 !h-3 !relative !transform-none"
+          className="!bg-s1 !w-3 !h-3 !relative !transform-none"
           style={{ position: 'relative', bottom: 0, left: 0 }}
         />
-        <span className="text-[10px] font-medium text-indigo-600 bg-white px-1 rounded mt-0.5">Out</span>
+        <span className="lp-handle-tag text-s1 mt-0.5">Out</span>
       </div>
     </div>
   );

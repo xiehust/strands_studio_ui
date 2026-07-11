@@ -10,3 +10,5 @@ wheels/
 .venv
 storage/
 tests/*
+# AgentCore direct-deploy workspaces (zips + vendored dependency cache)
+deployment/agentcore/deployments/

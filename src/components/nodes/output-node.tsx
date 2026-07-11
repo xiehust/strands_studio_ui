@@ -18,41 +18,24 @@ export function OutputNode({ data, selected, id }: NodeProps) {
     destination = 'Display',
   } = nodeData;
 
-  const getTypeColor = (type: string) => {
-    switch (type) {
-      case 'response':
-        return { bg: 'bg-indigo-50', border: 'border-indigo-200', icon: 'text-indigo-600', text: 'text-indigo-800' };
-      case 'file':
-        return { bg: 'bg-red-50', border: 'border-red-200', icon: 'text-red-600', text: 'text-red-800' };
-      case 'data':
-        return { bg: 'bg-teal-50', border: 'border-teal-200', icon: 'text-teal-600', text: 'text-teal-800' };
-      default:
-        return { bg: 'bg-gray-50', border: 'border-gray-200', icon: 'text-gray-600', text: 'text-gray-800' };
-    }
-  };
-
-  const colors = getTypeColor(outputType);
-
   const handleDelete = (event: React.MouseEvent) => {
     event.stopPropagation();
     deleteElements({ nodes: [{ id }] });
   };
 
   return (
-    <div className={`
-      bg-white rounded-lg border-2 shadow-sm min-w-[180px]
-      ${selected ? 'border-blue-500 shadow-lg' : `border-gray-200 hover:${colors.border}`}
-    `}>
+    <div className={`lp-node min-w-[180px] ${selected ? 'sel' : ''}`}>
       {/* Node Header */}
-      <div className={`${colors.bg} px-4 py-2 border-b ${colors.border} rounded-t-lg flex items-center`}>
-        <ArrowLeft className={`w-4 h-4 ${colors.icon} mr-2`} />
-        <span className={`text-sm font-semibold ${colors.text}`}>{label}</span>
-        <div className="ml-auto flex items-center space-x-1">
-          <Settings className="w-3 h-3 text-gray-400" />
+      <div className="lp-node-head" style={{ boxShadow: 'inset 2px 0 0 var(--ink-2)' }}>
+        <ArrowLeft className="w-4 h-4 text-ink-2 flex-shrink-0" />
+        <span className="text-[13px] font-semibold text-ink flex-1 truncate">{label}</span>
+        <span className="lp-node-type text-ink-3">OUTPUT</span>
+        <div className="flex items-center gap-1">
+          <Settings className="w-3 h-3 text-ink-3" />
           {selected && (
             <button
               onClick={handleDelete}
-              className="w-4 h-4 flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+              className="w-4 h-4 flex items-center justify-center text-ink-3 hover:text-crit transition-colors"
               title="Delete node"
             >
               <X className="w-3 h-3" />
@@ -62,18 +45,10 @@ export function OutputNode({ data, selected, id }: NodeProps) {
       </div>
 
       {/* Node Content */}
-      <div className="p-3">
-        <div className="space-y-1 text-xs text-gray-600">
-          <div>
-            <span className="font-medium">Type:</span> {outputType}
-          </div>
-          <div>
-            <span className="font-medium">Format:</span> {format}
-          </div>
-          <div>
-            <span className="font-medium">To:</span> {destination}
-          </div>
-        </div>
+      <div className="px-3 py-2.5">
+        <div className="lp-node-kv"><span className="k">TYPE</span><span className="v">{outputType}</span></div>
+        <div className="lp-node-kv"><span className="k">FORMAT</span><span className="v">{format}</span></div>
+        <div className="lp-node-kv"><span className="k">TO</span><span className="v">{destination}</span></div>
       </div>
 
       {/* Input Handle */}
@@ -81,7 +56,7 @@ export function OutputNode({ data, selected, id }: NodeProps) {
         type="target"
         position={Position.Left}
         id="input"
-        className="!bg-indigo-500 !w-3 !h-3 !absolute"
+        className="!bg-s1 !w-3 !h-3 !absolute"
         style={{ left: -6 }}
       />
     </div>
