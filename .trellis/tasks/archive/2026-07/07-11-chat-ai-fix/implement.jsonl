@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/backend/ai-codegen.md", "reason": "AI Fix (/api/fix-code/stream) 的 SSE 事件词汇、done payload 与诊断三类语义——ChatModal 接入必须与该契约一致"}
+{"file": ".trellis/spec/backend/generated-code-contract.md", "reason": "e2e 验证用的坏/好代码样例必须满足生成代码合同（async main、--messages argparse、__main__ guard、callback_handler=None）"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "CodeState 契约：onApplyFixedCode 回写 source:'ai' 与 flowStale 语义，Chat 修复应用必须与 Execution Panel 相同"}

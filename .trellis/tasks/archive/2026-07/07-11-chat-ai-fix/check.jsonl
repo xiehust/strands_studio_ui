@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/ai-codegen.md", "reason": "检查 ChatModal AI Fix 是否遵守 fix-code SSE 契约且未改动该契约"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "检查修复应用后 CodeState source/flowStale 行为与 Execution Panel 等价"}
