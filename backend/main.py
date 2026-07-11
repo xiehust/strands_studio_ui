@@ -1675,8 +1675,13 @@ async def send_chat_message_stream(session_id: str, request: ChatRequest):
     async def generate_response():
         try:
             async for chunk in conversation_service.stream_message(session_id, request.message):
-                # Send each chunk as an SSE event
-                yield f"data: {chunk}\n\n"
+                # _chunk_to_sse preserves newlines inside multiline chunks
+                # (empty `data: ` line = newline); sentinels like
+                # [CHAT_COMPLETE:id] / [CHAT_ERROR:json] are single-line and
+                # pass through unchanged
+                sse_event = _chunk_to_sse(chunk)
+                if sse_event:
+                    yield sse_event
         except ValueError as e:
             logger.warning(f"Session not found for streaming message: {session_id}")
             yield f"data: [CHAT_ERROR:{json.dumps(str(e))}]\n\n"
