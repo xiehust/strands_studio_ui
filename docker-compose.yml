@@ -1,0 +1,40 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: strands-studio-backend
+    restart: unless-stopped
+    environment:
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - backend-storage:/app/storage
+    networks:
+      - strands-network
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: strands-studio-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_BACKEND_URL=backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - strands-network
+
+volumes:
+  backend-storage:
+    name: strands-studio-backend-storage
+
+networks:
+  strands-network:
+    name: strands-studio-network
+    driver: bridge
